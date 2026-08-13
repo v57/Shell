@@ -158,15 +158,19 @@ struct SidebarView: View {
           Text("Remote")
           Spacer()
           Button {
-            model.openRemoteAuthorizedKeys()
-          } label: {
-            Image(systemName: "key.2.on.ring")
-          }.buttonStyle(.borderless).help("Manage the selected connection's authorized keys")
-          Button {
             model.showingNewConnection = true
           } label: {
             Image(systemName: "plus")
           }.buttonStyle(.borderless).help("New SSH connection")
+          // The key-ring button needs a target server to manage; it only
+          // makes sense once at least one connection exists.
+          if !model.connections.isEmpty {
+            Button {
+              model.openRemoteAuthorizedKeys()
+            } label: {
+              Image(systemName: "key.2.on.ring")
+            }.buttonStyle(.borderless).help("Manage the selected connection's authorized keys")
+          }
         }.padding(.trailing, 4)
       }
 
