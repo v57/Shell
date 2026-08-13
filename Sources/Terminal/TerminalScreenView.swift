@@ -648,17 +648,10 @@ public struct TerminalScreenView: View {
 
     if dragStart == nil {
       dragStart = target
-      // target.row is already the LOGICAL line (content-space mapping).
-      let line = target.row
-      // Clicking the LAST character of a line pins (or unpins) that line
-      // as the sidebar status; clicking anywhere else starts a selection.
-      if target.column == snapshot.lastNonBlankColumn(ofLine: line) {
-        session.selectionStart = nil
-        session.selectionEnd = nil
-        session.toggleStatusPin(line)
-        return
-      }
-      let start = TerminalCursor(row: line, column: target.column)
+      // Every mouse-down tentatively starts a selection; mouse-up decides
+      // whether it was a CLICK (pins the line as the sidebar status on
+      // ANY character) or a drag (keeps the selection).
+      let start = TerminalCursor(row: target.row, column: target.column)
       session.selectionStart = start
       session.selectionEnd = start
       session.selectionEpoch = snapshot.selectionEpoch
@@ -686,13 +679,23 @@ public struct TerminalScreenView: View {
     if let start = session.selectionStart {
       let end = cell(at: location)
       session.selectionEnd = end
-      // A click without dragging clears the selection.
+      // A click without dragging pins the clicked line as the sidebar
+      // status — ANY character of the line works (previously only the
+      // last non-blank character did); dragging keeps the selection.
       if start == end {
         session.selectionStart = nil
         session.selectionEnd = nil
+        session.toggleStatusPin(start.row)
       }
     }
     dragStart = nil
+  }
+
+  /// A mouse-up on the same cell as mouse-down is a CLICK (pins the line
+  /// as the sidebar status, any character); any movement is a selection
+  /// drag. Kept as a named rule so the click/drag semantics are testable.
+  static func isClick(start: TerminalCursor, end: TerminalCursor) -> Bool {
+    start == end
   }
 
   /// The LOGICAL line/column under a point in the view's local space.

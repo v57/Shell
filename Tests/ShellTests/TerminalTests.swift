@@ -290,6 +290,52 @@ struct SelectionHitTestingTests {
   }
 }
 
+/// The sidebar-status pin: a click (mouse-down == mouse-up cell) on ANY
+/// character of a line pins that line as the status; dragging selects.
+struct StatusPinTests {
+  /// A click pins the clicked line (rank from bottom); clicking the pinned
+  /// line again unpins back to automatic (rank 0 = last non-empty line).
+  @MainActor
+  @Test func clickingAnyCharacterPinsAndTogglesLine() {
+    let transport = CapturingTransport()
+    let session = TerminalSession(transport: transport)
+    transport.injectOutput(Data("line one\nline two\nline three\n".utf8))
+
+    let snapshot = session.snapshot
+    #expect(session.statusRank == 0)
+    // Rank API: 0 = last non-empty line, 1 = the one above it. (Raw
+    // totalLines arithmetic would miscount the trailing empty line a
+    // final newline leaves behind.)
+    let last = snapshot.nonEmptyLineIndexFromBottom(0)
+    let middle = snapshot.nonEmptyLineIndexFromBottom(1)
+    #expect(last != nil && middle != nil)
+
+    // Pin the middle line — rank 1 from the bottom.
+    session.toggleStatusPin(middle!)
+    #expect(session.statusRank == 1)
+    #expect(snapshot.nonEmptyLineIndexFromBottom(session.statusRank) == middle)
+
+    // Clicking the pinned line again unpins to automatic.
+    session.toggleStatusPin(middle!)
+    #expect(session.statusRank == 0)
+    #expect(snapshot.nonEmptyLineIndexFromBottom(0) == last)
+
+    // The same line, pinned via a click on ANY of its characters.
+    session.toggleStatusPin(middle!)
+    session.toggleStatusPin(middle!)
+    #expect(session.statusRank == 0)
+  }
+
+  /// The click/drag rule: same cell = click (pin), any movement = drag.
+  @Test func clickIsPinDragIsSelection() {
+    let start = TerminalCursor(row: 10, column: 3)
+    #expect(TerminalScreenView.isClick(start: start, end: TerminalCursor(row: 10, column: 3)))
+    #expect(!TerminalScreenView.isClick(start: start, end: TerminalCursor(row: 10, column: 4)))
+    #expect(!TerminalScreenView.isClick(start: start, end: TerminalCursor(row: 11, column: 3)))
+    #expect(!TerminalScreenView.isClick(start: start, end: TerminalCursor(row: 9, column: 1)))
+  }
+}
+
 private final class LockedCounter: @unchecked Sendable {
   private let lock = NSLock()
   private var count = 0
