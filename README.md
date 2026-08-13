@@ -4,7 +4,8 @@ Modern terminal for your needs. Pure SwiftUI, no electron-type bullshit
 - View status in the sidebar
 - Persistent sessions using `screen` or `tmux`
 - Built in SSH, keys stored in secure enclave
-- Device-bound encrypted quick notes
+- Device-bound encrypted quick notes (per-note iCloud option: a note can
+  live in iCloud Drive, encrypted with a key stored in iCloud Keychain)
 - Encrypted local session history with replay
 - Quick actions `cmd + r`
 
@@ -20,6 +21,18 @@ One SwiftUI app target builds for both macOS and iOS (iOS 18+):
 The `Terminal` library is cross-platform; the local-pty pieces
 (`LocalPTYTransport` + its `.zsh`/`.tmux`/`.screen` presets) are compiled
 only on macOS.
+
+## Notes storage
+Each note is stored in one of two encrypted homes, chosen per note with the
+cloud button in the note editor's toolbar (iCloud notes show a cloud badge
+in the sidebar):
+
+- **Local** (default): `~/Library/Application Support/<bundle id>/Notes/`,
+  encrypted with the device-bound Secure Enclave key.
+- **iCloud**: the app's iCloud Drive container (`ShellNotes/` subfolder),
+  encrypted with a 256-bit key stored in **iCloud Keychain** — every device
+  signed into the same Apple Account can open the same notes. Requires the
+  iCloud Documents capability (enabled in `Shell.entitlements`).
 
 ## Use as library
 **Local terminal (forkpty, macOS only):** use the `LocalPTYTransport`

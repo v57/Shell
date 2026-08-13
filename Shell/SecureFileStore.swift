@@ -90,7 +90,11 @@ nonisolated enum SecureFileStore {
     }
   }
 
-  private static func symmetricKey(for domain: Domain) throws -> SymmetricKey {
+  /// The AES-256 key for a storage domain. Local (device-bound) files are
+  /// encrypted with the Secure Enclave ECDH-derived key; iCloud notes use
+  /// `ICloudNotesKey` instead. Internal so notes migration can decrypt
+  /// local files with the domain key.
+  static func symmetricKey(for domain: Domain) throws -> SymmetricKey {
     let (privateKey, peerPublicKey) = try loadOrCreateKeyAgreement()
     let secret = try privateKey.sharedSecretFromKeyAgreement(with: peerPublicKey)
     return deriveSymmetricKey(from: secret, domain: domain)

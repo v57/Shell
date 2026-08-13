@@ -26,5 +26,20 @@ struct NoteEditorView: View {
       .onChange(of: text) { _, newValue in
         model.notes.updateText(newValue, for: noteID)
       }
+      .toolbar {
+        ToolbarItem {
+          Button {
+            model.notes.setICloudStorage(!inICloud, for: noteID)
+          } label: {
+            Image(systemName: inICloud ? "icloud.fill" : "icloud")
+          }
+          .help(inICloud ? "Store this note on this device only (encrypted)" : "Store this note in iCloud (encrypted)")
+        }
+      }
+  }
+
+  /// The current note's storage location (false until the note loads).
+  private var inICloud: Bool {
+    model.notes.notes.first { $0.id == noteID }?.storedInICloud ?? false
   }
 }

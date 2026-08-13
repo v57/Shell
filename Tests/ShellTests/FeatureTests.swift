@@ -100,6 +100,73 @@ struct FeatureTests {
     #expect(!ScreenSessionsMonitor.isTmuxEmptyState("permission denied"))
     #expect(!ScreenSessionsMonitor.isTmuxMissingTarget("permission denied"))
   }
+
+  @Test func noteMoveReencryptsAndMovesFile() throws {
+    let fm = FileManager.default
+    let root = fm.temporaryDirectory.appendingPathComponent(
+      "notes-move-\(UUID().uuidString)", isDirectory: true
+    )
+    let local = root.appendingPathComponent("local", isDirectory: true)
+    let cloud = root.appendingPathComponent("cloud", isDirectory: true)
+    defer { try? fm.removeItem(at: root) }
+    try fm.createDirectory(at: local, withIntermediateDirectories: true)
+    try fm.createDirectory(at: cloud, withIntermediateDirectories: true)
+
+    // A note encrypted with the "local" key.
+    let localKey = SymmetricKey(size: .bits256)
+    let cloudKey = SymmetricKey(size: .bits256)
+    let id = UUID()
+    let localFile = local.appendingPathComponent("\(id.uuidString).note")
+    let cloudFile = cloud.appendingPathComponent("\(id.uuidString).note")
+    try SecureFileStore.seal(Data("migrating note".utf8), using: localKey)
+      .write(to: localFile)
+
+    try NotesStore.moveNote(
+      id: id,
+      from: localFile,
+      decryptingWith: localKey,
+      to: cloudFile,
+      encryptingWith: cloudKey,
+      write: { data, url in try data.write(to: url) }
+    )
+
+    // Source removed; destination opens with the NEW key only.
+    #expect(!fm.fileExists(atPath: localFile.path))
+    #expect(fm.fileExists(atPath: cloudFile.path))
+    let plaintext = try SecureFileStore.open(Data(contentsOf: cloudFile), using: cloudKey)
+    #expect(String(data: plaintext, encoding: .utf8) == "migrating note")
+    #expect(throws: SecureFileStore.StoreError.self) {
+      _ = try SecureFileStore.open(Data(contentsOf: cloudFile), using: localKey)
+    }
+  }
+
+  @Test @MainActor func storeMovesNoteBetweenLocalAndICloud() throws {
+    let fm = FileManager.default
+    let root = fm.temporaryDirectory.appendingPathComponent(
+      "notes-store-\(UUID().uuidString)", isDirectory: true
+    )
+    defer { try? fm.removeItem(at: root) }
+    let local = root.appendingPathComponent("local", isDirectory: true)
+    let cloud = root.appendingPathComponent("cloud", isDirectory: true)
+    let store = NotesStore(directoryURL: local, iCloudDirectoryURL: cloud)
+
+    let note = store.addNote()
+    store.updateText("to the cloud", for: note.id)
+    store.flush()
+    #expect(store.notes.first { $0.id == note.id }?.storedInICloud == false)
+
+    store.setICloudStorage(true, for: note.id)
+    #expect(store.notes.first { $0.id == note.id }?.storedInICloud == true)
+    #expect(store.storageError == nil)
+    #expect(fm.fileExists(atPath: cloud.appendingPathComponent("\(note.id.uuidString).note").path))
+    #expect(!fm.fileExists(atPath: local.appendingPathComponent("\(note.id.uuidString).note").path))
+
+    store.setICloudStorage(false, for: note.id)
+    #expect(store.notes.first { $0.id == note.id }?.storedInICloud == false)
+    #expect(store.storageError == nil)
+    #expect(fm.fileExists(atPath: local.appendingPathComponent("\(note.id.uuidString).note").path))
+    #expect(!fm.fileExists(atPath: cloud.appendingPathComponent("\(note.id.uuidString).note").path))
+  }
 }
 
 /// Opt-in because unsigned command-line test hosts cannot reliably access the

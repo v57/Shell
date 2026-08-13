@@ -718,6 +718,12 @@ private struct NoteRow: View {
           .lineLimit(1)
           .truncationMode(.tail)
         Spacer()
+        if note.storedInICloud {
+          Image(systemName: "icloud.fill")
+            .font(.caption2)
+            .foregroundStyle(Color.blue)
+            .help("Stored in iCloud (encrypted)")
+        }
       }
       if let subtitle = NotesStore.subtitle(for: note.text) {
         Text(subtitle)
