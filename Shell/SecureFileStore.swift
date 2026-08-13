@@ -90,6 +90,14 @@ nonisolated enum SecureFileStore {
     }
   }
 
+  /// True when the device-bound key is readable (Secure Enclave up, screen
+  /// unlocked — `WhenUnlocked` items are inaccessible while locked, which
+  /// surfaces as errSecInteractionNotAllowed). Used to gate tests that need
+  /// the real device keychain.
+  static var isAvailable: Bool {
+    (try? symmetricKey(for: .notes)) != nil
+  }
+
   /// The AES-256 key for a storage domain. Local (device-bound) files are
   /// encrypted with the Secure Enclave ECDH-derived key; iCloud notes use
   /// `ICloudNotesKey` instead. Internal so notes migration can decrypt

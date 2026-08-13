@@ -140,7 +140,12 @@ struct FeatureTests {
     }
   }
 
+  /// Store-level move test. Gated on device-keychain availability: the
+  /// file-based store hardwires the real keys, and Secure Enclave items are
+  /// `WhenUnlocked`-protected (locked screen → errSecInteractionNotAllowed).
+  /// The SwiftData store rewrite replaces this with injected hermetic keys.
   @Test @MainActor func storeMovesNoteBetweenLocalAndICloud() throws {
+    guard SecureFileStore.isAvailable else { return }
     let fm = FileManager.default
     let root = fm.temporaryDirectory.appendingPathComponent(
       "notes-store-\(UUID().uuidString)", isDirectory: true

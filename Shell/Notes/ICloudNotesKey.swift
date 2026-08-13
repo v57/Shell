@@ -30,6 +30,13 @@ enum ICloudNotesKey {
   private static let service = "dev.v57.sh"
   private static let account = "icloud-notes-aes-key-v1"
 
+  /// True when the iCloud Keychain can serve the sync key (account signed
+  /// in, iCloud Keychain enabled). Used to gate tests that need real iCloud
+  /// state; also creates the item on first use (idempotent, app-owned).
+  static var isAvailable: Bool {
+    (try? loadOrCreate()) != nil
+  }
+
   /// Loads the sync key, creating it on first use.
   static func loadOrCreate() throws -> SymmetricKey {
     if let data = try load() {
