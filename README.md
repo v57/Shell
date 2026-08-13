@@ -3,7 +3,8 @@ Modern terminal for your needs. Pure SwiftUI, no electron-type bullshit
 
 - View status in the sidebar
 - Persistent sessions using `screen` or `tmux`
-- Built in SSH, keys stored in secure enclave
+- Built in SSH, keys stored in secure enclave, saved connections synced
+  through iCloud (encrypted)
 - Device-bound encrypted quick notes (per-note iCloud option: a note can
   live in iCloud, synced via SwiftData/CloudKit and encrypted with a key
   stored in iCloud Keychain)
@@ -42,6 +43,21 @@ AES-GCM ciphertexts, so CloudKit never sees plaintext note data (only
 `lastUpdate` and the key id). Decryption is lazy: sidebar rows decrypt only
 when visible (the List renders visible cells only), and the editor decrypts
 content when opened.
+
+## SSH config sync
+Saved SSH connections live in a dedicated CloudKit-synced SwiftData store
+(`SSHConfigs`, same container, same no-push/launch-and-activation sync as
+notes). Each connection is one record whose entire config (name, host, user,
+port, auth method, flags) travels as a single AES-GCM ciphertext — CloudKit
+never sees plaintext connection data. The key is the iCloud Keychain sync
+key (usable on every device); if it can't be served, a device-bound
+Secure Enclave key is used instead and the record simply won't decrypt
+elsewhere.
+
+Saved PASSWORDS never sync: they stay in the device Keychain, so a synced
+connection keeps its auth method but needs the password entered once on
+each device. Configs saved by the old UserDefaults store are imported once
+on first launch.
 
 ## Use as library
 **Local terminal (forkpty, macOS only):** use the `LocalPTYTransport`

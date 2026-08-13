@@ -47,20 +47,24 @@ struct NoteModelTests {
   /// CloudKit bans unique constraints and non-optional attributes. This test
   /// fails the build if the schema drifts.
   @Test @MainActor func noteSchemaStaysCloudKitCompatible() throws {
-    let schema = Schema(NoteRecord.self)
-    #expect(schema.entities.count == 1)
-    let attributes = schema.entities[0].attributes
-    // Every attribute is optional or defaulted, none unique.
-    for attribute in attributes {
-      let attributeName = attribute.name
-      #expect(!attribute.options.contains(.unique), "\(attributeName) must not be unique (CloudKit bans it)")
-      #expect(
-        attribute.isOptional || attribute.defaultValue != nil,
-        "\(attributeName) must be optional or have a default value (CloudKit rule)"
-      )
+    for model in [NoteRecord.self, SSHConfigRecord.self] as [any PersistentModel.Type] {
+      let schema = Schema(model)
+      #expect(schema.entities.count == 1)
+      let attributes = schema.entities[0].attributes
+      // Every attribute is optional or defaulted, none unique.
+      for attribute in attributes {
+        let attributeName = attribute.name
+        #expect(!attribute.options.contains(.unique), "\(attributeName) must not be unique (CloudKit bans it)")
+        #expect(
+          attribute.isOptional || attribute.defaultValue != nil,
+          "\(attributeName) must be optional or have a default value (CloudKit rule)"
+        )
+      }
     }
     // The fields we rely on must exist (schema drift detection).
-    let names = Set(attributes.map { $0.name })
-    #expect(names == ["id", "lastUpdate", "keyId", "titleCipher", "subtitleCipher", "contentCipher"])
+    let noteNames = Set(Schema(NoteRecord.self).entities[0].attributes.map { $0.name })
+    #expect(noteNames == ["id", "lastUpdate", "keyId", "titleCipher", "subtitleCipher", "contentCipher"])
+    let sshNames = Set(Schema(SSHConfigRecord.self).entities[0].attributes.map { $0.name })
+    #expect(sshNames == ["id", "order", "keyId", "updatedAt", "payloadCipher"])
   }
 }

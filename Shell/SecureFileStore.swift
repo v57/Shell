@@ -12,6 +12,7 @@ nonisolated enum SecureFileStore {
   enum Domain: String, Sendable {
     case notes = "dev.v57.sh.encrypted-files.notes.v1"
     case history = "dev.v57.sh.encrypted-files.history.v1"
+    case sshConfigs = "dev.v57.sh.encrypted-files.ssh-configs.v1"
   }
 
   enum StoreError: LocalizedError {

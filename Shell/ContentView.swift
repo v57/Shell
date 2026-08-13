@@ -112,7 +112,7 @@ struct ContentView: View {
           // Skip the first activation: init already loaded the stores, and
           // fetching during launch can race SwiftData's store bootstrap.
           if hasActivatedOnce {
-            model.notes.refreshOnActivation()
+            model.refreshOnActivation()
           }
           hasActivatedOnce = true
         } else {

@@ -83,14 +83,13 @@ final class AppModel {
     showingNewAction = true
   }
   
-  private let connectionStore = SSHConnectionStore()
-  /// Observable source of truth for saved SSH rows. `connectionStore` is
-  /// persistence only; reading UserDefaults through a computed property does
-  /// not register an Observation dependency with SwiftUI.
-  private(set) var connections: [SSHConfig] = []
+  private let connectionStore = SSHConfigStore()
+  /// Observable source of truth for saved SSH rows. Computed from the
+  /// store so saves/reloads (including iCloud sync refreshes) flow through
+  /// Observation automatically.
+  var connections: [SSHConfig] { connectionStore.all }
   
   private init() {
-    connections = connectionStore.all
     #if os(macOS)
     // Start with a local terminal so the window is never empty. iOS has no
     // local terminals — it starts with just the sidebar (SSH + notes).
@@ -168,11 +167,6 @@ final class AppModel {
   @discardableResult
   func connect(to config: SSHConfig) -> TerminalSession {
     connectionStore.save(config)
-    if let index = connections.firstIndex(where: { $0.id == config.id }) {
-      connections[index] = config
-    } else {
-      connections.append(config)
-    }
     let session = TerminalSession(
       transport: SSHSession(config: config),
       startupMessage: "Connecting to \(config.host)…"
@@ -396,7 +390,6 @@ final class AppModel {
   
   func deleteConnection(_ config: SSHConfig) {
     connectionStore.remove(config.id)
-    connections.removeAll { $0.id == config.id }
     let toRemove = sessions.filter { kind(of: $0).sshConfigID == config.id }
     for session in toRemove {
       removeSession(session.id)
@@ -640,7 +633,16 @@ final class AppModel {
   /// Moves an SSH connection within the sidebar list and persists the
   /// new order (drag-to-reorder).
   func moveConnection(from source: IndexSet, to destination: Int) {
-    connections.move(fromOffsets: source, toOffset: destination)
-    connectionStore.reorder(connections)
+    var reordered = connections
+    reordered.move(fromOffsets: source, toOffset: destination)
+    connectionStore.reorder(reordered)
+  }
+
+  /// Sync trigger for the no-push stores (notes + SSH configs): re-fetch
+  /// whatever CloudKit pulled while the app ran. Called when the scene
+  /// becomes active; the launch-time activation is skipped in ContentView.
+  func refreshOnActivation() {
+    notes.refreshOnActivation()
+    connectionStore.refreshOnActivation()
   }
 }
