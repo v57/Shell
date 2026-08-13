@@ -513,11 +513,14 @@ final class AppModel {
   func deleteHistorySession(_ id: UUID) {
     history.remove(id)
     if selection == id { selection = history.sessions.first?.id }
+    // Deleting the last record while viewing history would leave an empty
+    // list with no way back (the history button hides when empty).
+    if historyMode && history.sessions.isEmpty { toggleHistoryMode() }
   }
 
   func deleteAllHistory() {
     history.removeAll()
-    if historyMode { selection = nil }
+    if historyMode { toggleHistoryMode() }
   }
 
   func replayHistorySession(_ record: HistorySession) {

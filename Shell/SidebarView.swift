@@ -76,14 +76,19 @@ struct SidebarView: View {
             .help("Delete all local history")
           }
           Spacer()
-          Button {
-            model.toggleHistoryMode()
-          } label: {
-            Image(systemName: "clock.arrow.trianglehead.clockwise.rotate.90.path.dotted")
-              .foregroundStyle(model.historyMode ? Color.blue : Color.secondary)
+          // Only meaningful when there is something to show; hidden while
+          // the list is empty (the trash button still serves as the exit
+          // when viewing history).
+          if !model.history.sessions.isEmpty {
+            Button {
+              model.toggleHistoryMode()
+            } label: {
+              Image(systemName: "clock.arrow.trianglehead.clockwise.rotate.90.path.dotted")
+                .foregroundStyle(model.historyMode ? Color.blue : Color.secondary)
+            }
+            .buttonStyle(.borderless)
+            .help(model.historyMode ? "Show local terminals" : "Show local history")
           }
-          .buttonStyle(.borderless)
-          .help(model.historyMode ? "Show local terminals" : "Show local history")
           Button {
             model.openLocalAuthorizedKeys()
           } label: {
