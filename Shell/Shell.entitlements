@@ -8,11 +8,7 @@
 	</array>
 	<key>com.apple.developer.icloud-services</key>
 	<array>
-		<string>CloudDocuments</string>
-	</array>
-	<key>com.apple.developer.ubiquity-container-identifiers</key>
-	<array>
-		<string>iCloud.dev.v57.sh</string>
+		<string>CloudKit</string>
 	</array>
 	<key>keychain-access-groups</key>
 	<array>

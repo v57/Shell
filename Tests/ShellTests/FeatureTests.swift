@@ -101,76 +101,72 @@ struct FeatureTests {
     #expect(!ScreenSessionsMonitor.isTmuxMissingTarget("permission denied"))
   }
 
-  @Test func noteMoveReencryptsAndMovesFile() throws {
-    let fm = FileManager.default
-    let root = fm.temporaryDirectory.appendingPathComponent(
-      "notes-move-\(UUID().uuidString)", isDirectory: true
-    )
-    let local = root.appendingPathComponent("local", isDirectory: true)
-    let cloud = root.appendingPathComponent("cloud", isDirectory: true)
-    defer { try? fm.removeItem(at: root) }
-    try fm.createDirectory(at: local, withIntermediateDirectories: true)
-    try fm.createDirectory(at: cloud, withIntermediateDirectories: true)
-
-    // A note encrypted with the "local" key.
+  /// Store-level move test, fully hermetic: temp SwiftData stores + injected
+  /// generated keys (no real keychain needed — runs on any machine, even
+  /// with a locked screen or no iCloud session).
+  @Test @MainActor func storeMovesNoteBetweenLocalAndICloud() throws {
+    let root = FileManager.default.temporaryDirectory
+      .appendingPathComponent("notes-store-\(UUID().uuidString)", isDirectory: true)
+    let (stores, cleanup) = try NoteStores.makeTest(in: root)
+    defer { cleanup() }
+    let store = NotesStore(stores: stores)
     let localKey = SymmetricKey(size: .bits256)
     let cloudKey = SymmetricKey(size: .bits256)
-    let id = UUID()
-    let localFile = local.appendingPathComponent("\(id.uuidString).note")
-    let cloudFile = cloud.appendingPathComponent("\(id.uuidString).note")
-    try SecureFileStore.seal(Data("migrating note".utf8), using: localKey)
-      .write(to: localFile)
-
-    try NotesStore.moveNote(
-      id: id,
-      from: localFile,
-      decryptingWith: localKey,
-      to: cloudFile,
-      encryptingWith: cloudKey,
-      write: { data, url in try data.write(to: url) }
-    )
-
-    // Source removed; destination opens with the NEW key only.
-    #expect(!fm.fileExists(atPath: localFile.path))
-    #expect(fm.fileExists(atPath: cloudFile.path))
-    let plaintext = try SecureFileStore.open(Data(contentsOf: cloudFile), using: cloudKey)
-    #expect(String(data: plaintext, encoding: .utf8) == "migrating note")
-    #expect(throws: SecureFileStore.StoreError.self) {
-      _ = try SecureFileStore.open(Data(contentsOf: cloudFile), using: localKey)
-    }
-  }
-
-  /// Store-level move test. Gated on device-keychain availability: the
-  /// file-based store hardwires the real keys, and Secure Enclave items are
-  /// `WhenUnlocked`-protected (locked screen → errSecInteractionNotAllowed).
-  /// The SwiftData store rewrite replaces this with injected hermetic keys.
-  @Test @MainActor func storeMovesNoteBetweenLocalAndICloud() throws {
-    guard SecureFileStore.isAvailable else { return }
-    let fm = FileManager.default
-    let root = fm.temporaryDirectory.appendingPathComponent(
-      "notes-store-\(UUID().uuidString)", isDirectory: true
-    )
-    defer { try? fm.removeItem(at: root) }
-    let local = root.appendingPathComponent("local", isDirectory: true)
-    let cloud = root.appendingPathComponent("cloud", isDirectory: true)
-    let store = NotesStore(directoryURL: local, iCloudDirectoryURL: cloud)
+    store.deviceKeyProvider = { localKey }
+    store.iCloudKeyProvider = { cloudKey }
 
     let note = store.addNote()
-    store.updateText("to the cloud", for: note.id)
+    store.updateText("to the cloud\nSecond line", for: note.id)
     store.flush()
     #expect(store.notes.first { $0.id == note.id }?.storedInICloud == false)
+    #expect(store.decryptedNote(id: note.id)?.text == "to the cloud\nSecond line")
+    #expect(store.decryptedNote(id: note.id)?.title == "to the cloud")
 
     store.setICloudStorage(true, for: note.id)
     #expect(store.notes.first { $0.id == note.id }?.storedInICloud == true)
     #expect(store.storageError == nil)
-    #expect(fm.fileExists(atPath: cloud.appendingPathComponent("\(note.id.uuidString).note").path))
-    #expect(!fm.fileExists(atPath: local.appendingPathComponent("\(note.id.uuidString).note").path))
+    #expect(store.decryptedNote(id: note.id)?.text == "to the cloud\nSecond line")
+    #expect(store.decryptedNote(id: note.id)?.subtitle == "Second line")
 
     store.setICloudStorage(false, for: note.id)
     #expect(store.notes.first { $0.id == note.id }?.storedInICloud == false)
     #expect(store.storageError == nil)
-    #expect(fm.fileExists(atPath: local.appendingPathComponent("\(note.id.uuidString).note").path))
-    #expect(!fm.fileExists(atPath: cloud.appendingPathComponent("\(note.id.uuidString).note").path))
+    #expect(store.decryptedNote(id: note.id)?.text == "to the cloud\nSecond line")
+  }
+
+  /// Lazy decryption: decrypting one note must not decrypt the others, and
+  /// repeated reads hit the cache (key provider call count = decrypts).
+  /// Uses a fresh store instance over the same files so the cache is cold
+  /// (updateText pre-warms the cache for live sidebar updates, so notes
+  /// edited this session never re-decrypt).
+  @Test @MainActor func decryptionIsLazyAndCachedPerNote() throws {
+    let root = FileManager.default.temporaryDirectory
+      .appendingPathComponent("notes-lazy-\(UUID().uuidString)", isDirectory: true)
+    let (stores, cleanup) = try NoteStores.makeTest(in: root)
+    defer { cleanup() }
+    let key = SymmetricKey(size: .bits256)
+
+    let writer = NotesStore(stores: stores)
+    writer.deviceKeyProvider = { key }
+    writer.iCloudKeyProvider = { key }
+    let a = writer.addNote()
+    let b = writer.addNote()
+    writer.updateText("Note A", for: a.id)
+    writer.updateText("Note B", for: b.id)
+    writer.flush()
+
+    // Cold cache: a fresh store over the same containers.
+    let reader = NotesStore(stores: stores)
+    var decryptCalls = 0
+    reader.deviceKeyProvider = { decryptCalls += 1; return key }
+    reader.iCloudKeyProvider = { decryptCalls += 1; return key }
+
+    _ = reader.decryptedNote(id: a.id)
+    #expect(decryptCalls == 1)          // only note A decrypted
+    _ = reader.decryptedNote(id: a.id)
+    #expect(decryptCalls == 1)          // cached — no second decrypt
+    _ = reader.decryptedNote(id: b.id)
+    #expect(decryptCalls == 2)          // note B decrypts on demand only
   }
 }
 

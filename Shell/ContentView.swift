@@ -10,6 +10,11 @@ struct ContentView: View {
   #if os(macOS)
   @State private var escMonitor: Any?
   #endif
+  /// The launch-time `.active` scene change fires while the SwiftData store
+  /// is still bootstrapping; a fetch in that window can trap inside
+  /// SwiftData (observed as a launch crash in reload()). Init already
+  /// loaded everything, so the first activation is skipped.
+  @State private var hasActivatedOnce = false
 
   var body: some View {
     @Bindable var model = model
@@ -98,10 +103,21 @@ struct ContentView: View {
           targetSSHConnectionID: model.newActionTargetSSHConnectionID
         )
       }
-      // Notes autosave: flush every note with a pending edit when the app
-      // leaves the active scene (also flushed on quit in AppDelegate).
+      // Notes: refresh on activation (no-push sync trigger — re-fetch shows
+      // changes the CloudKit store pulled while the app ran) and flush
+      // pending edits when leaving the active scene (also flushed on quit
+      // in AppDelegate).
       .onChange(of: scenePhase) { _, phase in
-        if phase != .active { model.notes.flush() }
+        if phase == .active {
+          // Skip the first activation: init already loaded the stores, and
+          // fetching during launch can race SwiftData's store bootstrap.
+          if hasActivatedOnce {
+            model.notes.refreshOnActivation()
+          }
+          hasActivatedOnce = true
+        } else {
+          model.notes.flush()
+        }
       }
       .alert("Encrypted Storage Error", isPresented: Binding(
         get: { model.notes.storageError != nil || model.history.storageError != nil },

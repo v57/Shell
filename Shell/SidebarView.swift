@@ -702,19 +702,21 @@ private struct KeyRow: View {
   }
 }
 
-/// A note row in the sidebar. The title is the first non-empty line of
-/// the note (editing it renames the note); the preview is the next
-/// non-empty line. Both update live as the note is edited in the main
-/// view.
+/// A note row in the sidebar. The title is the first non-empty line of the
+/// note (editing it renames it); the preview is the next non-empty line.
+/// Both are DECRYPTED IN THE VIEW via `decryptedNote(id:)` — SwiftUI's List
+/// materializes visible rows only, so only visible cells decrypt (results
+/// cached by the store).
 private struct NoteRow: View {
-  let note: NotesStore.Note
+  @Environment(AppModel.self) private var model
+  let note: NotesStore.NoteSummary
 
   var body: some View {
     VStack(alignment: .leading, spacing: 2) {
       HStack(spacing: 8) {
         Image(systemName: "note.text")
           .foregroundStyle(.secondary)
-        Text(NotesStore.title(for: note.text))
+        Text(model.notes.title(for: note.id))
           .lineLimit(1)
           .truncationMode(.tail)
         Spacer()
@@ -725,7 +727,7 @@ private struct NoteRow: View {
             .help("Stored in iCloud (encrypted)")
         }
       }
-      if let subtitle = NotesStore.subtitle(for: note.text) {
+      if let subtitle = model.notes.subtitle(for: note.id) {
         Text(subtitle)
           .font(.caption)
           .foregroundStyle(.secondary)

@@ -105,7 +105,7 @@ final class AppModel {
   /// The note currently focused in the main view, if any. Shares the
   /// sidebar selection with sessions (note ids are distinct UUIDs, so
   /// row tags never collide).
-  var selectedNote: NotesStore.Note? {
+  var selectedNote: NotesStore.NoteSummary? {
     notes.notes.first { $0.id == selection }
   }
 
@@ -452,7 +452,7 @@ final class AppModel {
   
   /// Creates a new note and focuses it in the main view.
   @discardableResult
-  func newNote() -> NotesStore.Note {
+  func newNote() -> NotesStore.NoteSummary {
     let note = notes.addNote()
     selection = note.id
     return note
