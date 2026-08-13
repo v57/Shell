@@ -20,3 +20,4 @@ build/
 
 # graphify tool output
 graphify-out/
+/.swiftpm

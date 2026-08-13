@@ -1,4 +1,8 @@
+#if os(macOS)
 import AppKit
+#else
+import UIKit
+#endif
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -101,9 +105,16 @@ public struct TerminalScreenView: View {
   /// Must match the font used by every other part of the app so metrics
   /// and hit-testing agree.
   private static let fontSize: CGFloat = 14
-  private static let metrics = fontMetrics(
-    for: NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
-  )
+  private static let metrics = fontMetrics(for: monoFont(ofSize: fontSize))
+
+  /// The platform monospaced font at the terminal size (regular weight).
+  private static func monoFont(ofSize size: CGFloat) -> TerminalFont {
+    #if os(macOS)
+    NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
+    #else
+    UIFont.monospacedSystemFont(ofSize: size, weight: .regular)
+    #endif
+  }
 
   // MARK: - Scroll offset tracking (content-space hit testing)
 
@@ -136,7 +147,7 @@ public struct TerminalScreenView: View {
         if let message = snapshot.message {
           Text(message)
             .font(.system(size: Self.fontSize, design: .monospaced))
-            .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+            .foregroundStyle(TerminalPalette.secondaryText)
             .padding(16)
         } else {
           terminalGrid(
@@ -160,14 +171,18 @@ public struct TerminalScreenView: View {
     }
     .focusable()
     .focused($focused)
+    #if os(macOS)
     .focusEffectDisabled()
+    #endif
     .onKeyPress { press in
       handleKeyPress(press)
     }
     .gesture(dragGesture)
+    #if os(macOS)
     .onPasteCommand(of: [UTType.plainText, UTType.utf8PlainText]) { _ in
       pasteFromPasteboard()
     }
+    #endif
     .onChange(of: session.snapshot.totalLines) { oldTotal, _ in
       // New output: keep following the bottom only when already at bottom.
       // The at-bottom test must use the PREVIOUS total — after a line is
@@ -275,7 +290,7 @@ public struct TerminalScreenView: View {
   private static var clusterMetrics: [String: (base: CGFloat, scaled: (size: CGFloat, advance: CGFloat)?)] = [:]
   private static func measure(_ cluster: String, at size: CGFloat) -> CGFloat {
     (cluster as NSString).size(
-      withAttributes: [.font: NSFont.monospacedSystemFont(ofSize: size, weight: .regular)]
+      withAttributes: [.font: monoFont(ofSize: size)]
     ).width
   }
   private static func metrics(for cluster: String) -> (base: CGFloat, scaled: (size: CGFloat, advance: CGFloat)?) {
@@ -316,7 +331,7 @@ public struct TerminalScreenView: View {
     selectionStart: TerminalCursor?,
     selectionEnd: TerminalCursor?
   ) -> [LinePiece] {
-    let terminalBackground = NSColor.windowBackgroundColor
+    let terminalBackground = TerminalPalette.windowBackground
     let screenRow = line - (snapshot.totalLines - snapshot.rows)
     var pieces: [LinePiece] = []
 
@@ -501,8 +516,8 @@ public struct TerminalScreenView: View {
     for cell: TerminalCell,
     isCursor: Bool,
     isSelected: Bool,
-    cursorBackground: NSColor,
-    terminalBackground: NSColor
+    cursorBackground: Color,
+    terminalBackground: Color
   ) -> (attrs: AttributeContainer, background: Color?) {
     let cellForeground = cell.effectiveForeground()
     let cellBackground = cell.effectiveBackground(defaultingTo: terminalBackground)
@@ -520,18 +535,18 @@ public struct TerminalScreenView: View {
     var background: Color?
 
     if isSelected {
-      foreground = Color(nsColor: .selectedTextColor)
-      background = Color(nsColor: .selectedTextBackgroundColor)
+      foreground = TerminalPalette.selectionForeground
+      background = TerminalPalette.selectionBackground
     } else if isCursor {
-      background = Color(nsColor: cursorBackground)
-      foreground = Color(nsColor: cell.inverse ? cellForeground : (cellBackground ?? terminalBackground))
+      background = cursorBackground
+      foreground = cell.inverse ? cellForeground : (cellBackground ?? terminalBackground)
     } else if cell.inverse {
-      background = Color(nsColor: cellForeground)
-      foreground = Color(nsColor: cellBackground ?? terminalBackground)
+      background = cellForeground
+      foreground = cellBackground ?? terminalBackground
     } else {
-      foreground = Color(nsColor: cellForeground)
+      foreground = cellForeground
       if let cellBackground {
-        background = Color(nsColor: cellBackground)
+        background = cellBackground
       }
     }
     if cell.dim && !isSelected {
@@ -575,17 +590,14 @@ public struct TerminalScreenView: View {
     return .handled
   }
 
-  /// SwiftUI EventModifiers → AppKit modifier flags (no direct initializer
-  /// exists for this conversion in the current SDK).
-  private static func nsFlags(from modifiers: EventModifiers) -> NSEvent.ModifierFlags {
-    var flags = NSEvent.ModifierFlags()
+  /// SwiftUI EventModifiers → portable TerminalModifierFlags (no direct
+  /// initializer exists for this conversion in the current SDK).
+  private static func nsFlags(from modifiers: EventModifiers) -> TerminalModifierFlags {
+    var flags = TerminalModifierFlags()
     if modifiers.contains(.command) { flags.insert(.command) }
     if modifiers.contains(.shift) { flags.insert(.shift) }
     if modifiers.contains(.option) { flags.insert(.option) }
     if modifiers.contains(.control) { flags.insert(.control) }
-    if modifiers.contains(.capsLock) { flags.insert(.capsLock) }
-    if modifiers.contains(.numericPad) { flags.insert(.numericPad) }
-    if modifiers.contains(.function) { flags.insert(.function) }
     return flags
   }
 
@@ -803,16 +815,22 @@ public struct TerminalScreenView: View {
   // MARK: - Paste
 
   private func pasteFromPasteboard() {
+    #if os(macOS)
     if let string = NSPasteboard.general.string(forType: .string) {
       session.paste(string)
     }
+    #else
+    if let string = UIPasteboard.general.string {
+      session.paste(string)
+    }
+    #endif
   }
 
   // MARK: - Metrics (moved from TerminalInputView)
 
   /// Font metrics shared by every renderer so cell grids match exactly
   /// (cellWidth/lineHeight/baseline/kern all derive from the same font).
-  public static func fontMetrics(for font: NSFont) -> TerminalFontMetrics {
+  public static func fontMetrics(for font: TerminalFont) -> TerminalFontMetrics {
     let sample = NSString(string: "W")
     let size = sample.size(withAttributes: [.font: font])
     let cellWidth = max(1, ceil(size.width))

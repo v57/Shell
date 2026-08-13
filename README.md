@@ -8,10 +8,23 @@ Modern terminal for your needs. Pure SwiftUI, no electron-type bullshit
 - Encrypted local session history with replay
 - Quick actions `cmd + r`
 
+## Platforms
+One SwiftUI app target builds for both macOS and iOS (iOS 18+):
+
+- **macOS** — everything: local zsh terminals, persistent `screen`/`tmux`
+  sessions, SSH, notes, actions, history.
+- **iOS** — SSH and notes only. There is no local terminal (forkpty is
+  macOS-only), so the Local and Persistent sidebar sections are hidden and
+  local-only actions are filtered out.
+
+The `Terminal` library is cross-platform; the local-pty pieces
+(`LocalPTYTransport` + its `.zsh`/`.tmux`/`.screen` presets) are compiled
+only on macOS.
+
 ## Use as library
-**Local terminal (forkpty):** use the `LocalPTYTransport` presets — `.zsh`
-for an interactive login shell, `.screen(name)` / `.tmux(name)` to attach
-to a persistent multiplexer session:
+**Local terminal (forkpty, macOS only):** use the `LocalPTYTransport`
+presets — `.zsh` for an interactive login shell, `.screen(name)` /
+`.tmux(name)` to attach to a persistent multiplexer session:
 ```swift
 import Terminal
 

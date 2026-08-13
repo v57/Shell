@@ -1,4 +1,4 @@
-import AppKit
+import Foundation
 import SwiftUI
 import Terminal
 
@@ -7,8 +7,10 @@ struct SidebarView: View {
   @Environment(AppModel.self) private var model
   /// The session currently being renamed (shows an inline text field).
   @State private var renamingSessionID: UUID?
+  #if os(macOS)
   /// The screen session currently being renamed (keyed by full name).
   @State private var renamingScreenName: String?
+  #endif
   
   private var localSessions: [TerminalSession] {
     model.sessions.filter { model.kind(of: $0) == .local }
@@ -34,6 +36,7 @@ struct SidebarView: View {
         }
       }
 
+      #if os(macOS)
       Section {
         if model.historyMode {
           ForEach(model.history.sessions) { record in
@@ -130,7 +133,8 @@ struct SidebarView: View {
           }.buttonStyle(.borderless).help("Refresh persistent sessions")
         }.padding(.trailing, 4)
       }
-      
+      #endif // os(macOS) — Local + Persistent sections (no local terminals on iOS)
+
       Section {
         ForEach(model.connections) { config in
           SSHConfigGroup(
@@ -184,12 +188,15 @@ struct SidebarView: View {
     // to that screen session.
     .onChange(of: model.selection) { _, newValue in
       if renamingSessionID != nil { renamingSessionID = nil }
+      #if os(macOS)
       renamingScreenName = nil
+      #endif
       guard let id = newValue else { return }
       if let config = model.connections.first(where: { $0.id == id }) {
         model.connect(to: config)
         return
       }
+      #if os(macOS)
       if let info = model.screenMonitor.sessions.first(where: { $0.tagID == id }) {
         if let existing = model.attachedSession(toScreen: info) {
           // Already attached: just focus the open terminal instead of
@@ -200,8 +207,10 @@ struct SidebarView: View {
           model.attach(toScreen: info)
         }
       }
+      #endif
     }
     .navigationTitle("Terminals")
+    #if os(macOS)
     .alert(item: $model.screenMonitor.actionError) { error in
       Alert(
         title: Text(error.title),
@@ -209,6 +218,7 @@ struct SidebarView: View {
         dismissButton: .default(Text("OK"))
       )
     }
+    #endif
   }
   
   /// True while an action session can still be interrupted (its process
@@ -228,11 +238,13 @@ struct SidebarView: View {
     renamingSessionID = nil
   }
   
+  #if os(macOS)
   /// Renames a screen session on the local machine and exits edit mode.
   private func commitScreenRename(_ info: ScreenSessionInfo, _ name: String) {
     model.screenMonitor.rename(info, to: name)
     renamingScreenName = nil
   }
+  #endif
 }
 
 private struct HistorySessionRow: View {
@@ -434,7 +446,9 @@ private struct ScreenSessionRow: View {
             .textFieldStyle(.plain)
             .focused($fieldFocused)
             .onSubmit { onCommitRename(draft) }
+            #if os(macOS)
             .onExitCommand(perform: onCancelRename)
+            #endif
         } else {
           // Sidebar shows the short name (no "pid." prefix); the full
           // "pid.name" spec stays in the window title (navigationTitle).
@@ -495,7 +509,9 @@ private struct SessionRow: View {
             .textFieldStyle(.plain)
             .focused($fieldFocused)
             .onSubmit { onCommitRename(draft) }
+            #if os(macOS)
             .onExitCommand(perform: onCancelRename)
+            #endif
         } else {
           Text(currentLabel)
         }
@@ -727,8 +743,7 @@ extension TerminalColor {
     case .rgb(let red, let green, let blue):
       return Color(red: red, green: green, blue: blue)
     case .ansi(let index):
-      guard let nsColor = TerminalColor.color(forAnsiIndex: index) else { return nil }
-      return Color(nsColor: nsColor)
+      return TerminalColor.color(forAnsiIndex: index)
     }
   }
 }

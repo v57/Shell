@@ -1,4 +1,3 @@
-import AppKit
 import SwiftUI
 import Terminal
 
@@ -7,7 +6,10 @@ struct ContentView: View {
   @Environment(\.scenePhase) private var scenePhase
   /// Local Esc monitor while the actions overlay is open (the overlay is
   /// non-modal and never gets keyboard focus, so onExitCommand won't fire).
+  /// macOS only — iOS dismisses the overlay by tapping the backdrop.
+  #if os(macOS)
   @State private var escMonitor: Any?
+  #endif
 
   var body: some View {
     @Bindable var model = model
@@ -69,7 +71,11 @@ struct ContentView: View {
                 // (screen -S <name> -X quit / tmux kill-session -t <name>),
                 // which also kills every attached client.
                 if case .screen(let info) = model.kind(of: session) {
+                  #if os(macOS)
                   model.closeScreenSession(info)
+                  #else
+                  model.removeSession(session.id)
+                  #endif
                 } else {
                   model.removeSession(session.id)
                 }
@@ -118,6 +124,7 @@ struct ContentView: View {
     }
     .animation(.easeOut(duration: 0.15), value: model.showingActions)
     .onChange(of: model.showingActions) { _, showing in
+      #if os(macOS)
       if showing {
         escMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
           if event.keyCode == 53 {   // Esc
@@ -130,6 +137,7 @@ struct ContentView: View {
         NSEvent.removeMonitor(escMonitor)
         self.escMonitor = nil
       }
+      #endif
     }
   }
 }

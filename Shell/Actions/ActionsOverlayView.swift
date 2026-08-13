@@ -1,4 +1,3 @@
-import AppKit
 import SwiftUI
 import Terminal
 
@@ -148,7 +147,9 @@ struct ActionsOverlayView: View {
       if !query.isEmpty {
         Button {
           query = ""
+          #if os(macOS)
           claimFocus()
+          #endif
         } label: {
           Image(systemName: "xmark.circle.fill")
             .foregroundStyle(.secondary)
@@ -167,7 +168,9 @@ struct ActionsOverlayView: View {
   private func run(_ action: Action) {
     model.runAction(action)
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+      #if os(macOS)
       claimFocus()
+      #endif
     }
   }
 
@@ -177,6 +180,7 @@ struct ActionsOverlayView: View {
     run(first)
   }
 
+  #if os(macOS)
   /// AppKit fallback for "always focused": SwiftUI's FocusState requests
   /// are dropped for transition-inserted overlay views (verified
   /// empirically — the first responder stayed on the window's hosting
@@ -197,6 +201,7 @@ struct ActionsOverlayView: View {
     }
     return nil
   }
+  #endif
 }
 
 /// A single action chip; clicking it runs the action in the current

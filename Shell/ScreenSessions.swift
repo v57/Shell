@@ -62,10 +62,14 @@ struct ScreenActionError: Identifiable, Equatable {
   let message: String
 }
 
+#if os(macOS)
 /// Polls the local multiplexers (`tmux ls` and `screen -ls`) and publishes
 /// the merged list of persistent sessions. When tmux is installed, tmux is
 /// the preferred backend for creating/renaming; screen sessions created by
 /// the older backend still appear and keep working.
+///
+/// macOS only: persistent local sessions (screen/tmux) need local process
+/// management; the iOS app ships SSH + notes only.
 @MainActor
 @Observable
 final class ScreenSessionsMonitor {
@@ -527,3 +531,4 @@ final class ScreenSessionsMonitor {
     return result
   }
 }
+#endif // os(macOS)

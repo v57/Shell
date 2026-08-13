@@ -1,4 +1,4 @@
-import AppKit
+import SwiftUI
 
 // Key event -> byte sequence mapping for the terminal child.
 // Extracted from the Shell app (TerminalView.swift) into the Terminal library.
@@ -10,7 +10,7 @@ enum TerminalKeyMapper {
   /// to the byte sequence the child expects. Identical logic to the old
   /// NSEvent-based version — ctrl+key control sequences first, then special
   /// keys by keyCode, then plain characters (option = ESC prefix).
-  static func bytes(characters: String?, charactersIgnoringModifiers: String?, keyCode: UInt16, modifierFlags: NSEvent.ModifierFlags) -> Data? {
+  static func bytes(characters: String?, charactersIgnoringModifiers: String?, keyCode: UInt16, modifierFlags: TerminalModifierFlags) -> Data? {
     if modifierFlags.contains(.control), let characters = charactersIgnoringModifiers, characters.count == 1 {
       return controlSequence(for: characters)
     }

@@ -1,7 +1,46 @@
+import SwiftUI
+
+#if os(macOS)
 import AppKit
+/// The platform monospaced font type (AppKit on macOS, UIKit on iOS).
+public typealias TerminalFont = NSFont
+#else
+import UIKit
+public typealias TerminalFont = UIFont
+#endif
 
 // Terminal model types: snapshot, cells, colors.
 // Extracted from the Shell app (TerminalView.swift) into the Terminal library.
+
+/// Portable key-modifier flags. AppKit's NSEvent.ModifierFlags and UIKit's
+/// UIKeyModifierFlags differ; the views convert SwiftUI EventModifiers into
+/// this type so the key mapper is platform-independent.
+public struct TerminalModifierFlags: OptionSet, Sendable {
+  public let rawValue: Int
+  public init(rawValue: Int) { self.rawValue = rawValue }
+
+  public static let control = TerminalModifierFlags(rawValue: 1 << 0)
+  public static let option = TerminalModifierFlags(rawValue: 1 << 1)
+  public static let shift = TerminalModifierFlags(rawValue: 1 << 2)
+  public static let command = TerminalModifierFlags(rawValue: 1 << 3)
+}
+
+/// Platform-appropriate semantic colors for the terminal chrome (window
+/// background, text selection, secondary text). Keeps the renderer free of
+/// #if per color site.
+public enum TerminalPalette {
+  #if os(macOS)
+  public static let windowBackground = Color(nsColor: .windowBackgroundColor)
+  public static let selectionBackground = Color(nsColor: .selectedTextBackgroundColor)
+  public static let selectionForeground = Color(nsColor: .selectedTextColor)
+  public static let secondaryText = Color(nsColor: .secondaryLabelColor)
+  #else
+  public static let windowBackground = Color(uiColor: .systemBackground)
+  public static let selectionBackground = Color(uiColor: .tintColor)
+  public static let selectionForeground = Color(uiColor: .white)
+  public static let secondaryText = Color(uiColor: .secondaryLabel)
+  #endif
+}
 
 // MARK: - Snapshot / Model
 
@@ -14,19 +53,19 @@ public struct TerminalSnapshot {
   public var scrollback: [[TerminalCell]]
   public var cursor: TerminalCursor
   public var showCursor: Bool
-  public var cursorBackground: NSColor
+  public var cursorBackground: Color
   public var message: String?
   /// Bumped whenever the visible content is wholesale invalidated (full
   /// screen clear, RIS, alternate-screen switch). Selections made against
   /// an older epoch are stale and get dropped.
   public var selectionEpoch: Int = 0
-  
+
   /// Logical line count: scrollback plus the visible grid.
   public var totalLines: Int { scrollback.count + rows }
   /// Maximum scroll offset (lines above the bottom).
   public var maxOffset: Int { max(0, totalLines - rows) }
-  
-  init(rows: Int = 24, columns: Int = 80, cells: [TerminalCell] = [], scrollback: [[TerminalCell]] = [], cursor: TerminalCursor = .zero, showCursor: Bool = true, cursorBackground: NSColor = .selectedTextBackgroundColor, message: String? = nil, selectionEpoch: Int = 0) {
+
+  init(rows: Int = 24, columns: Int = 80, cells: [TerminalCell] = [], scrollback: [[TerminalCell]] = [], cursor: TerminalCursor = .zero, showCursor: Bool = true, cursorBackground: Color = TerminalPalette.selectionBackground, message: String? = nil, selectionEpoch: Int = 0) {
     self.rows = rows
     self.columns = columns
     self.cells = cells.isEmpty ? Array(repeating: TerminalCell.space, count: rows * columns) : cells
@@ -220,56 +259,21 @@ public struct TerminalCell: Equatable {
   }
   
   /// Foreground color for drawing; `.default` resolves to the system label color.
-  public func effectiveForeground() -> NSColor {
-    foreground.nsColor ?? NSColor.labelColor
+  public func effectiveForeground() -> Color {
+    foreground.color ?? Color.primary
   }
-  
+
   /// Background color for drawing: `.default` resolves to the terminal
   /// background, explicit colors stay, `.clear` means no fill.
-  public func effectiveBackground(defaultingTo terminalBackground: NSColor) -> NSColor? {
+  public func effectiveBackground(defaultingTo terminalBackground: Color) -> Color? {
     switch background {
     case .clear:
       return nil
     case .default:
       return terminalBackground
     case .rgb, .ansi:
-      return background.nsColor
+      return background.color
     }
-  }
-  
-  public func makeAttributes(font: NSFont, inverted: Bool, selected: Bool = false, terminalBackground: NSColor) -> [NSAttributedString.Key: Any] {
-    let cellForeground = effectiveForeground()
-    let cellBackground = effectiveBackground(defaultingTo: terminalBackground)
-    let useInverse = inverse != inverted
-    
-    // NOTE: no .backgroundColor attribute here — the draw loop fills the exact
-    // cell rect itself. AppKit paints the attributed-string background box
-    // using font metrics (not the cell rect), which bleeds into adjacent rows.
-    let finalForeground: NSColor
-    if selected {
-      finalForeground = NSColor.selectedTextColor
-    } else if useInverse {
-      finalForeground = cellBackground ?? terminalBackground
-    } else {
-      finalForeground = cellForeground
-    }
-    
-    let finalFont = bold ? NSFont.monospacedSystemFont(ofSize: font.pointSize, weight: .semibold) : font
-    
-    var attrs: [NSAttributedString.Key: Any] = [
-      .font: finalFont,
-      .foregroundColor: finalForeground
-    ]
-    if underline {
-      attrs[.underlineStyle] = NSUnderlineStyle.single.rawValue
-    }
-    if italic {
-      attrs[.obliqueness] = 0.2
-    }
-    if dim && !selected {
-      attrs[.foregroundColor] = finalForeground.withAlphaComponent(0.6)
-    }
-    return attrs
   }
 }
 
@@ -304,23 +308,23 @@ public enum TerminalColor: Equatable {
   
   public static let defaultForeground = TerminalColor.default
   
-  public var nsColor: NSColor? {
+  public var color: Color? {
     switch self {
     case .clear:
       return .clear
     case .default:
       return nil
     case .rgb(let red, let green, let blue):
-      return NSColor(calibratedRed: red, green: green, blue: blue, alpha: 1)
+      return Color(red: red, green: green, blue: blue)
     case .ansi(let index):
       return TerminalColor.color(forAnsiIndex: index)
     }
   }
-  
+
   /// Standard 16-color ANSI palette, tuned for a dark background
   /// (near-black is lifted so it stays visible; the rest are the
   /// conventional xterm hues).
-  private static let palette16: [NSColor] = [
+  private static let palette16: [Color] = [
     rgb(0x2a, 0x2a, 0x2a), // 0 black
     rgb(0xe0, 0x55, 0x61), // 1 red
     rgb(0x8c, 0xc2, 0x65), // 2 green
@@ -338,36 +342,36 @@ public enum TerminalColor: Equatable {
     rgb(0x6c, 0xd8, 0xe0), // 14 bright cyan
     rgb(0xff, 0xff, 0xff)  // 15 bright white
   ]
-  
+
   /// 6x6x6 color cube (indices 16...231).
-  private static let colorCube: [NSColor] = {
+  private static let colorCube: [Color] = {
     let levels: [CGFloat] = [0, 95, 135, 175, 215, 255]
-    var colors: [NSColor] = []
+    var colors: [Color] = []
     colors.reserveCapacity(216)
     for red in levels {
       for green in levels {
         for blue in levels {
-          colors.append(NSColor(calibratedRed: red / 255, green: green / 255, blue: blue / 255, alpha: 1))
+          colors.append(Color(red: red / 255, green: green / 255, blue: blue / 255))
         }
       }
     }
     return colors
   }()
-  
+
   /// Grayscale ramp (indices 232...255).
-  private static let grayscale: [NSColor] = {
-    var colors: [NSColor] = []
+  private static let grayscale: [Color] = {
+    var colors: [Color] = []
     colors.reserveCapacity(24)
     for step in 0..<24 {
       let value = CGFloat(8 + 10 * step) / 255
-      colors.append(NSColor(calibratedRed: value, green: value, blue: value, alpha: 1))
+      colors.append(Color(red: value, green: value, blue: value))
     }
     return colors
   }()
-  
+
   /// xterm-256color palette lookup. Returns nil for out-of-range indices so
   /// the caller can fall back to the default label color.
-  public static func color(forAnsiIndex index: Int) -> NSColor? {
+  public static func color(forAnsiIndex index: Int) -> Color? {
     switch index {
     case 0..<16:
       return palette16[index]
@@ -379,8 +383,8 @@ public enum TerminalColor: Equatable {
       return nil
     }
   }
-  
-  private static func rgb(_ red: Int, _ green: Int, _ blue: Int) -> NSColor {
-    NSColor(calibratedRed: CGFloat(red) / 255, green: CGFloat(green) / 255, blue: CGFloat(blue) / 255, alpha: 1)
+
+  private static func rgb(_ red: Int, _ green: Int, _ blue: Int) -> Color {
+    Color(red: CGFloat(red) / 255, green: CGFloat(green) / 255, blue: CGFloat(blue) / 255)
   }
 }

@@ -1,4 +1,8 @@
+#if os(macOS)
 import AppKit
+#else
+import UIKit
+#endif
 import Foundation
 import Observation
 
@@ -143,7 +147,7 @@ public final class TerminalSession: Identifiable {
 
   /// Keyboard input from the pure-SwiftUI view (onKeyPress). Structured
   /// parameters instead of an NSEvent so no AppKit event object is needed.
-  public func handleKey(characters: String?, charactersIgnoringModifiers: String?, keyCode: UInt16, modifierFlags: NSEvent.ModifierFlags) {
+  public func handleKey(characters: String?, charactersIgnoringModifiers: String?, keyCode: UInt16, modifierFlags: TerminalModifierFlags) {
     if modifierFlags.contains(.command) {
       switch charactersIgnoringModifiers?.lowercased() {
       case "v":
@@ -211,25 +215,39 @@ public final class TerminalSession: Identifiable {
 
   private func copyVisibleBuffer() {
     let text = snapshot.plainText(offset: scrollbackOffset)
+    #if os(macOS)
     let pasteboard = NSPasteboard.general
     pasteboard.clearContents()
     pasteboard.setString(text, forType: .string)
+    #else
+    UIPasteboard.general.string = text
+    #endif
   }
 
   private func copySelection(from start: TerminalCursor, to end: TerminalCursor) {
     // Selection rows are LOGICAL lines; the snapshot maps them directly.
     let text = snapshot.plainText(logicalFrom: start, to: end)
     guard !text.isEmpty else { return }
+    #if os(macOS)
     let pasteboard = NSPasteboard.general
     pasteboard.clearContents()
     pasteboard.setString(text, forType: .string)
+    #else
+    UIPasteboard.general.string = text
+    #endif
   }
 
   private func pasteFromPasteboard() {
+    #if os(macOS)
     let pasteboard = NSPasteboard.general
     if let string = pasteboard.string(forType: .string) {
       paste(string)
     }
+    #else
+    if let string = UIPasteboard.general.string {
+      paste(string)
+    }
+    #endif
   }
 
   /// Pins a line as the sidebar status by its rank from the bottom
@@ -307,7 +325,7 @@ public final class TerminalSession: Identifiable {
     characters: String?,
     charactersIgnoringModifiers: String?,
     keyCode: UInt16,
-    modifierFlags: NSEvent.ModifierFlags
+    modifierFlags: TerminalModifierFlags
   ) {
     beginInputIfNeeded()
 
@@ -373,13 +391,16 @@ public final class TerminalSession: Identifiable {
 
 // MARK: - Local pty preset init
 
+#if os(macOS)
 public extension TerminalSession {
   /// Short form for local terminals: `TerminalSession(session: .zsh)` for
   /// an interactive login shell, `.screen(name)` to attach to a GNU screen
   /// session. tmux needs unwrapping (`LocalPTYTransport.tmux(name)` is nil
   /// when tmux isn't installed). Equivalent to
-  /// `TerminalSession(transport: LocalPTYTransport(...))`.
+  /// `TerminalSession(transport: LocalPTYTransport(...))`. macOS only —
+  /// local ptys (forkpty) don't exist on iOS.
   convenience init(session transport: LocalPTYTransport, startupMessage: String? = nil) {
     self.init(transport: transport, startupMessage: startupMessage)
   }
 }
+#endif

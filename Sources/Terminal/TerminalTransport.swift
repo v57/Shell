@@ -76,6 +76,7 @@ public extension TerminalTransport {
 
 // MARK: - Local pty transport
 
+#if os(macOS)
 /// Spawns a local executable in a pty (forkpty) and bridges it to the
 /// session: the child's output arrives via `onOutput`, its exit via
 /// `onExit`, and `write`/`resize`/`close` go straight to the master fd.
@@ -84,6 +85,9 @@ public extension TerminalTransport {
 /// login_tty in the child: setsid + TIOCSCTTY + dup2 slave onto 0/1/2),
 /// which is what lets ^C (ISIG/VINTR) deliver SIGINT to the foreground
 /// process group.
+///
+/// macOS only: forkpty does not exist on iOS, and local terminals are not
+/// a supported iOS feature (the iOS app ships SSH + notes).
 public final class LocalPTYTransport: TerminalTransport {
   public var onOutput: ((Data) -> Void)?
   public var onConnected: (() -> Void)?
@@ -361,3 +365,4 @@ public extension LocalPTYTransport {
     return nil
   }
 }
+#endif // os(macOS)

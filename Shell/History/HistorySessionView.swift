@@ -1,4 +1,5 @@
 import SwiftUI
+import Terminal
 
 struct HistorySessionView: View {
   let session: HistorySession
@@ -11,6 +12,6 @@ struct HistorySessionView: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .padding(12)
     }
-    .background(Color(nsColor: .textBackgroundColor))
+    .background(TerminalPalette.windowBackground)
   }
 }

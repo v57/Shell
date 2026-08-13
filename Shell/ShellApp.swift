@@ -1,22 +1,26 @@
-import AppKit
 import SwiftUI
 import Terminal
 
 @main
 struct ShellApp: App {
+  #if os(macOS)
   @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-  
+  #endif
+
   var body: some Scene {
     WindowGroup {
       ContentView()
         .environment(AppModel.shared)
     }
+    #if os(macOS)
     .commands {
       ShellCommands()
     }
+    #endif
   }
 }
 
+#if os(macOS)
 /// Removes the system File > Close (⌘W) so the shortcut closes the
 /// selected terminal (Shell > Close Terminal) instead of the window.
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -128,3 +132,4 @@ struct ShellCommands: Commands {
     }
   }
 }
+#endif // os(macOS)

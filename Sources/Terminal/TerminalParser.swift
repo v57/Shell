@@ -1,4 +1,4 @@
-import AppKit
+import SwiftUI
 import Foundation
 
 // ANSI/VT terminal output parser (byte state machine) + grid model.
@@ -408,7 +408,7 @@ struct TerminalGrid {
   var savedCursor: TerminalCursor?
   var currentAttributes: TerminalCell
   var showCursor: Bool
-  var cursorBackground: NSColor
+  var cursorBackground: Color
   var scrollTop: Int
   var scrollBottom: Int
   /// xterm (xenl) "wrap pending" state: a character written at the last
@@ -441,7 +441,7 @@ struct TerminalGrid {
     self.savedCursor = nil
     self.currentAttributes = TerminalCell.space
     self.showCursor = true
-    self.cursorBackground = .selectedTextBackgroundColor
+    self.cursorBackground = TerminalPalette.selectionBackground
     self.scrollTop = 0
     self.scrollBottom = max(rows - 1, 0)
     self.wrapPending = false

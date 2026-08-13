@@ -1,4 +1,8 @@
+#if os(macOS)
 import AppKit
+#else
+import UIKit
+#endif
 import Crypto
 import Foundation
 import SwiftUI
@@ -16,8 +20,10 @@ final class AppModel {
   var showingNewConnection = false
   var publicKeyError: String?
   
+  #if os(macOS)
   /// Polls `screen -ls` for the sidebar's Screen section.
   var screenMonitor = ScreenSessionsMonitor()
+  #endif
 
   /// The sidebar's encrypted Notes list (one sealed file per note, 5s debounced save).
   var notes = NotesStore()
@@ -85,8 +91,11 @@ final class AppModel {
   
   private init() {
     connections = connectionStore.all
-    // Start with a local terminal so the window is never empty.
+    #if os(macOS)
+    // Start with a local terminal so the window is never empty. iOS has no
+    // local terminals — it starts with just the sidebar (SSH + notes).
     _ = addLocalTerminal()
+    #endif
   }
   
   var selectedSession: TerminalSession? {
@@ -140,6 +149,7 @@ final class AppModel {
   
   // MARK: - Sessions
   
+  #if os(macOS)
   @discardableResult
   func addLocalTerminal() -> TerminalSession {
     if historyMode {
@@ -153,6 +163,7 @@ final class AppModel {
     selection = session.id
     return session
   }
+  #endif
   
   @discardableResult
   func connect(to config: SSHConfig) -> TerminalSession {
@@ -173,6 +184,7 @@ final class AppModel {
     return session
   }
   
+  #if os(macOS)
   /// Opens a local terminal attached to an existing persistent session
   /// (`screen -x` for screen, `tmux attach` for tmux).
   @discardableResult
@@ -200,6 +212,7 @@ final class AppModel {
     screenMonitor.refresh()  // the session just flipped to Attached
     return session
   }
+  #endif
   
   /// All running sessions for a connection, in creation order.
   func sessions(for config: SSHConfig) -> [TerminalSession] {
@@ -236,7 +249,11 @@ final class AppModel {
     case .local:
       return sessions.filter { kind(of: $0) == .local }
     case .screen:
+      #if os(macOS)
       return screenMonitor.sessions.compactMap { attachedSession(toScreen: $0) }
+      #else
+      return []
+      #endif
     case .ssh:
       return connections.flatMap { sessions(for: $0) }
     case .action:
@@ -247,6 +264,7 @@ final class AppModel {
   /// Creates a new session in the same section as `session`: a local
   /// terminal for local, a duplicate connection for SSH, a brand-new
   /// persistent session for screen.
+  #if os(macOS)
   @discardableResult
   func newSession(inSameSectionAs session: TerminalSession) -> TerminalSession {
     switch kind(of: session) {
@@ -261,9 +279,24 @@ final class AppModel {
       return addLocalTerminal()
     }
   }
-  
+  #else
+  @discardableResult
+  func newSession(inSameSectionAs session: TerminalSession) -> TerminalSession? {
+    // iOS: no local terminals — SSH sessions duplicate their connection,
+    // anything else opens the New Connection sheet.
+    switch kind(of: session) {
+    case .ssh(let config):
+      return connect(to: config)
+    default:
+      showingNewConnection = true
+      return selectedSession
+    }
+  }
+  #endif
+
   /// ⌘N: new session in the same section as the current selection
   /// (new local terminal when nothing is selected).
+  #if os(macOS)
   @discardableResult
   func newSessionInSameSection() -> TerminalSession {
     if let session = selectedSession {
@@ -271,6 +304,16 @@ final class AppModel {
     }
     return addLocalTerminal()
   }
+  #else
+  @discardableResult
+  func newSessionInSameSection() -> TerminalSession? {
+    if let session = selectedSession {
+      return newSession(inSameSectionAs: session)
+    }
+    showingNewConnection = true
+    return nil
+  }
+  #endif
   
   /// ⌘W: closes the selected session (quitting persistent sessions like
   /// the toolbar does), then selects the previous session in the same
@@ -288,7 +331,11 @@ final class AppModel {
     let wasOnly = section.count == 1
     
     if case .screen(let info) = kind(of: session) {
+      #if os(macOS)
       closeScreenSession(info)
+      #else
+      removeSession(session.id)
+      #endif
     } else {
       removeSession(session.id)
     }
@@ -319,6 +366,7 @@ final class AppModel {
     }
   }
   
+  #if os(macOS)
   /// Creates a new persistent session (tmux when installed, else screen)
   /// and immediately opens a terminal attached to it, so the new session
   /// is usable at once.
@@ -344,6 +392,7 @@ final class AppModel {
       removeSession(session.id)
     }
   }
+  #endif
   
   func deleteConnection(_ config: SSHConfig) {
     connectionStore.remove(config.id)
@@ -375,12 +424,20 @@ final class AppModel {
   func copyPublicKey(_ identity: SSHKeychain.Identity = .default) {
     do {
       let key = try key(for: identity)
+      #if os(macOS)
       let host = Host.current().localizedName ?? "Mac"
+      #else
+      let host = UIDevice.current.name
+      #endif
       let comment = "Shell (\(NSUserName())@\(host))"
       let line = SSHKeychain.publicKeyOpenSSHLine(for: key, comment: comment)
+      #if os(macOS)
       let pasteboard = NSPasteboard.general
       pasteboard.clearContents()
       pasteboard.setString(line, forType: .string)
+      #else
+      UIPasteboard.general.string = line
+      #endif
     } catch {
       publicKeyError = error.localizedDescription
     }
@@ -441,12 +498,17 @@ final class AppModel {
 
   func replayHistorySession(_ record: HistorySession) {
     if historyMode { toggleHistoryMode() }
+    #if os(macOS)
     let session = addLocalTerminal()
     DispatchQueue.main.async {
       for command in record.commands {
         session.submitCommand(command.text)
       }
     }
+    #else
+    // Replay needs a local pty (macOS only); iOS just drops back to the
+    // session list. The history row's replay button is hidden on iOS.
+    #endif
   }
 
   func createAction(from record: HistorySession) {
@@ -530,8 +592,15 @@ final class AppModel {
       transport = SSHSession(config: config, execCommand: spec.action.commands)
       startupMessage = "Connecting to \(config.host)…"
     } else {
+      #if os(macOS)
       transport = LocalPTYTransport(executable: "/bin/zsh", argv: ["zsh", "-lc", spec.action.commands])
       startupMessage = nil
+      #else
+      // Local actions need a local pty, which iOS doesn't have. This
+      // branch is unreachable on iOS: the actions overlay's applicability
+      // filter never offers a local action (no local/screen sessions).
+      preconditionFailure("Local actions require a local pty (macOS only)")
+      #endif
     }
     let newSession = TerminalSession(transport: transport, startupMessage: startupMessage)
     sessionKinds[newSession.id] = .action(spec)

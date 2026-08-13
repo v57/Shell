@@ -5,7 +5,7 @@ import PackageDescription
 
 let package = Package(
     name: "Terminal",
-    platforms: [.macOS(.v15)],
+    platforms: [.macOS(.v15), .iOS(.v18)],
     products: [.library(name: "Terminal", targets: ["Terminal"])],
     dependencies: [
         .package(url: "https://github.com/apple/swift-nio-ssh", exact: "0.15.0"),
