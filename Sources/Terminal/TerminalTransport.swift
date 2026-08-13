@@ -1,0 +1,320 @@
+import Darwin
+import Foundation
+
+// MARK: - Auth prompts
+
+/// Shown when an SSH server presents an unknown host key.
+public struct TerminalHostKeyPrompt: Identifiable {
+  public let id = UUID()
+  public let host: String
+  public let port: Int
+  public let fingerprint: String
+  /// Call with `true` to accept (and remember) the key, `false` to reject.
+  public let respond: (Bool) -> Void
+
+  public init(host: String, port: Int, fingerprint: String, respond: @escaping (Bool) -> Void) {
+    self.host = host
+    self.port = port
+    self.fingerprint = fingerprint
+    self.respond = respond
+  }
+}
+
+/// Shown when an SSH server asks for a password.
+public struct TerminalPasswordPrompt: Identifiable {
+  public let id = UUID()
+  public let host: String
+  public let username: String
+  /// Password + whether to save it in the Keychain.
+  public let respond: (String?, Bool) -> Void
+
+  public init(host: String, username: String, respond: @escaping (String?, Bool) -> Void) {
+    self.host = host
+    self.username = username
+    self.respond = respond
+  }
+}
+
+// MARK: - Transport protocol
+
+/// The I/O backbone of a `TerminalSession`: an interactive byte stream with
+/// a child process (local pty) or a remote channel (SSH).
+///
+/// All callbacks are delivered on the main thread.
+public protocol TerminalTransport: AnyObject {
+  /// Raw bytes from the child (terminal output). Feeds the parser.
+  var onOutput: ((Data) -> Void)? { get set }
+  /// The session is ready to accept input (pty spawned / SSH channel open).
+  var onConnected: (() -> Void)? { get set }
+  /// The transport failed or the connection dropped (shows an error).
+  var onTerminated: ((String) -> Void)? { get set }
+  /// The child process / remote exec exited with this code.
+  var onExit: ((Int32) -> Void)? { get set }
+  /// The server presented an unknown host key (SSH transports only).
+  var onHostKeyPrompt: ((TerminalHostKeyPrompt) -> Void)? { get set }
+  /// The server asked for a password (SSH transports only).
+  var onPasswordPrompt: ((TerminalPasswordPrompt) -> Void)? { get set }
+
+  func start()
+  func write(_ data: Data)
+  func resize(columns: Int, rows: Int)
+  func close()
+}
+
+/// Non-SSH transports never produce auth prompts — default no-ops so
+/// conformance only needs the four I/O callbacks.
+public extension TerminalTransport {
+  var onHostKeyPrompt: ((TerminalHostKeyPrompt) -> Void)? {
+    get { nil }
+    set {}
+  }
+  var onPasswordPrompt: ((TerminalPasswordPrompt) -> Void)? {
+    get { nil }
+    set {}
+  }
+}
+
+// MARK: - Local pty transport
+
+/// Spawns a local executable in a pty (forkpty) and bridges it to the
+/// session: the child's output arrives via `onOutput`, its exit via
+/// `onExit`, and `write`/`resize`/`close` go straight to the master fd.
+///
+/// The pty IS the child's controlling terminal (forkpty = openpty + fork +
+/// login_tty in the child: setsid + TIOCSCTTY + dup2 slave onto 0/1/2),
+/// which is what lets ^C (ISIG/VINTR) deliver SIGINT to the foreground
+/// process group.
+public final class LocalPTYTransport: TerminalTransport {
+  public var onOutput: ((Data) -> Void)?
+  public var onConnected: (() -> Void)?
+  public var onTerminated: ((String) -> Void)?
+  public var onExit: ((Int32) -> Void)?
+
+  private let executable: String
+  private let argv: [String]
+  private let queue = DispatchQueue(label: "Terminal.LocalPTYTransport")
+  private let queueIdentity = DispatchSpecificKey<UInt8>()
+  private var masterFD: Int32 = -1
+  private var childPID: pid_t = -1
+  private var processWatch: DispatchSourceProcess?
+  private var readSource: DispatchSourceRead?
+  private var isRunning = false
+  /// Internal regression-test probe; not part of the public transport API.
+  var onReadEventForTesting: (() -> Void)?
+
+  public init(executable: String, argv: [String]) {
+    self.executable = executable
+    self.argv = argv
+    queue.setSpecific(key: queueIdentity, value: 1)
+  }
+
+  public func start() {
+    guard !isRunning else { return }
+    isRunning = true
+
+    // Build argv/envp in the parent, BEFORE fork: between fork and exec
+    // the child may only run async-signal-safe code (no allocation).
+    let homeDirectory = FileManager.default.homeDirectoryForCurrentUser.path
+    let executableCString = executable.withCString { strdup($0) }
+    var argvPointers: [UnsafeMutablePointer<CChar>?] = argv.map {
+      $0.withCString { strdup($0) }
+    }
+    argvPointers.append(nil)
+    var envp: [UnsafeMutablePointer<CChar>?] = makeEnvironment()
+      .map { "\($0.key)=\($0.value)" }
+      .sorted()
+      .map { $0.withCString { strdup($0) } }
+    envp.append(nil)
+    let homeCString = homeDirectory.withCString { strdup($0) }
+
+    // Start WIDE (not 80 cols): zsh's startup blanking writes a fixed
+    // 92-space run; at <93 cols it wraps and strands its reverse-video
+    // "%" marker above the erase, so it shows on the first screen.
+    // The view resizes the pty to the real size on first layout.
+    var windowSize = winsize(ws_row: 24, ws_col: 200, ws_xpixel: 0, ws_ypixel: 0)
+
+    var master: Int32 = -1
+    let pid = forkpty(&master, nil, nil, &windowSize)
+    if pid == 0 {
+      // Child — async-signal-safe only from here on.
+      Darwin.close(master)
+      if chdir(homeCString) != 0 {
+        _exit(127)
+      }
+      execve(executableCString, argvPointers, envp)
+      _exit(127)
+    }
+
+    // Parent.
+    defer {
+      free(executableCString)
+      for ptr in argvPointers { ptr.map { free($0) } }
+      for ptr in envp { ptr.map { free($0) } }
+      free(homeCString)
+    }
+    guard pid > 0 else {
+      let message = "Failed to start \(argv[0]): \(String(cString: strerror(errno)))"
+      isRunning = false
+      onTerminated?(message)
+      return
+    }
+
+    masterFD = master
+    // forkpty closed the slave side in the parent.
+
+    let flags = fcntl(masterFD, F_GETFL, 0)
+    if flags >= 0 {
+      _ = fcntl(masterFD, F_SETFL, flags | O_NONBLOCK)
+    }
+    childPID = pid
+
+    let source = DispatchSource.makeReadSource(fileDescriptor: masterFD, queue: queue)
+    source.setEventHandler { [weak self] in
+      self?.onReadEventForTesting?()
+      self?.readFromPTY()
+    }
+    source.setCancelHandler { }
+    source.resume()
+    readSource = source
+
+    let exitSource = DispatchSource.makeProcessSource(identifier: pid, eventMask: .exit, queue: queue)
+    exitSource.setEventHandler { [weak self] in
+      guard let self else { return }
+      var status: Int32 = 0
+      var waitResult: pid_t
+      repeat {
+        waitResult = waitpid(pid, &status, 0)
+      } while waitResult == -1 && errno == EINTR
+      self.processWatch?.cancel()
+      self.processWatch = nil
+      if waitResult == pid {
+        self.childPID = -1
+      }
+      DispatchQueue.main.async {
+        self.isRunning = false
+        // Wait status: exit code in bits 8-15, signal in low 7. Normal
+        // exits read their code directly; signal deaths (e.g. ^C) get
+        // the shell convention 128+signal so an interrupted action
+        // shows as a failure (exit 130), not a clean exit.
+        let signal = status & 0x7F
+        let code = (status >> 8) & 0xFF
+        self.onExit?((signal != 0 && code == 0) ? Int32(128 + signal) : code)
+      }
+    }
+    exitSource.resume()
+    processWatch = exitSource
+
+    onConnected?()
+  }
+
+  public func write(_ data: Data) {
+    guard masterFD >= 0, !data.isEmpty else { return }
+
+    data.withUnsafeBytes { rawBuffer in
+      guard let base = rawBuffer.bindMemory(to: UInt8.self).baseAddress else { return }
+      var remaining = rawBuffer.count
+      var offset = 0
+
+      while remaining > 0 {
+        let written = Darwin.write(masterFD, base.advanced(by: offset), remaining)
+        if written > 0 {
+          remaining -= written
+          offset += written
+          continue
+        }
+        if written == -1, errno == EINTR {
+          continue
+        }
+        break
+      }
+    }
+  }
+
+  public func resize(columns: Int, rows: Int) {
+    guard columns > 0, rows > 0, masterFD >= 0 else { return }
+    var ws = winsize(ws_row: UInt16(rows), ws_col: UInt16(columns), ws_xpixel: 0, ws_ypixel: 0)
+    _ = ioctl(masterFD, TIOCSWINSZ, &ws)
+  }
+
+  public func close() {
+    if DispatchQueue.getSpecific(key: queueIdentity) != nil {
+      closeOnTransportQueue()
+    } else {
+      queue.sync { closeOnTransportQueue() }
+    }
+  }
+
+  /// All descriptors and dispatch sources are owned by `queue`; serializing
+  /// teardown prevents close from racing a pending read/exit handler.
+  private func closeOnTransportQueue() {
+    readSource?.cancel()
+    readSource = nil
+
+    if childPID > 0 {
+      // The child is a session leader, so -childPID covers the whole
+      // process group (shell + its children).
+      _ = kill(-childPID, SIGTERM)
+      _ = kill(childPID, SIGTERM)
+      childPID = -1
+    }
+    processWatch?.cancel()
+    processWatch = nil
+
+    if masterFD >= 0 {
+      Darwin.close(masterFD)
+      masterFD = -1
+    }
+  }
+
+  private func readFromPTY() {
+    guard masterFD >= 0 else { return }
+
+    var buffer = [UInt8](repeating: 0, count: 4096)
+    while true {
+      let count = Darwin.read(masterFD, &buffer, buffer.count)
+      if count > 0 {
+        let data = Data(buffer.prefix(count))
+        DispatchQueue.main.async { [weak self] in
+          self?.onOutput?(data)
+        }
+        continue
+      }
+      if count == 0 {
+        stopReadingFromPTY()
+        break
+      }
+      if count == -1, errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR { break }
+      // PTYs commonly report EIO rather than a zero-byte read when the
+      // slave disappears. Any other permanent read error is terminal too.
+      stopReadingFromPTY()
+      break
+    }
+  }
+
+  /// EOF is level-triggered for a dispatch read source. Leaving the source
+  /// active would immediately invoke `readFromPTY` again forever, spinning a
+  /// core after an attached screen/tmux client exits.
+  private func stopReadingFromPTY() {
+    readSource?.cancel()
+    readSource = nil
+  }
+
+  private func makeEnvironment() -> [String: String] {
+    var env = ProcessInfo.processInfo.environment
+    // Always advertise a full xterm-256color terminal. Inheriting TERM (or
+    // terminfo-polluting variables) from the launching process can carry a
+    // broken value that makes curses apps like nano fail with
+    // "Incomplete terminfo entry".
+    env["TERM"] = "xterm-256color"
+    env["COLORTERM"] = "truecolor"
+    env["TERM_PROGRAM"] = "Shell"
+    env["TERM_PROGRAM_VERSION"] = "1.0"
+    // Guarantee a sane home dir regardless of how the app was launched,
+    // so zsh finds ~/.zshrc and starts in the right place.
+    env["HOME"] = NSHomeDirectory()
+    env.removeValue(forKey: "TERMINFO")
+    env.removeValue(forKey: "TERMINFO_DIRS")
+    env.removeValue(forKey: "TERMCAP")
+    return env
+  }
+}
