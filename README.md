@@ -9,12 +9,29 @@ Modern terminal for your needs. Pure SwiftUI, no electron-type bullshit
 - Quick actions `cmd + r`
 
 ## Use as library
-**Local terminal (forkpty, zsh):**
+**Local terminal (forkpty):** use the `LocalPTYTransport` presets — `.zsh`
+for an interactive login shell, `.screen(name)` / `.tmux(name)` to attach
+to a persistent multiplexer session:
 ```swift
 import Terminal
 
-let transport = LocalPTYTransport(executable: "/bin/zsh", argv: ["zsh", "-l", "-i"])
-let session = TerminalSession(transport: transport)
+// Interactive zsh login shell — the default local terminal.
+let session = TerminalSession(session: .zsh)
+
+// Attach to a named GNU screen session (screen ships with macOS).
+let screenSession = TerminalSession(session: .screen("work"))
+
+// Attach to a named tmux session. tmux has no fixed macOS location, so
+// the preset resolves the binary (Homebrew paths, then PATH) and is nil
+// when tmux isn't installed — fall back to screen:
+let transport = LocalPTYTransport.tmux("work") ?? .screen("work")
+let tmuxSession = TerminalSession(session: transport)
+
+// The presets are plain LocalPTYTransports — build your own for anything
+// else (e.g. running a command: zsh -lc):
+let execSession = TerminalSession(transport: LocalPTYTransport(
+  executable: "/bin/zsh", argv: ["zsh", "-lc", "make && make test"]
+))
 ```
 
 **SSH terminal:**

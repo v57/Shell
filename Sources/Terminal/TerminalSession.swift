@@ -370,3 +370,16 @@ public final class TerminalSession: Identifiable {
     }
   }
 }
+
+// MARK: - Local pty preset init
+
+public extension TerminalSession {
+  /// Short form for local terminals: `TerminalSession(session: .zsh)` for
+  /// an interactive login shell, `.screen(name)` to attach to a GNU screen
+  /// session. tmux needs unwrapping (`LocalPTYTransport.tmux(name)` is nil
+  /// when tmux isn't installed). Equivalent to
+  /// `TerminalSession(transport: LocalPTYTransport(...))`.
+  convenience init(session transport: LocalPTYTransport, startupMessage: String? = nil) {
+    self.init(transport: transport, startupMessage: startupMessage)
+  }
+}

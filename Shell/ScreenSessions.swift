@@ -1,4 +1,5 @@
 import Foundation
+import Terminal
 
 /// Which multiplexer a persistent session belongs to. The app prefers
 /// tmux when installed (see `PersistentSessionTool`); screen sessions
@@ -80,21 +81,10 @@ final class ScreenSessionsMonitor {
     tmuxPath() != nil
   }
   
-  /// First existing candidate for the tmux binary.
+  /// Resolves the tmux executable (delegates to the Terminal library's
+  /// preset resolver: common install locations, then PATH).
   static func tmuxPath() -> String? {
-    for candidate in ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux"] {
-      if FileManager.default.isExecutableFile(atPath: candidate) {
-        return candidate
-      }
-    }
-    guard let path = ProcessInfo.processInfo.environment["PATH"] else { return nil }
-    for dir in path.split(separator: ":") {
-      let candidate = URL(fileURLWithPath: String(dir)).appendingPathComponent("tmux").path
-      if FileManager.default.isExecutableFile(atPath: candidate) {
-        return candidate
-      }
-    }
-    return nil
+    LocalPTYTransport.tmuxExecutablePath()
   }
   
   private(set) var sessions: [ScreenSessionInfo] = []

@@ -318,3 +318,46 @@ public final class LocalPTYTransport: TerminalTransport {
     return env
   }
 }
+
+// MARK: - Local pty presets
+
+public extension LocalPTYTransport {
+  /// Interactive zsh login shell — the default local terminal.
+  /// Use via the short form: `TerminalSession(session: .zsh)`.
+  static var zsh: LocalPTYTransport {
+    LocalPTYTransport(executable: "/bin/zsh", argv: ["zsh", "-l", "-i"])
+  }
+
+  /// Attach to a named GNU screen session (`screen -x`, multi-attaches).
+  /// screen ships with macOS. Use via `TerminalSession(session: .screen(name))`.
+  static func screen(_ name: String) -> LocalPTYTransport {
+    LocalPTYTransport(executable: "/usr/bin/screen", argv: ["screen", "-x", name])
+  }
+
+  /// Attach to a named tmux session (`tmux attach -t`). Returns nil when
+  /// tmux is not installed — callers fall back to `.screen(name)`.
+  static func tmux(_ name: String) -> LocalPTYTransport? {
+    guard let executable = tmuxExecutablePath() else { return nil }
+    return LocalPTYTransport(executable: executable, argv: ["tmux", "attach", "-t", name])
+  }
+
+  /// Resolves the tmux executable: common install locations first, then
+  /// PATH. Returns nil when tmux is not installed. (tmux has no fixed
+  /// macOS location — Homebrew installs it under /opt/homebrew or
+  /// /usr/local, and GUI launches inherit a minimal PATH.)
+  static func tmuxExecutablePath() -> String? {
+    for candidate in ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux"] {
+      if FileManager.default.isExecutableFile(atPath: candidate) {
+        return candidate
+      }
+    }
+    guard let path = ProcessInfo.processInfo.environment["PATH"] else { return nil }
+    for dir in path.split(separator: ":") {
+      let candidate = URL(fileURLWithPath: String(dir)).appendingPathComponent("tmux").path
+      if FileManager.default.isExecutableFile(atPath: candidate) {
+        return candidate
+      }
+    }
+    return nil
+  }
+}

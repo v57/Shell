@@ -146,9 +146,7 @@ final class AppModel {
       historyMode = false
       selectionBeforeHistory = nil
     }
-    let session = TerminalSession(
-      transport: LocalPTYTransport(executable: "/bin/zsh", argv: ["zsh", "-l", "-i"])
-    )
+    let session = TerminalSession(session: .zsh)
     sessionKinds[session.id] = .local
     registerCapture(for: session, archiveLocally: true)
     sessions.append(session)
@@ -179,13 +177,14 @@ final class AppModel {
   /// (`screen -x` for screen, `tmux attach` for tmux).
   @discardableResult
   func attach(toScreen info: ScreenSessionInfo) -> TerminalSession {
-    let transport: LocalPTYTransport
-    if info.kind == .tmux, let tmux = ScreenSessionsMonitor.tmuxPath() {
-      transport = LocalPTYTransport(executable: tmux, argv: ["tmux", "attach", "-t", info.name])
+    // tmux attach when tmux is installed; otherwise screen -x (screen
+    // ships with macOS). LocalPTYTransport.tmux is nil without tmux.
+    let session: TerminalSession
+    if info.kind == .tmux, let transport = LocalPTYTransport.tmux(info.name) {
+      session = TerminalSession(session: transport)
     } else {
-      transport = LocalPTYTransport(executable: "/usr/bin/screen", argv: ["screen", "-x", info.name])
+      session = TerminalSession(session: .screen(info.name))
     }
-    let session = TerminalSession(transport: transport)
     session.exitHandler = { [weak self, weak session] _ in
       guard let id = session?.id else { return }
       // The client can exit because the shell ended (`exit`) or because it
