@@ -21,3 +21,6 @@ build/
 # graphify tool output
 graphify-out/
 /.swiftpm
+
+# LLVM code coverage artifacts
+*.profraw
