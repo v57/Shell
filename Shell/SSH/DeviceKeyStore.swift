@@ -1,0 +1,146 @@
+import Crypto
+import Foundation
+import Observation
+import SwiftData
+import Terminal
+#if os(iOS)
+import UIKit
+#endif
+
+/// The iCloud-synced registry of per-device public keys.
+///
+/// Every device publishes its Secure Enclave identity key's public line on
+/// launch (and when the authorized-keys panel opens). Other devices read
+/// the registry to grant that key access to their servers. Plaintext by
+/// design — public keys are meant to be shared.
+///
+/// Same storage pattern as `SSHConfigStore`: a dedicated CloudKit store
+/// (`DeviceKeys`, private database of `iCloud.dev.v57.sh`), created
+/// unconditionally (loads as a local store without an account, syncs when
+/// one appears), no push — changes arrive at launch/activation.
+@MainActor
+@Observable
+final class DeviceKeyStore {
+  /// All published device keys, newest first.
+  private(set) var all: [DeviceKeyRecord] = []
+  /// The most recent publish/read failure (nil when fine).
+  var storageError: String?
+
+  private let context: ModelContext
+
+  // MARK: Test seam — the device key normally comes from the Secure
+  // Enclave keychain; tests inject a generator.
+  var defaultKeyProvider: () throws -> SecureEnclave.P256.Signing.PrivateKey = {
+    try SSHKeychain.loadOrCreateDefaultKey()
+  }
+  /// The device's display name (comment in the published key line).
+  var deviceNameProvider: () -> String = {
+    #if os(macOS)
+    Host.current().localizedName ?? "Mac"
+    #else
+    UIDevice.current.name
+    #endif
+  }
+
+  init(
+    container: ModelContainer? = nil,
+    defaultKeyProvider: (() throws -> SecureEnclave.P256.Signing.PrivateKey)? = nil
+  ) {
+    // The CloudKit schema (all models) must be initialized before ANY
+    // CloudKit-configured store opens. Idempotent; DEBUG-only.
+    NoteStores.initializeCloudKitSchemaForDevelopment()
+    let resolved: ModelContainer
+    if let container {
+      resolved = container
+    } else if let made = try? DeviceKeyStore.makeContainer() {
+      resolved = made
+    } else {
+      // CloudKit setup failed — degrade to a plain local store rather
+      // than crash.
+      resolved = try! ModelContainer(
+        for: DeviceKeyRecord.self,
+        configurations: ModelConfiguration("DeviceKeys", cloudKitDatabase: .none)
+      )
+    }
+    context = resolved.mainContext
+    if let defaultKeyProvider { self.defaultKeyProvider = defaultKeyProvider }
+    reload()
+  }
+
+  /// The synced store (works as a local-only store without an account).
+  /// Shares SSHConfigStore's container — one store for both models keeps
+  /// the process's SwiftData container count low (see SSHConfigStore).
+  static func makeContainer() throws -> ModelContainer {
+    try SSHConfigStore.makeContainer()
+  }
+
+  /// Hermetic test container: plain SQLite in a temp directory. Unique
+  /// config name so it never collides with the app's real store.
+  static func makeTestContainer(in directory: URL) throws -> ModelContainer {
+    try ModelContainer(
+      for: DeviceKeyRecord.self,
+      configurations: ModelConfiguration(
+        "DeviceKeysTests",
+        url: directory.appendingPathComponent("device-keys.store"),
+        cloudKitDatabase: .none
+      )
+    )
+  }
+
+  // MARK: - Publishing
+
+  /// Publishes this device's identity key: upserts one record keyed by
+  /// fingerprint (the key material IS the device identity), leaving other
+  /// devices' records untouched. Fails silently when the Secure Enclave
+  /// key isn't reachable (locked screen) — retried on panel open.
+  @discardableResult
+  func publishThisDevice() -> Bool {
+    do {
+      let key = try defaultKeyProvider()
+      let fingerprint = SSHKeychain.publicKeyFingerprint(for: key)
+      let comment = "Shell (\(NSUserName())@\(deviceNameProvider()))"
+      let line = SSHKeychain.publicKeyOpenSSHLine(for: key, comment: comment)
+      if let record = fetch(byFingerprint: fingerprint) {
+        record.keyLine = line
+        record.deviceName = deviceNameProvider()
+        record.updatedAt = Date()
+      } else {
+        context.insert(DeviceKeyRecord(
+          fingerprint: fingerprint,
+          keyLine: line,
+          deviceName: deviceNameProvider(),
+          updatedAt: Date()
+        ))
+      }
+      try context.save()
+      storageError = nil
+      reload()
+      return true
+    } catch {
+      storageError = error.localizedDescription
+      NSLog("DeviceKeyStore: could not publish this device's key: \(error)")
+      return false
+    }
+  }
+
+  /// Re-fetches — the no-push sync trigger (scene activation).
+  func refreshOnActivation() {
+    reload()
+  }
+
+  // MARK: - Store access
+
+  private func reload() {
+    let records = (try? context.fetch(
+      FetchDescriptor<DeviceKeyRecord>(sortBy: [SortDescriptor(\.updatedAt, order: .reverse)])
+    )) ?? []
+    all = records
+  }
+
+  private func fetch(byFingerprint fingerprint: String) -> DeviceKeyRecord? {
+    // Plain fetch + Swift filter (see SSHConfigStore.fetch — bounded list,
+    // avoids SwiftData's predicate machinery in the hosted runner).
+    let records = (try? context.fetch(FetchDescriptor<DeviceKeyRecord>())) ?? []
+    return records.first { $0.fingerprint == fingerprint }
+  }
+}

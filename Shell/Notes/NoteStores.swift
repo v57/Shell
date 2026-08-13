@@ -85,7 +85,7 @@ struct NoteStores {
           containerIdentifier: "iCloud.dev.v57.sh"
         )
         description.shouldAddStoreAsynchronously = false
-        guard let model = NSManagedObjectModel.makeManagedObjectModel(for: [NoteRecord.self, SSHConfigRecord.self]) else { return }
+        guard let model = NSManagedObjectModel.makeManagedObjectModel(for: [NoteRecord.self, SSHConfigRecord.self, DeviceKeyRecord.self]) else { return }
         let container = NSPersistentCloudKitContainer(name: "CloudNotes", managedObjectModel: model)
         container.persistentStoreDescriptions = [description]
         container.loadPersistentStores { _, error in

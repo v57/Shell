@@ -5,6 +5,7 @@ import UIKit
 #endif
 import Crypto
 import Foundation
+import SwiftData
 import SwiftUI
 import Terminal
 
@@ -83,13 +84,43 @@ final class AppModel {
     showingNewAction = true
   }
   
-  private let connectionStore = SSHConfigStore()
+  private let connectionStore: SSHConfigStore
   /// Observable source of truth for saved SSH rows. Computed from the
   /// store so saves/reloads (including iCloud sync refreshes) flow through
   /// Observation automatically.
   var connections: [SSHConfig] { connectionStore.all }
-  
+
+  /// The iCloud registry of every device's public key (this device
+  /// publishes on launch; other devices' keys power the authorized-keys
+  /// panel).
+  var deviceKeys: DeviceKeyStore
+  /// The authorized-keys panel (key.2.on.ring button in the sidebar).
+  var showingAuthorizedKeys = false
+  var authorizedKeysTarget: AuthorizedKeysManager.Target?
+  /// Message when the panel can't be opened (e.g. no SSH connections).
+  var authorizedKeysError: String?
+
+  /// ONE container for both the SSH-config and device-key stores (the
+  /// SwiftData hosted-runner instability scales with container churn, so
+  /// the app deliberately keeps the container count low). Falls back to a
+  /// plain local store when CloudKit setup fails.
+  private static let sharedSSHContainer: ModelContainer = {
+    (try? SSHConfigStore.makeContainer()) ?? {
+      // swiftlint:disable:next force_try
+      try! ModelContainer(
+        for: SSHConfigRecord.self, DeviceKeyRecord.self,
+        configurations: ModelConfiguration("SSHConfigs", cloudKitDatabase: .none)
+      )
+    }()
+  }()
+
   private init() {
+    connectionStore = SSHConfigStore(container: Self.sharedSSHContainer)
+    deviceKeys = DeviceKeyStore(container: Self.sharedSSHContainer)
+    // Publish this device's identity key to iCloud (no-op when the Secure
+    // Enclave key is unreachable, e.g. locked screen — retried when the
+    // authorized-keys panel opens).
+    deviceKeys.publishThisDevice()
     #if os(macOS)
     // Start with a local terminal so the window is never empty. iOS has no
     // local terminals — it starts with just the sidebar (SSH + notes).
@@ -403,7 +434,7 @@ final class AppModel {
   // MARK: - Public keys
   
   /// The Secure Enclave key for an identity (creates it on first use).
-  private func key(for identity: SSHKeychain.Identity) throws -> SecureEnclave.P256.Signing.PrivateKey {
+  func key(for identity: SSHKeychain.Identity) throws -> SecureEnclave.P256.Signing.PrivateKey {
     switch identity {
     case .default:
       return try SSHKeychain.loadOrCreateDefaultKey()
@@ -638,11 +669,35 @@ final class AppModel {
     connectionStore.reorder(reordered)
   }
 
+  // MARK: - Authorized keys
+
+  /// Opens the authorized-keys panel for a target machine.
+  func showAuthorizedKeys(for target: AuthorizedKeysManager.Target) {
+    authorizedKeysTarget = target
+    showingAuthorizedKeys = true
+  }
+
+  /// The Local section's key-ring button: this Mac's authorized_keys.
+  func openLocalAuthorizedKeys() {
+    showAuthorizedKeys(for: .local)
+  }
+
+  /// The Remote section's key-ring button: the selected SSH connection's
+  /// authorized_keys (falls back to the first saved connection).
+  func openRemoteAuthorizedKeys() {
+    guard let config = connections.first(where: { $0.id == selection }) ?? connections.first else {
+      authorizedKeysError = "Add an SSH connection first, then manage its authorized keys."
+      return
+    }
+    showAuthorizedKeys(for: .ssh(config))
+  }
+
   /// Sync trigger for the no-push stores (notes + SSH configs): re-fetch
   /// whatever CloudKit pulled while the app ran. Called when the scene
   /// becomes active; the launch-time activation is skipped in ContentView.
   func refreshOnActivation() {
     notes.refreshOnActivation()
     connectionStore.refreshOnActivation()
+    deviceKeys.refreshOnActivation()
   }
 }

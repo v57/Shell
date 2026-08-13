@@ -85,6 +85,11 @@ struct SidebarView: View {
           .buttonStyle(.borderless)
           .help(model.historyMode ? "Show local terminals" : "Show local history")
           Button {
+            model.openLocalAuthorizedKeys()
+          } label: {
+            Image(systemName: "key.2.on.ring")
+          }.buttonStyle(.borderless).help("Manage this Mac's authorized keys")
+          Button {
             model.addLocalTerminal()
           } label: {
             Image(systemName: "plus")
@@ -153,6 +158,11 @@ struct SidebarView: View {
           Text("Remote")
           Spacer()
           Button {
+            model.openRemoteAuthorizedKeys()
+          } label: {
+            Image(systemName: "key.2.on.ring")
+          }.buttonStyle(.borderless).help("Manage the selected connection's authorized keys")
+          Button {
             model.showingNewConnection = true
           } label: {
             Image(systemName: "plus")
@@ -219,6 +229,22 @@ struct SidebarView: View {
       )
     }
     #endif
+    // The authorized-keys panel (key.2.on.ring in the Local/Remote
+    // headers); opens for this Mac or the selected SSH connection.
+    .sheet(isPresented: $model.showingAuthorizedKeys) {
+      if let target = model.authorizedKeysTarget {
+        AuthorizedKeysView(target: target)
+          .environment(model)
+      }
+    }
+    .alert("Authorized Keys", isPresented: Binding(
+      get: { model.authorizedKeysError != nil },
+      set: { if !$0 { model.authorizedKeysError = nil } }
+    )) {
+      Button("OK", role: .cancel) { model.authorizedKeysError = nil }
+    } message: {
+      Text(model.authorizedKeysError ?? "")
+    }
   }
   
   /// True while an action session can still be interrupted (its process

@@ -47,7 +47,7 @@ struct NoteModelTests {
   /// CloudKit bans unique constraints and non-optional attributes. This test
   /// fails the build if the schema drifts.
   @Test @MainActor func noteSchemaStaysCloudKitCompatible() throws {
-    for model in [NoteRecord.self, SSHConfigRecord.self] as [any PersistentModel.Type] {
+    for model in [NoteRecord.self, SSHConfigRecord.self, DeviceKeyRecord.self] as [any PersistentModel.Type] {
       let schema = Schema(model)
       #expect(schema.entities.count == 1)
       let attributes = schema.entities[0].attributes
@@ -66,5 +66,7 @@ struct NoteModelTests {
     #expect(noteNames == ["id", "lastUpdate", "keyId", "titleCipher", "subtitleCipher", "contentCipher"])
     let sshNames = Set(Schema(SSHConfigRecord.self).entities[0].attributes.map { $0.name })
     #expect(sshNames == ["id", "order", "keyId", "updatedAt", "payloadCipher"])
+    let deviceKeyNames = Set(Schema(DeviceKeyRecord.self).entities[0].attributes.map { $0.name })
+    #expect(deviceKeyNames == ["id", "fingerprint", "keyLine", "deviceName", "updatedAt"])
   }
 }

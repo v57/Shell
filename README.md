@@ -5,6 +5,9 @@ Modern terminal for your needs. Pure SwiftUI, no electron-type bullshit
 - Persistent sessions using `screen` or `tmux`
 - Built in SSH, keys stored in secure enclave, saved connections synced
   through iCloud (encrypted)
+- Authorized-keys manager: add or remove keys on any server's
+  `~/.ssh/authorized_keys` (local or over SSH), with every device's public
+  key published through iCloud
 - Device-bound encrypted quick notes (per-note iCloud option: a note can
   live in iCloud, synced via SwiftData/CloudKit and encrypted with a key
   stored in iCloud Keychain)
@@ -58,6 +61,19 @@ Saved PASSWORDS never sync: they stay in the device Keychain, so a synced
 connection keeps its auth method but needs the password entered once on
 each device. Configs saved by the old UserDefaults store are imported once
 on first launch.
+
+## Authorized keys
+The `key.2.on.ring` button (Local and Remote sidebar headers, before the +
+button) opens the authorized-keys panel for a target machine — this Mac
+(direct file access) or the selected SSH connection (headless SSH exec,
+saved password used automatically, host key trusted on first use).
+
+Every device publishes its Secure Enclave identity key's public line to
+iCloud (`DeviceKeyRecord`, plaintext by design — public keys are meant to
+be shared; same CloudKit store, same no-push sync). The panel lists this
+device's keys plus every other device's published keys, each with its
+status on the target's `~/.ssh/authorized_keys`: added keys can be
+removed, keys not yet added can be added — one click each.
 
 ## Use as library
 **Local terminal (forkpty, macOS only):** use the `LocalPTYTransport`
