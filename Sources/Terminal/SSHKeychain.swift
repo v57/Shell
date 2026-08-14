@@ -11,28 +11,17 @@ import Security
 /// `dataRepresentation` blob touches the Keychain (as a generic password),
 /// and only the public key can be exported.
 ///
-/// Note on the "sensitive" key: Touch ID per-sign gating (userPresence ACL)
-/// is NOT used. Spikes proved the ACL cannot be satisfied by NIOSSH's
-/// signing path on this OS (-1009 regardless of thread/context/signature),
-/// so the sensitive key is a separate Secure Enclave keypair instead — a
-/// distinct public key that can be installed only on sensitive hosts.
+/// Note on per-sign gating: Touch ID gating (userPresence ACL) is NOT
+/// used. Spikes proved the ACL cannot be satisfied by NIOSSH's signing
+/// path on this OS (-1009 regardless of thread/context/signature), so
+/// the app uses a single Secure Enclave identity key instead.
 ///
 /// Marked `nonisolated`: all operations are stateless Security-framework
 /// calls safe to run off the main actor (e.g. from SSH auth callbacks).
 public nonisolated enum SSHKeychain {
-  /// Which Secure Enclave identity to use.
-  public enum Identity {
-    /// The app's main SSH key.
-    case `default`
-    /// The separate key used by sensitive connections.
-    case sensitive
-  }
-  
   public static let service = "dev.v57.sh"
-  /// The app's main SSH identity (Secure Enclave P-256).
+  /// The app's SSH identity (Secure Enclave P-256).
   public static let defaultKeyAccount = "ssh-sep-key"
-  /// A second, separate Secure Enclave key for sensitive connections.
-  public static let sensitiveKeyAccount = "ssh-sep-key-sensitive"
   
   public enum KeychainError: LocalizedError {
     case keychainAddFailed(OSStatus)
@@ -53,20 +42,11 @@ public nonisolated enum SSHKeychain {
   
   // MARK: - Identity keys (Secure Enclave)
   
-  /// Returns the app's main Secure Enclave key, creating it on first use.
+  /// Returns the app's Secure Enclave key, creating it on first use.
   public static func loadOrCreateDefaultKey() throws -> SecureEnclave.P256.Signing.PrivateKey {
     try loadOrCreateKey(
       account: defaultKeyAccount,
       label: "Shell SSH key (Secure Enclave P-256)"
-    )
-  }
-  
-  /// Returns the separate Secure Enclave key for sensitive connections,
-  /// creating it lazily on first use.
-  public static func loadOrCreateSensitiveKey() throws -> SecureEnclave.P256.Signing.PrivateKey {
-    try loadOrCreateKey(
-      account: sensitiveKeyAccount,
-      label: "Shell SSH sensitive key (Secure Enclave P-256)"
     )
   }
   

@@ -132,17 +132,17 @@ struct TerminalParserTests {
     #expect(s.scrollback.isEmpty)
   }
 
-  @Test func sshConfigDecodesMissingNewFields() throws {
-    // Configs saved before `useSensitiveKey` existed have no such key;
-    // decodeIfPresent must fall back to the default (pitfall: the
-    // synthesized decoder throws keyNotFound and empties the whole list).
+  @Test func sshConfigIgnoresRemovedLegacyFields() throws {
+    // Configs saved while `useSensitiveKey` existed carry that key; the
+    // synthesized decoder must ignore unknown keys (pitfall: a custom
+    // decoder that throws keyNotFound empties the whole list).
     let json = """
-    [{"id":"6D28B4C5-2F7A-4E3B-9C1D-0A5B8E6F2C41","name":"box","host":"example.com","user":"me","port":22,"authMethod":"keychainKey","savePassword":true}]
+    [{"id":"6D28B4C5-2F7A-4E3B-9C1D-0A5B8E6F2C41","name":"box","host":"example.com","user":"me","port":22,"authMethod":"keychainKey","savePassword":true,"useSensitiveKey":true}]
     """
     let configs = try JSONDecoder().decode([SSHConfig].self, from: Data(json.utf8))
     #expect(configs.count == 1)
     #expect(configs[0].host == "example.com")
-    #expect(configs[0].useSensitiveKey == false)
+    #expect(configs[0].displayName == "box")
   }
 
   @Test func fullPlainTextUsesScrollbackButAlternateScreenResetsIt() {

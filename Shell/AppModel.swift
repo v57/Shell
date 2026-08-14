@@ -466,21 +466,11 @@ final class AppModel {
   
   // MARK: - Public keys
   
-  /// The Secure Enclave key for an identity (creates it on first use).
-  func key(for identity: SSHKeychain.Identity) throws -> SecureEnclave.P256.Signing.PrivateKey {
-    switch identity {
-    case .default:
-      return try SSHKeychain.loadOrCreateDefaultKey()
-    case .sensitive:
-      return try SSHKeychain.loadOrCreateSensitiveKey()
-    }
-  }
-  
-  /// Copies a Secure Enclave key's public key (OpenSSH authorized_keys
+  /// Copies the Secure Enclave key's public key (OpenSSH authorized_keys
   /// line) to the pasteboard. Generates the key on first use.
-  func copyPublicKey(_ identity: SSHKeychain.Identity = .default) {
+  func copyPublicKey() {
     do {
-      let key = try key(for: identity)
+      let key = try SSHKeychain.loadOrCreateDefaultKey()
       #if os(macOS)
       let host = Host.current().localizedName ?? "Mac"
       #else
@@ -500,8 +490,8 @@ final class AppModel {
     }
   }
   
-  func publicKeyFingerprint(for identity: SSHKeychain.Identity = .default) -> String? {
-    guard let key = try? key(for: identity) else { return nil }
+  func publicKeyFingerprint() -> String? {
+    guard let key = try? SSHKeychain.loadOrCreateDefaultKey() else { return nil }
     return SSHKeychain.publicKeyFingerprint(for: key)
   }
   

@@ -4,7 +4,7 @@ import Terminal
 /// The authorized-keys panel (opened by the `key.2.on.ring` button in the
 /// Local and Remote sidebar headers).
 ///
-/// Shows this device's Secure Enclave keys and every other device's keys
+/// Shows this device's Secure Enclave key and every other device's keys
 /// published through iCloud, each with its status on the target machine's
 /// `~/.ssh/authorized_keys` (local file or remote via SSH). Added keys can
 /// be removed; keys not yet added can be added — one click each.
@@ -94,22 +94,20 @@ struct AuthorizedKeysView: View {
     // (and freshens the record after a long time away).
     model.deviceKeys.publishThisDevice()
 
-    // This device's keys (Secure Enclave).
+    // This device's key (Secure Enclave).
     var deviceEntries: [AuthorizedKeysManager.KeyEntry] = []
-    for identity in [SSHKeychain.Identity.default, .sensitive] {
-      if let key = try? model.key(for: identity) {
-        let fingerprint = SSHKeychain.publicKeyFingerprint(for: key)
-        let comment = "Shell (\(NSUserName())@\(Self.deviceName))"
-        let line = SSHKeychain.publicKeyOpenSSHLine(for: key, comment: comment)
-        deviceEntries.append(AuthorizedKeysManager.KeyEntry(
-          keyMaterial: String(line.split(separator: " ").prefix(2).joined(separator: " ")),
-          fullLine: line,
-          displayName: identity == .default ? "Default key" : "Sensitive key",
-          fingerprint: fingerprint,
-          source: .device,
-          added: false
-        ))
-      }
+    if let key = try? SSHKeychain.loadOrCreateDefaultKey() {
+      let fingerprint = SSHKeychain.publicKeyFingerprint(for: key)
+      let comment = "Shell (\(NSUserName())@\(Self.deviceName))"
+      let line = SSHKeychain.publicKeyOpenSSHLine(for: key, comment: comment)
+      deviceEntries.append(AuthorizedKeysManager.KeyEntry(
+        keyMaterial: String(line.split(separator: " ").prefix(2).joined(separator: " ")),
+        fullLine: line,
+        displayName: "Default key",
+        fingerprint: fingerprint,
+        source: .device,
+        added: false
+      ))
     }
 
     // iCloud keys from OTHER devices (this device's own fingerprint is

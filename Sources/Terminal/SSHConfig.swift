@@ -29,10 +29,6 @@ public struct SSHConfig: Identifiable, Codable, Hashable {
   public var port: Int
   public var authMethod: AuthMethod
   public var savePassword: Bool
-  /// Uses the separate "sensitive" Secure Enclave key instead of the
-  /// main identity key. Defaults to false for existing saved configs
-  /// (Codable falls back to the default when the key is missing).
-  public var useSensitiveKey: Bool
   
   public init(
     id: UUID = UUID(),
@@ -41,8 +37,7 @@ public struct SSHConfig: Identifiable, Codable, Hashable {
     user: String = NSUserName(),
     port: Int = 22,
     authMethod: AuthMethod = .keychainKey,
-    savePassword: Bool = true,
-    useSensitiveKey: Bool = false
+    savePassword: Bool = true
   ) {
     self.id = id
     self.name = name
@@ -51,7 +46,6 @@ public struct SSHConfig: Identifiable, Codable, Hashable {
     self.port = port
     self.authMethod = authMethod
     self.savePassword = savePassword
-    self.useSensitiveKey = useSensitiveKey
   }
   
   /// Name if given, otherwise user@host.
@@ -62,24 +56,8 @@ public struct SSHConfig: Identifiable, Codable, Hashable {
     return user.isEmpty ? host : "\(user)@\(host)"
   }
   
-  /// Backward-compatible decode: configs saved before `useSensitiveKey`
-  /// existed have no such key — decodeIfPresent keeps them loadable
-  /// (the synthesized decoder throws keyNotFound instead).
-  public init(from decoder: Decoder) throws {
-    let c = try decoder.container(keyedBy: CodingKeys.self)
-    id = try c.decode(UUID.self, forKey: .id)
-    name = try c.decode(String.self, forKey: .name)
-    host = try c.decode(String.self, forKey: .host)
-    user = try c.decode(String.self, forKey: .user)
-    port = try c.decode(Int.self, forKey: .port)
-    authMethod = try c.decode(AuthMethod.self, forKey: .authMethod)
-    savePassword = try c.decode(Bool.self, forKey: .savePassword)
-    useSensitiveKey = try c.decodeIfPresent(Bool.self, forKey: .useSensitiveKey) ?? false
-  }
-  
   /// Keychain account used for this connection's saved password.
   public var passwordAccount: String {
     "ssh-password-\(id.uuidString)"
   }
 }
-

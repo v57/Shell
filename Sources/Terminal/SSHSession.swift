@@ -34,13 +34,7 @@ public final class SSHSession: TerminalTransport {
     started = true
 
     // The identity key lives in the Secure Enclave; it never touches disk.
-    // Sensitive connections use the separate sensitive key.
-    let key: SecureEnclave.P256.Signing.PrivateKey?
-    if config.useSensitiveKey {
-      key = try? SSHKeychain.loadOrCreateSensitiveKey()
-    } else {
-      key = try? SSHKeychain.loadOrCreateDefaultKey()
-    }
+    let key = try? SSHKeychain.loadOrCreateDefaultKey()
     let engine = SSHConnectionEngine(config: config, privateKey: key, execCommand: execCommand)
 
     engine.onOutput = { [weak self] data in

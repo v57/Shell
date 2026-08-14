@@ -160,4 +160,4 @@ final class SerialTransport: TerminalTransport {
 - SSH identity keys are Secure Enclave P-256 keys: device-bound, no export, no backup — install their public keys (`⌘⇧C`) on the servers you connect to.
 - Notes and local history use domain-separated AES-256-GCM keys derived through a device-bound Secure Enclave P-256 agreement key. They are available only while the device is unlocked.
 - Run a normally code-signed build: the data-protection Keychain requires Shell's Keychain Sharing entitlement, so an app built with `CODE_SIGNING_ALLOWED=NO` cannot save encrypted notes or history.
-- Touch ID per-sign gating is intentionally not used (the Secure Enclave ACL can't be satisfied by swift-nio-ssh's signing path on this OS); the "sensitive" tier is a second, separate key instead.
+- Touch ID per-sign gating is intentionally not used (the Secure Enclave ACL can't be satisfied by swift-nio-ssh's signing path on this OS); a single Secure Enclave identity key is used instead.

@@ -595,7 +595,6 @@ struct NewConnectionView: View {
   @State private var authMethod = SSHConfig.AuthMethod.keychainKey
   @State private var password = ""
   @State private var savePassword = true
-  @State private var useSensitiveKey = false
   @State private var keyError: String?
   
   private var canConnect: Bool {
@@ -628,37 +627,22 @@ struct NewConnectionView: View {
               .textContentType(.password)
             Toggle("Save in Keychain", isOn: $savePassword)
           }
-          if authMethod == .keychainKey {
-            Toggle("Use separate sensitive key", isOn: $useSensitiveKey)
-          }
         }
         
         if authMethod == .keychainKey {
           Section {
             KeyRow(
               label: "Default key",
-              fingerprint: model.publicKeyFingerprint(for: .default),
+              fingerprint: model.publicKeyFingerprint(),
               onCopy: {
-                model.copyPublicKey(.default)
+                model.copyPublicKey()
                 keyError = model.publicKeyError
               }
             )
-            if useSensitiveKey {
-              KeyRow(
-                label: "Sensitive key",
-                fingerprint: model.publicKeyFingerprint(for: .sensitive),
-                onCopy: {
-                  model.copyPublicKey(.sensitive)
-                  keyError = model.publicKeyError
-                }
-              )
-            }
           } header: {
             Text("SSH key")
           } footer: {
-            Text(useSensitiveKey
-              ? "Add the sensitive key to the server's ~/.ssh/authorized_keys. It is a separate Secure Enclave key, installed only on hosts you mark sensitive."
-              : "Add this key to the server's ~/.ssh/authorized_keys to use key authentication.")
+            Text("Add this key to the server's ~/.ssh/authorized_keys to use key authentication.")
           }
         }
       }
@@ -693,8 +677,7 @@ struct NewConnectionView: View {
       user: user.trimmingCharacters(in: .whitespaces),
       port: port,
       authMethod: authMethod,
-      savePassword: savePassword,
-      useSensitiveKey: useSensitiveKey
+      savePassword: savePassword
     )
     if authMethod == .password {
       if savePassword {
