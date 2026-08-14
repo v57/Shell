@@ -605,68 +605,63 @@ struct NewConnectionView: View {
   }
   
   var body: some View {
-    VStack(spacing: 0) {
-      Form {
-        Section("Connection") {
-          TextField("Name (optional)", text: $name)
-          TextField("Host", text: $host)
-            .textContentType(.URL)
-          TextField("User", text: $user)
-            .textContentType(.username)
-          TextField("Port", value: $port, format: .number)
-        }
-        
-        Section("Authentication") {
-          Picker("Method", selection: $authMethod) {
-            ForEach(SSHConfig.AuthMethod.allCases) { method in
-              Text(method.label).tag(method)
+    NavigationStack {
+      VStack(spacing: 0) {
+        Form {
+          Section {
+            TextField("Host", text: $host).textContentType(.URL)
+            TextField("User", text: $user).textContentType(.username)
+            TextField("Name \(host)", text: $name)
+            TextField("Port", value: $port, format: .number)
+          }
+          
+          Section("Authentication") {
+            Picker("Method", selection: $authMethod) {
+              ForEach(SSHConfig.AuthMethod.allCases) { method in
+                Text(method.label).tag(method)
+              }
+            }
+            if authMethod == .password {
+              SecureField("Password", text: $password)
+                .textContentType(.password)
+              Toggle("Save in Keychain", isOn: $savePassword)
             }
           }
-          if authMethod == .password {
-            SecureField("Password", text: $password)
-              .textContentType(.password)
-            Toggle("Save in Keychain", isOn: $savePassword)
+          
+          if authMethod == .keychainKey {
+            Section {
+              KeyRow(
+                label: "Default key",
+                fingerprint: model.publicKeyFingerprint(),
+                onCopy: {
+                  model.copyPublicKey()
+                  keyError = model.publicKeyError
+                }
+              )
+            } header: {
+              Text("SSH key")
+            } footer: {
+              Text("Add this key to the server's ~/.ssh/authorized_keys to use key authentication.")
+            }
           }
+        }.formStyle(.grouped)
+      }.toolbar {
+        ToolbarItem(placement: .confirmationAction) {
+          Button("Connect", systemImage: "checkmark") {
+            connect()
+          }.keyboardShortcut(.defaultAction).disabled(!canConnect)
         }
-        
-        if authMethod == .keychainKey {
-          Section {
-            KeyRow(
-              label: "Default key",
-              fingerprint: model.publicKeyFingerprint(),
-              onCopy: {
-                model.copyPublicKey()
-                keyError = model.publicKeyError
-              }
-            )
-          } header: {
-            Text("SSH key")
-          } footer: {
-            Text("Add this key to the server's ~/.ssh/authorized_keys to use key authentication.")
-          }
-        }
-      }
-      .formStyle(.grouped)
-      
-      HStack {
-        Spacer()
-        Button("Cancel") { dismiss() }
-        Button("Connect") {
-          connect()
-        }
-        .keyboardShortcut(.defaultAction)
-        .disabled(!canConnect)
-      }
-      .padding()
-    }
-    .frame(width: 420, height: 430)
-    .alert("Could not copy public key", isPresented: Binding(
-      get: { keyError != nil },
-      set: { if !$0 { keyError = nil } }
-    )) {
-      Button("OK", role: .cancel) {}
-    } message: {
-      Text(keyError ?? "")
+      }.alert("Could not copy public key", isPresented: Binding(
+        get: { keyError != nil },
+        set: { if !$0 { keyError = nil } }
+      )) {
+        Button("OK", role: .cancel) {}
+      } message: {
+        Text(keyError ?? "")
+      }.navigationTitle("New Connection")
+#if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+#endif
     }
   }
   
