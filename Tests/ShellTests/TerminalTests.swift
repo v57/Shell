@@ -75,6 +75,32 @@ struct TerminalParserTests {
     #expect(s.totalLines == s.rows)
   }
 
+  @Test func cleanStdoutKeepsCurrentLine() {
+    let p = parser()
+    p.resize(columns: 20, rows: 3)
+    // Output fills the screen, one LF scrolls "one" into the scrollback.
+    p.consume(Data("one\ntwo\nthree".utf8))
+    p.consume(Data("\n".utf8))
+    // A fresh prompt on the bottom line (the cursor row).
+    p.consume(Data("\rprompt$".utf8))
+    let before = p.snapshot()
+    #expect(before.scrollback.count == 1)
+    #expect(before.cursor == TerminalCursor(row: 2, column: 7))
+
+    p.clearStdout()
+
+    let s = p.snapshot()
+    // Scrollback wiped, the prompt line survives, the rest is blank.
+    #expect(s.scrollback.isEmpty)
+    #expect(s.cell(atRow: 2, column: 0).character == "p")
+    #expect(s.cell(atRow: 0, column: 0).character == " ")
+    #expect(s.cell(atRow: 1, column: 0).character == " ")
+    // Cursor stays where the shell's line editor thinks it is.
+    #expect(s.cursor == before.cursor)
+    // Content was wholesale invalidated: stale selections are dropped.
+    #expect(s.selectionEpoch == before.selectionEpoch + 1)
+  }
+
   @Test func deviceAttributesResponse() {
     var responses: [String] = []
     let p = parser { responses.append($0) }

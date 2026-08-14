@@ -54,6 +54,14 @@ public final class TerminalOutputParser {
       selectionEpoch: selectionEpoch
     )
   }
+
+  /// Cmd+K "clean stdout": erase the scrollback and every row except the
+  /// cursor's, keeping the current prompt line. Bumps the selection epoch
+  /// so any selection (now pointing at erased content) is dropped.
+  func clearStdout() {
+    mutateActiveGrid { $0.clearStdout() }
+    selectionEpoch += 1
+  }
   
   var activeGrid: TerminalGrid {
     usingAlternateScreen ? alternateGrid : grid
@@ -585,6 +593,19 @@ struct TerminalGrid {
       cells[index] = erasedCell()
     }
     cursor = .zero
+  }
+
+  /// Cmd+K "clean stdout": erase the scrollback and every row except the
+  /// cursor's, keeping the prompt line and the cursor position untouched.
+  /// The shell's line editor model of the screen stays valid (only rows it
+  /// never redraws are blanked), so no escape sequence needs to go to the
+  /// shell.
+  mutating func clearStdout() {
+    scrollback.removeAll()
+    let keepRow = cursor.row
+    for row in 0..<rows where row != keepRow {
+      eraseRow(row)
+    }
   }
   
   mutating func eraseDisplay(mode: Int) {

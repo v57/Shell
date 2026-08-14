@@ -158,6 +158,8 @@ public final class TerminalSession: Identifiable {
         } else {
           copyVisibleBuffer()
         }
+      case "k":
+        clearStdout()
       default:
         break
       }
@@ -183,6 +185,19 @@ public final class TerminalSession: Identifiable {
       }
       send(bytes)
     }
+  }
+
+  /// Cmd+K "clean stdout": erase the scrollback and every row except the
+  /// cursor's (the current prompt line survives), drop any selection, and
+  /// publish the refreshed snapshot. Local-only — nothing is sent to the
+  /// shell, so its line editor keeps the cursor exactly where it was.
+  public func clearStdout() {
+    parser.clearStdout()
+    selectionStart = nil
+    selectionEnd = nil
+    scrollbackOffset = 0
+    snapshot = parser.snapshot()
+    snapshotUpdateHandler?(snapshot)
   }
 
   public func paste(_ string: String) {

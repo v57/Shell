@@ -569,6 +569,13 @@ public struct TerminalScreenView: View {
     guard press.phase == .down || press.phase == .repeat else { return .ignored }
 
     let flags = Self.nsFlags(from: press.modifiers)
+    // Cmd+K: clean stdout — the scrollback is wiped, so the viewport must
+    // snap to the (new) bottom too.
+    if flags.contains(.command), press.key.character.lowercased() == "k" {
+      session.clearStdout()
+      snapToBottom()
+      return .handled
+    }
     if !flags.contains(.command) {
       // Typing clears the selection and snaps back to the bottom.
       session.selectionStart = nil
