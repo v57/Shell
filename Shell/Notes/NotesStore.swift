@@ -64,28 +64,14 @@ final class NotesStore {
   private var pendingText: [UUID: String] = [:]
   private var decryptionCache: [UUID: DecryptedContents] = [:]
 
-  init(stores: NoteStores? = nil) {
-    let resolved: NoteStores
-    if let stores {
-      resolved = stores
-    } else if let made = try? NoteStores.make() {
-      resolved = made
-    } else {
-      // CloudKit/store setup failed — degrade to a local-only store rather
-      // than crash. The plain SQLite local store is effectively infallible.
-      let local = try! ModelContainer(
-        for: NoteRecord.self,
-        configurations: ModelConfiguration("LocalNotes", cloudKitDatabase: .none)
-      )
-      resolved = NoteStores(local: local, cloud: nil)
-    }
-    // The CloudKit schema must be initialized BEFORE SwiftData opens the
-    // synced store (DEBUG builds only).
-    if stores == nil {
-      NoteStores.initializeCloudKitSchemaForDevelopment()
-    }
-    localContext = resolved.local.mainContext
-    cloudContext = resolved.cloud?.mainContext
+  /// - Parameter stores: the pre-built containers. Production callers get
+  ///   them from `NoteStores.make()`; tests from `NoteStores.makeTest()`.
+  ///   Containers MUST be created outside this init — a container created
+  ///   inside an @Observable init traps (SIGTRAP, `brk #0x1` ×2) on its
+  ///   first insert, so the old `NotesStore()` nil-branch is gone.
+  init(stores: NoteStores) {
+    localContext = stores.local.mainContext
+    cloudContext = stores.cloud?.mainContext
     reload()
   }
 

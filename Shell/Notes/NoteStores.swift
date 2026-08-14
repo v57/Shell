@@ -15,31 +15,44 @@ struct NoteStores {
   let local: ModelContainer
   let cloud: ModelContainer?
 
-  /// Production containers. The cloud store is only created when the
-  /// iCloud account is available (same probe the old file store used).
+  /// Production containers. The cloud store is created UNCONDITIONALLY:
+  /// real CloudKit when the iCloud account is available, a plain local
+  /// store otherwise. NEVER nil — a `NotesStore` whose cloud context is
+  /// nil traps inside SwiftData on the first local insert (silent
+  /// EXC_BREAKPOINT; reproduced Aug 2026 — inserts only work when a
+  /// sibling cloud context exists in the same store).
+  ///
+  /// MUST be called OUTSIDE any `@Observable` class init (e.g. from a
+  /// `static let` closure): containers created inside an @Observable init
+  /// (the old `NotesStore()` nil-branch) SIGTRAP on their first insert —
+  /// see the note-insert SIGTRAP reference.
   static func make() throws -> NoteStores {
-    let localConfig = ModelConfiguration(
-      "LocalNotes",
-      cloudKitDatabase: .none
-    )
+    let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+      .appendingPathComponent(Bundle.main.bundleIdentifier ?? "Shell", isDirectory: true)
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     let local = try ModelContainer(
       for: NoteRecord.self,
-      configurations: localConfig
+      configurations: ModelConfiguration(
+        "LocalNotes",
+        url: dir.appendingPathComponent("LocalNotes.store"),
+        cloudKitDatabase: .none
+      )
     )
-
-    let cloud: ModelContainer?
+    let cloudConfig: ModelConfiguration
     if NotesStore.iCloudContainerURL() != nil {
-      let cloudConfig = ModelConfiguration(
+      cloudConfig = ModelConfiguration(
         "CloudNotes",
+        url: dir.appendingPathComponent("CloudNotes.store"),
         cloudKitDatabase: .private("iCloud.dev.v57.sh")
       )
-      cloud = try ModelContainer(
-        for: NoteRecord.self,
-        configurations: cloudConfig
-      )
     } else {
-      cloud = nil
+      cloudConfig = ModelConfiguration(
+        "CloudNotes",
+        url: dir.appendingPathComponent("CloudNotes.store"),
+        cloudKitDatabase: .none
+      )
     }
+    let cloud = try ModelContainer(for: NoteRecord.self, configurations: cloudConfig)
     return NoteStores(local: local, cloud: cloud)
   }
 

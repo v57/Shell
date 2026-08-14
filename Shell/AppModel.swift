@@ -26,8 +26,8 @@ final class AppModel {
   var screenMonitor = ScreenSessionsMonitor()
   #endif
 
-  /// The sidebar's encrypted Notes list (one sealed file per note, 5s debounced save).
-  var notes = NotesStore()
+  /// The sidebar's encrypted Notes list (SwiftData-backed, lazy decryption).
+  var notes: NotesStore
 
   /// The sidebar's saved Actions (UserDefaults-backed).
   var actions = ActionsStore()
@@ -114,9 +114,42 @@ final class AppModel {
     }()
   }()
 
+  /// The notes' two containers. Built in a `static let` closure — NOT
+  /// inside an init: containers created inside an @Observable init trap
+  /// on their first insert (silent SIGTRAP at `localContext.insert`;
+  /// probe-verified — the old `NotesStore()` factory path crashed while
+  /// the injected `NotesStore(stores:)` path always worked).
+  private static let notesStores: NoteStores = {
+    if let made = try? NoteStores.make() { return made }
+    // Store setup failed — degrade to two plain local stores rather than
+    // crash. Plain SQLite stores are effectively infallible.
+    let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+      .appendingPathComponent(Bundle.main.bundleIdentifier ?? "Shell", isDirectory: true)
+    // swiftlint:disable:next force_try
+    try! FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let local = try! ModelContainer(
+      for: NoteRecord.self,
+      configurations: ModelConfiguration(
+        "LocalNotes",
+        url: dir.appendingPathComponent("LocalNotes.store"),
+        cloudKitDatabase: .none
+      )
+    )
+    let cloud = try! ModelContainer(
+      for: NoteRecord.self,
+      configurations: ModelConfiguration(
+        "CloudNotes",
+        url: dir.appendingPathComponent("CloudNotes.store"),
+        cloudKitDatabase: .none
+      )
+    )
+    return NoteStores(local: local, cloud: cloud)
+  }()
+
   private init() {
     connectionStore = SSHConfigStore(container: Self.sharedSSHContainer)
     deviceKeys = DeviceKeyStore(container: Self.sharedSSHContainer)
+    notes = NotesStore(stores: Self.notesStores)
     // Publish this device's identity key to iCloud (no-op when the Secure
     // Enclave key is unreachable, e.g. locked screen — retried when the
     // authorized-keys panel opens).
