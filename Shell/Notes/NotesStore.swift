@@ -317,8 +317,10 @@ final class NotesStore {
   // MARK: - Locations
 
   /// The app's iCloud container URL, or nil when iCloud is unavailable
-  /// (no Apple Account / iCloud Drive disabled). Also the probe for whether
-  /// the CloudKit-synced store can be created.
+  /// (no Apple Account / iCloud Drive disabled). Used only as a fast probe
+  /// to skip DEBUG CloudKit schema initialization when there is no iCloud
+  /// session — the CloudKit-synced stores themselves are created
+  /// unconditionally (CloudKit database sync works without iCloud Drive).
   static func iCloudContainerURL() -> URL? {
     FileManager.default.url(forUbiquityContainerIdentifier: nil)
   }

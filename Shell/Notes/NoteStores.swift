@@ -7,7 +7,8 @@ import SwiftData
 ///   opting out is REQUIRED: automatic discovery would sync EVERY store,
 ///   since the app's entitlements declare an iCloud container.
 /// - `cloud` — the CloudKit-synced store (private database of
-///   `iCloud.dev.v57.sh`), nil when iCloud is unavailable.
+///   `iCloud.dev.v57.sh`), always created (never gated on iCloud
+///   availability — see `make()`).
 ///
 /// A note lives in exactly one store (`NoteRecord` moved by
 /// `NotesStore.setICloudStorage`); `keyId` says which key decrypts it.
@@ -15,12 +16,16 @@ struct NoteStores {
   let local: ModelContainer
   let cloud: ModelContainer?
 
-  /// Production containers. The cloud store is created UNCONDITIONALLY:
-  /// real CloudKit when the iCloud account is available, a plain local
-  /// store otherwise. NEVER nil — a `NotesStore` whose cloud context is
-  /// nil traps inside SwiftData on the first local insert (silent
-  /// EXC_BREAKPOINT; reproduced Aug 2026 — inserts only work when a
-  /// sibling cloud context exists in the same store).
+  /// Production containers. The cloud store is created UNCONDITIONALLY as a
+  /// real CloudKit store: with no iCloud account it behaves as a plain
+  /// local store and syncs silently when an account appears (same pattern
+  /// as the SSH config store — verified). NEVER gate this on the ubiquity
+  /// container URL: that probe requires iCloud Drive, but CloudKit DATABASE
+  /// sync works without it (reproduced: Drive OFF, configs/keys sync; notes
+  /// gated on the probe never left the device). NEVER nil — a `NotesStore`
+  /// whose cloud context is nil traps inside SwiftData on the first local
+  /// insert (silent EXC_BREAKPOINT; reproduced Aug 2026 — inserts only work
+  /// when a sibling cloud context exists in the same store).
   ///
   /// MUST be called OUTSIDE any `@Observable` class init (e.g. from a
   /// `static let` closure): containers created inside an @Observable init
@@ -38,21 +43,14 @@ struct NoteStores {
         cloudKitDatabase: .none
       )
     )
-    let cloudConfig: ModelConfiguration
-    if NotesStore.iCloudContainerURL() != nil {
-      cloudConfig = ModelConfiguration(
+    let cloud = try ModelContainer(
+      for: NoteRecord.self,
+      configurations: ModelConfiguration(
         "CloudNotes",
         url: dir.appendingPathComponent("CloudNotes.store"),
         cloudKitDatabase: .private("iCloud.dev.v57.sh")
       )
-    } else {
-      cloudConfig = ModelConfiguration(
-        "CloudNotes",
-        url: dir.appendingPathComponent("CloudNotes.store"),
-        cloudKitDatabase: .none
-      )
-    }
-    let cloud = try ModelContainer(for: NoteRecord.self, configurations: cloudConfig)
+    )
     return NoteStores(local: local, cloud: cloud)
   }
 

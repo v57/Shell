@@ -113,6 +113,16 @@ struct ContentView: View {
           // fetching during launch can race SwiftData's store bootstrap.
           if hasActivatedOnce {
             model.refreshOnActivation()
+          } else {
+            // But CloudKit's initial sync lands AFTER bootstrap, so on
+            // first launch the stores are still empty once launch settles.
+            // Schedule one delayed refresh (the CloudKit remote-change
+            // observer in AppModel covers the same gap live) so iCloud
+            // data appears without a restart.
+            Task { @MainActor in
+              try? await Task.sleep(for: .seconds(4))
+              model.refreshOnActivation()
+            }
           }
           hasActivatedOnce = true
         } else {

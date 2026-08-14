@@ -3,6 +3,7 @@ import AppKit
 #else
 import UIKit
 #endif
+import CoreData
 import Crypto
 import Foundation
 import SwiftData
@@ -50,6 +51,10 @@ final class AppModel {
   private var sessionCommands: [UUID: [SubmittedCommand]] = [:]
   private var localHistoryDrafts: [UUID: LocalHistoryDraft] = [:]
   private var selectionBeforeHistory: UUID?
+  /// Observation token for CloudKit remote-change notifications (kept so
+  /// the observer can be torn down; AppModel is a singleton, so it lives
+  /// for the process).
+  private var cloudKitChangeObserver: NSObjectProtocol?
 
   private struct LocalHistoryDraft {
     var commands: [SubmittedCommand] = []
@@ -154,6 +159,7 @@ final class AppModel {
     // Enclave key is unreachable, e.g. locked screen — retried when the
     // authorized-keys panel opens).
     deviceKeys.publishThisDevice()
+    observeCloudKitRemoteChanges()
     #if os(macOS)
     // Start with a local terminal so the window is never empty. iOS has no
     // local terminals — it starts with just the sidebar (SSH + notes).
@@ -716,6 +722,27 @@ final class AppModel {
       return
     }
     showAuthorizedKeys(for: .ssh(config))
+  }
+
+  /// Re-fetches the stores whenever the CloudKit mirror imports remote
+  /// changes (the CoreData `NSPersistentStoreRemoteChange` notification;
+  /// SwiftData's CloudKit stores post it through their persistent store
+  /// coordinator). This is what makes FIRST LAUNCH self-heal: init's
+  /// reload runs before CloudKit has delivered anything, and the launch-time
+  /// scene activation is deliberately skipped, so without this the sidebar
+  /// stays empty until the next activation or restart. It also surfaces
+  /// cross-device edits while the app runs (belt-and-braces on top of the
+  /// scene-activation refresh).
+  private func observeCloudKitRemoteChanges() {
+    cloudKitChangeObserver = NotificationCenter.default.addObserver(
+      forName: .NSPersistentStoreRemoteChange,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      Task { @MainActor [weak self] in
+        self?.refreshOnActivation()
+      }
+    }
   }
 
   /// Sync trigger for the no-push stores (notes + SSH configs): re-fetch
