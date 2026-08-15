@@ -56,6 +56,9 @@ struct SidebarView: View {
             .tag(session.id)
             .contextMenu {
               Button("Rename…") { renamingSessionID = session.id }
+              Button("Authorized Keys", systemImage: "key.2.on.ring.fill") {
+                model.openLocalAuthorizedKeys()
+              }.buttonStyle(.borderless).help("Manage this Mac's authorized keys")
               Divider()
               Button("Close Terminal", role: .destructive) {
                 model.removeSession(session.id)
@@ -89,11 +92,6 @@ struct SidebarView: View {
             .buttonStyle(.borderless)
             .help(model.historyMode ? "Show local terminals" : "Show local history")
           }
-          Button {
-            model.openLocalAuthorizedKeys()
-          } label: {
-            Image(systemName: "key.2.on.ring")
-          }.buttonStyle(.borderless).help("Manage this Mac's authorized keys")
           Button {
             model.addLocalTerminal()
           } label: {
@@ -167,15 +165,6 @@ struct SidebarView: View {
           } label: {
             Image(systemName: "plus")
           }.buttonStyle(.borderless).help("New SSH connection")
-          // The key-ring button needs a target server to manage; it only
-          // makes sense once at least one connection exists.
-          if !model.connections.isEmpty {
-            Button {
-              model.openRemoteAuthorizedKeys()
-            } label: {
-              Image(systemName: "key.2.on.ring")
-            }.buttonStyle(.borderless).help("Manage the selected connection's authorized keys")
-          }
         }.padding(.trailing, 4)
       }
 
@@ -393,6 +382,9 @@ private struct SSHConfigGroup: View {
       .contextMenu {
         Button("Connect") { model.connect(to: config) }
         Button("Copy Public Key") { model.copyPublicKey() }
+        Button("Authorized Keys", systemImage: "key.2.on.ring") {
+          model.showAuthorizedKeys(for: .ssh(config))
+        }.buttonStyle(.borderless).help("Manage the selected connection's authorized keys")
         Divider()
         Button("Delete Connection", role: .destructive) {
           model.deleteConnection(config)

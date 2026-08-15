@@ -714,16 +714,6 @@ final class AppModel {
     showAuthorizedKeys(for: .local)
   }
 
-  /// The Remote section's key-ring button: the selected SSH connection's
-  /// authorized_keys (falls back to the first saved connection).
-  func openRemoteAuthorizedKeys() {
-    guard let config = connections.first(where: { $0.id == selection }) ?? connections.first else {
-      authorizedKeysError = "Add an SSH connection first, then manage its authorized keys."
-      return
-    }
-    showAuthorizedKeys(for: .ssh(config))
-  }
-
   /// Re-fetches the stores whenever the CloudKit mirror imports remote
   /// changes (the CoreData `NSPersistentStoreRemoteChange` notification;
   /// SwiftData's CloudKit stores post it through their persistent store
