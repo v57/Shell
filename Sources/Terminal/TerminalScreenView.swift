@@ -96,6 +96,16 @@ public func terminalCellRuns(
 /// - resize: GeometryReader driving session.resize()
 /// - paste: `.onPasteCommand` for the Edit > Paste menu route
 ///
+/// Behavior is split into three nested ViewModifiers so the body stays a
+/// thin composition and each concern is independently testable:
+///
+/// - `ScrollModifier` (applied to the grid's ScrollView) owns anchor +
+///   content-offset tracking, bottom-tailing, and the anchor →
+///   `session.scrollbackOffset` sync
+/// - `InputModifier` owns focus, keyboard, and paste
+/// - `SelectionModifier` owns mouse selection, click-to-pin, and edge
+///   auto-scroll
+///
 /// Scroll position is the source of truth: `anchorLine` is the first
 /// visible logical line (scrollPosition(id:)); `session.scrollbackOffset`
 /// is derived from it so copy/status logic keeps working unchanged.
@@ -107,6 +117,15 @@ public struct TerminalScreenView: View {
   private static let fontSize: CGFloat = 14
   private static let metrics = fontMetrics(for: monoFont(ofSize: fontSize))
 
+  /// Inset of the grid content from the scroll view's edges (the old
+  /// TerminalView `.padding(4)`, moved INSIDE the ScrollView). The scroll
+  /// view itself now spans the full safe area — scroll indicators sit at
+  /// the edge and content scrolls under the toolbar/notch — while the grid
+  /// text keeps a small margin. Must stay below lineHeight/cellWidth:
+  /// hit-testing maps through content coordinates, and a shift under one
+  /// cell keeps every click on the right line/column.
+  private static let gridPadding: CGFloat = 4
+
   /// The platform monospaced font at the terminal size (regular weight).
   private static func monoFont(ofSize size: CGFloat) -> TerminalFont {
     #if os(macOS)
@@ -116,13 +135,19 @@ public struct TerminalScreenView: View {
     #endif
   }
 
-  // MARK: - Scroll offset tracking (content-space hit testing)
+  // MARK: - Shared interaction state
+  //
+  // Produced by one modifier, consumed by another, so it lives here and is
+  // handed out as bindings: ScrollModifier writes `scrollOffset` and
+  // `anchorLine` (and SelectionModifier reads both for hit-testing /
+  // auto-scroll); the resize code writes `viewportHeight`, which
+  // SelectionModifier reads to extend a drag to the viewport edges.
 
   /// The scroll view's content offset (the content's top edge y in the
   /// scroll view's space = -scrolled pixels), kept in sync via
-  /// `onScrollGeometryChange`. Mouse → cell hit-testing maps through it so
-  /// clicks work in CONTENT coordinates: logical line L spans content y
-  /// [L*lh, (L+1)*lh) no matter where the viewport is.
+  /// `onScrollGeometryChange` (ScrollModifier). Mouse → cell hit-testing
+  /// maps through it so clicks work in CONTENT coordinates: logical line L
+  /// spans content y [L*lh, (L+1)*lh) no matter where the viewport is.
   @State private var scrollOffset: CGFloat = 0
   @State private var viewportHeight: CGFloat = 0
 
@@ -130,10 +155,6 @@ public struct TerminalScreenView: View {
   /// First visible logical line of the scroll view (nil = top).
   @State private var anchorLine: Int?
   @State private var lastGridSize = TerminalGridSize.zero
-  /// Non-nil while a drag is in progress (its first change is "mouseDown").
-  @State private var dragStart: TerminalCursor?
-  @State private var autoScrollTimer: Timer?
-  @State private var autoScrollDirection = 0
 
   public var body: some View {
     // Read observable properties in body (not inside closures) so SwiftUI
@@ -142,70 +163,53 @@ public struct TerminalScreenView: View {
     let selectionStart = session.selectionStart
     let selectionEnd = session.selectionEnd
 
-    GeometryReader { geo in
-      ZStack(alignment: .topLeading) {
-        if let message = snapshot.message {
-          Text(message)
-            .font(.system(size: Self.fontSize, design: .monospaced))
-            .foregroundStyle(TerminalPalette.secondaryText)
-            .padding(16)
-        } else {
-          terminalGrid(
-            snapshot: snapshot,
-            selectionStart: selectionStart,
-            selectionEnd: selectionEnd
-          )
+    if let message = snapshot.message {
+      messageView(message)
+    } else {
+      // The live grid is the ONLY interactive branch, so resize and the
+      // input/selection modifiers are scoped here; the message is a plain
+      // status label with no focus, key routing, or selection gesture.
+      GeometryReader { geo in
+        terminalGrid(
+          snapshot: snapshot,
+          selectionStart: selectionStart,
+          selectionEnd: selectionEnd
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
+        .onAppear {
+          resizeIfNeeded(to: geo.size, safeArea: geo.safeAreaInsets)
         }
+        .onChange(of: geo.size) { _, newSize in
+          resizeIfNeeded(to: newSize, safeArea: geo.safeAreaInsets)
+        }
+        .onChange(of: geo.safeAreaInsets) { _, newInsets in
+          // Fullscreen / toolbar changes shift the safe area without
+          // changing the size; the grid must reflow.
+          resizeIfNeeded(to: geo.size, safeArea: newInsets)
+        }
+        .modifier(InputModifier(session: session, focused: $focused, anchorLine: $anchorLine))
+        .modifier(SelectionModifier(
+          session: session,
+          focused: $focused,
+          anchorLine: $anchorLine,
+          scrollOffset: $scrollOffset,
+          viewportHeight: $viewportHeight
+        ))
       }
-      .frame(maxWidth: .infinity, maxHeight: .infinity)
-      .contentShape(Rectangle())
-      .onAppear {
-        resizeIfNeeded(to: geo.size)
-        snapToBottom()
-        // Focus must be granted after the view is in the hierarchy.
-        DispatchQueue.main.async { focused = true }
-      }
-      .onChange(of: geo.size) { _, newSize in
-        resizeIfNeeded(to: newSize)
-      }
     }
-    .focusable()
-    .focused($focused)
-    #if os(macOS)
-    .focusEffectDisabled()
-    #endif
-    .onKeyPress { press in
-      handleKeyPress(press)
-    }
-    .gesture(dragGesture)
-    #if os(macOS)
-    .onPasteCommand(of: [UTType.plainText, UTType.utf8PlainText]) { _ in
-      pasteFromPasteboard()
-    }
-    #endif
-    .onChange(of: session.snapshot.totalLines) { oldTotal, _ in
-      // New output: keep following the bottom only when already at bottom.
-      // The at-bottom test must use the PREVIOUS total — after a line is
-      // appended the stale anchor sits exactly `rows` above the new bottom,
-      // so `anchor + rows == oldTotal < newTotal` and the guard would fail
-      // on the very first new line, stopping tailing forever.
-      followIfAtBottom(wasAtBottomOf: oldTotal)
-    }
-    .onChange(of: session.snapshot.rows) { _, _ in
-      // Resize reflows the grid but keeps scrollback, so totalLines changed
-      // through rows alone; the current values are the correct baseline (at
-      // the bottom this is an exact equality — the anchor does not move).
-      followIfAtBottom(wasAtBottomOf: session.snapshot.totalLines)
-    }
-    .onChange(of: anchorLine) { _, newAnchor in
-      // Keep session.scrollbackOffset (used by copy/status) in sync.
-      let snapshot = session.snapshot
-      let maxOffset = snapshot.maxOffset
-      session.scrollbackOffset = max(0, maxOffset - (newAnchor ?? 0))
-    }
-    .onDisappear {
-      stopAutoScroll()
-    }
+  }
+
+  /// The non-interactive status label (connecting / failed). Deliberately
+  /// NOT inside the GeometryReader and NOT under InputModifier /
+  /// SelectionModifier: the message can't take input, so it shouldn't be
+  /// focusable, clickable, or steal keyboard focus.
+  private func messageView(_ message: String) -> some View {
+    Text(message)
+      .font(.system(size: Self.fontSize, design: .monospaced))
+      .foregroundStyle(TerminalPalette.secondaryText)
+      .padding(16)
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
   }
 
   // MARK: - Rendering
@@ -235,28 +239,13 @@ public struct TerminalScreenView: View {
         }
       }
       .scrollTargetLayout()
+      // Content margin: the scroll view spans the full safe area; only the
+      // grid text is inset from its edges.
+      .padding(Self.gridPadding)
     }
-    // anchor: .top is REQUIRED — without it SwiftUI scrolls the MINIMAL
-    // amount on programmatic sets: the re-anchored bottom line is usually
-    // already inside the viewport, so the viewport never moves while the
-    // binding claims the new bottom (viewport no longer tails, and
-    // selection maps anchorLine + row to lines below the cursor). With
-    // .top, writing the binding aligns that line to the viewport's top
-    // edge deterministically, and the binding reports the true top-most
-    // line as the user scrolls.
-    .scrollPosition(id: $anchorLine, anchor: .top)
-    // The content offset, reported live by the scroll system. Hit-testing
-    // maps clicks through it (content coordinates) so the mapping is exact
-    // at every scroll position. NOTE: this MUST be onScrollGeometryChange
-    // (macOS 15+), not a background-GeometryReader preference — the scroll
-    // view moves the content without re-evaluating the reader, so a
-    // preference only fires at initial layout and hit-testing silently
-    // falls back to "scrolled to the top" (verified empirically Aug 2026).
-    .onScrollGeometryChange(for: CGFloat.self) { geometry in
-      geometry.contentOffset.y
-    } action: { _, newOffset in
-      scrollOffset = -newOffset
-    }
+    // Scrolling behavior (anchor tracking, content-offset reporting,
+    // bottom-tailing) lives in ScrollModifier.
+    .modifier(ScrollModifier(session: session, anchorLine: $anchorLine, scrollOffset: $scrollOffset))
   }
 
   // MARK: - Per-glyph advance normalization
@@ -563,277 +552,23 @@ public struct TerminalScreenView: View {
     return (attrs, background)
   }
 
-  // MARK: - Keyboard
-
-  private func handleKeyPress(_ press: KeyPress) -> KeyPress.Result {
-    guard press.phase == .down || press.phase == .repeat else { return .ignored }
-
-    let flags = Self.nsFlags(from: press.modifiers)
-    // Cmd+K: clean stdout — the scrollback is wiped, so the viewport must
-    // snap to the (new) bottom too.
-    if flags.contains(.command), press.key.character.lowercased() == "k" {
-      session.clearStdout()
-      snapToBottom()
-      return .handled
-    }
-    if !flags.contains(.command) {
-      // Typing clears the selection and snaps back to the bottom.
-      session.selectionStart = nil
-      session.selectionEnd = nil
-      snapToBottom()
-    }
-
-    let keyCode = Self.keyCode(for: press.key)
-    // charactersIgnoringModifiers is only consulted for ctrl+key control
-    // sequences; printable keys report their KeyEquivalent character, while
-    // special keys (arrows etc., which have a real keyCode) report nil.
-    let charactersIgnoringModifiers = keyCode == 0 ? String(press.key.character) : nil
-    session.handleKey(
-      characters: press.characters,
-      charactersIgnoringModifiers: charactersIgnoringModifiers,
-      keyCode: keyCode,
-      modifierFlags: flags
-    )
-    return .handled
-  }
-
-  /// SwiftUI EventModifiers → portable TerminalModifierFlags (no direct
-  /// initializer exists for this conversion in the current SDK).
-  private static func nsFlags(from modifiers: EventModifiers) -> TerminalModifierFlags {
-    var flags = TerminalModifierFlags()
-    if modifiers.contains(.command) { flags.insert(.command) }
-    if modifiers.contains(.shift) { flags.insert(.shift) }
-    if modifiers.contains(.option) { flags.insert(.option) }
-    if modifiers.contains(.control) { flags.insert(.control) }
-    return flags
-  }
-
-  /// Maps a SwiftUI KeyEquivalent to the AppKit keyCode the terminal's key
-  /// mapper switches on (arrows, home/end, page keys, delete, tab, return,
-  /// escape). Printable characters don't need a keyCode (the mapper uses
-  /// characters for those), so they map to 0.
-  private static func keyCode(for key: KeyEquivalent) -> UInt16 {
-    switch key {
-    case .upArrow: return 126
-    case .downArrow: return 125
-    case .leftArrow: return 123
-    case .rightArrow: return 124
-    case .home: return 115
-    case .end: return 119
-    case .pageUp: return 116
-    case .pageDown: return 121
-    case .delete: return 51
-    case .deleteForward: return 117
-    case .return: return 36
-    case .tab: return 48
-    case .space: return 49
-    case .escape: return 53
-    case .clear: return 71
-    default: return 0
-    }
-  }
-
-  // MARK: - Mouse / selection
-
-  private var dragGesture: some Gesture {
-    DragGesture(minimumDistance: 0, coordinateSpace: .local)
-      .onChanged { value in
-        focused = true
-        handleDragChanged(at: value.location)
-      }
-      .onEnded { value in
-        handleDragEnded(at: value.location)
-      }
-  }
-
-  /// First change = mouseDown (pin on last char or start selection);
-  /// later changes = mouseDragged (extend selection, edge auto-scroll).
-  private func handleDragChanged(at location: CGPoint) {
-    let snapshot = session.snapshot
-    guard snapshot.message == nil else { return }
-    let target = cell(at: location)
-
-    if dragStart == nil {
-      dragStart = target
-      // Every mouse-down tentatively starts a selection; mouse-up decides
-      // whether it was a CLICK (pins the line as the sidebar status on
-      // ANY character) or a drag (keeps the selection).
-      let start = TerminalCursor(row: target.row, column: target.column)
-      session.selectionStart = start
-      session.selectionEnd = start
-      session.selectionEpoch = snapshot.selectionEpoch
-      return
-    }
-
-    guard session.selectionStart != nil else { return }
-    let rawRow = Int(floor(location.y / Self.metrics.lineHeight))
-    // Dragging past the top/bottom edge auto-scrolls the viewport and
-    // keeps extending the selection (Terminal.app behavior).
-    if rawRow < 0 {
-      startAutoScroll(direction: 1)  // toward older content
-      extendSelectionToEdge(direction: 1)
-    } else if rawRow >= snapshot.rows {
-      startAutoScroll(direction: -1)  // toward the live grid
-      extendSelectionToEdge(direction: -1)
-    } else {
-      stopAutoScroll()
-      session.selectionEnd = cell(at: location)
-    }
-  }
-
-  private func handleDragEnded(at location: CGPoint) {
-    stopAutoScroll()
-    if let start = session.selectionStart {
-      let end = cell(at: location)
-      session.selectionEnd = end
-      // A click without dragging pins the clicked line as the sidebar
-      // status — ANY character of the line works (previously only the
-      // last non-blank character did); dragging keeps the selection.
-      if start == end {
-        session.selectionStart = nil
-        session.selectionEnd = nil
-        session.toggleStatusPin(start.row)
-      }
-    }
-    dragStart = nil
-  }
-
-  /// A mouse-up on the same cell as mouse-down is a CLICK (pins the line
-  /// as the sidebar status, any character); any movement is a selection
-  /// drag. Kept as a named rule so the click/drag semantics are testable.
-  static func isClick(start: TerminalCursor, end: TerminalCursor) -> Bool {
-    start == end
-  }
-
-  /// The LOGICAL line/column under a point in the view's local space.
-  ///
-  /// Mapping goes through the scroll CONTENT offset, not the viewport:
-  /// logical line L spans content y [L*lh, (L+1)*lh) no matter where the
-  /// viewport is, so the result is exact at every scroll position. The old
-  /// `anchorLine + floor(localY / lineHeight)` formula assumed grid row 0
-  /// sat at the viewport's top — when the viewport height isn't a multiple
-  /// of lineHeight, scrolled to the bottom the grid actually sits
-  /// `H mod lineHeight` px BELOW the viewport top, and clicks in the lower
-  /// part of each line landed on the line BELOW the targeted one (and the
-  /// scrollback sliver peeking in above the grid hit the grid's first
-  /// line). Reported: "cursor selects the line below the targeted line,
-  /// around after half a line; only when scrolled to the bottom."
-  private func cell(at location: CGPoint) -> TerminalCursor {
-    let snapshot = session.snapshot
-    let line = Self.logicalLine(
-      contentOffset: scrollOffset,
-      localY: location.y,
-      lineHeight: Self.metrics.lineHeight,
-      totalLines: snapshot.totalLines
-    )
-    let column = min(max(Int(floor(location.x / Self.metrics.cellWidth)), 0), snapshot.columns - 1)
-    return TerminalCursor(row: line, column: column)
-  }
-
-  /// Pure hit-test mapping (unit-tested): the logical line under a click at
-  /// `localY` (view-local), given the scroll content offset and geometry.
-  static func logicalLine(contentOffset: CGFloat, localY: CGFloat, lineHeight: CGFloat, totalLines: Int) -> Int {
-    min(max(Int(floor((localY - contentOffset) / lineHeight)), 0), totalLines - 1)
-  }
-
-  // MARK: - Edge auto-scroll (selection drag)
-
-  private func startAutoScroll(direction: Int) {
-    guard autoScrollDirection != direction else { return }
-    stopAutoScroll()
-    autoScrollDirection = direction
-    let timer = Timer(timeInterval: 0.05, repeats: true) { _ in
-      self.autoScrollTick()
-    }
-    RunLoop.main.add(timer, forMode: .common)
-    autoScrollTimer = timer
-  }
-
-  private func stopAutoScroll() {
-    autoScrollTimer?.invalidate()
-    autoScrollTimer = nil
-    autoScrollDirection = 0
-  }
-
-  private func autoScrollTick() {
-    guard autoScrollDirection != 0 else { return }
-    let snapshot = session.snapshot
-    let anchor = anchorLine ?? 0
-    let newAnchor = min(max(0, anchor - autoScrollDirection * 2), snapshot.maxOffset)
-    if newAnchor != anchor {
-      anchorLine = newAnchor
-    }
-    extendSelectionToEdge(direction: autoScrollDirection)
-  }
-
-  /// Extends the selection endpoint to the viewport's top (direction > 0)
-  /// or bottom (direction < 0) edge line, computed in CONTENT coordinates
-  /// (exact — no anchor bookkeeping).
-  private func extendSelectionToEdge(direction: Int) {
-    let snapshot = session.snapshot
-    let topLine = Self.logicalLine(
-      contentOffset: scrollOffset,
-      localY: 0,
-      lineHeight: Self.metrics.lineHeight,
-      totalLines: snapshot.totalLines
-    )
-    let bottomLine = Self.logicalLine(
-      contentOffset: scrollOffset,
-      localY: viewportHeight,
-      lineHeight: Self.metrics.lineHeight,
-      totalLines: snapshot.totalLines
-    )
-    let edgeLine = direction > 0 ? topLine : bottomLine
-    let edgeColumn = direction > 0 ? 0 : snapshot.columns - 1
-    session.selectionEnd = TerminalCursor(row: edgeLine, column: edgeColumn)
-  }
-
-  // MARK: - Scroll position
-
-  /// Re-anchors to the new bottom when output arrived while the viewport was
-  /// pinned to the bottom of the PREVIOUS content (live tailing). When
-  /// scrolled up, the anchor is left alone — the frozen viewport keeps
-  /// showing the same logical lines (line ids are stable across scrollback
-  /// growth). `previousTotalLines` is the content height the current anchor
-  /// was computed against; judging against the new total instead fails the
-  /// guard the moment a line is added while at the bottom (see the
-  /// totalLines onChange above).
-  private func followIfAtBottom(wasAtBottomOf previousTotalLines: Int) {
-    let snapshot = session.snapshot
-    let anchor = anchorLine ?? 0
-    guard anchor + snapshot.rows >= previousTotalLines else { return }
-    anchorLine = max(0, snapshot.totalLines - snapshot.rows)
-  }
-
-  private func snapToBottom() {
-    let snapshot = session.snapshot
-    anchorLine = max(0, snapshot.totalLines - snapshot.rows)
-  }
-
   // MARK: - Resize
 
-  private func resizeIfNeeded(to size: CGSize) {
-    viewportHeight = size.height
-    let columns = max(1, Int(floor(size.width / Self.metrics.cellWidth)))
-    let rows = max(1, Int(floor(size.height / Self.metrics.lineHeight)))
+  private func resizeIfNeeded(to size: CGSize, safeArea: EdgeInsets) {
+    // The grid only ever occupies the safe area; the scroll view may span
+    // more (auto-hidden toolbar on macOS, notch/home indicator on iOS), so
+    // the size the grid can use is the proposal minus the insets.
+    let contentWidth = size.width - safeArea.leading - safeArea.trailing
+    let contentHeight = size.height - safeArea.top - safeArea.bottom
+    // The viewport's visible bottom edge in local coordinates, used by
+    // SelectionModifier to extend a drag to the last visible line.
+    viewportHeight = size.height - safeArea.bottom
+    let columns = max(1, Int(floor((contentWidth - Self.gridPadding * 2) / Self.metrics.cellWidth)))
+    let rows = max(1, Int(floor((contentHeight - Self.gridPadding * 2) / Self.metrics.lineHeight)))
     let grid = TerminalGridSize(rows: rows, columns: columns)
     guard grid != lastGridSize else { return }
     lastGridSize = grid
     session.resize(columns: columns, rows: rows)
-  }
-
-  // MARK: - Paste
-
-  private func pasteFromPasteboard() {
-    #if os(macOS)
-    if let string = NSPasteboard.general.string(forType: .string) {
-      session.paste(string)
-    }
-    #else
-    if let string = UIPasteboard.general.string {
-      session.paste(string)
-    }
-    #endif
   }
 
   // MARK: - Metrics (moved from TerminalInputView)
@@ -855,5 +590,403 @@ public struct TerminalScreenView: View {
     // difference so glyph k lands exactly on the k-th cell boundary.
     let cellKern = cellWidth - size.width
     return TerminalFontMetrics(cellWidth: cellWidth, lineHeight: lineHeight, baselineOffset: baselineOffset, cellKern: cellKern)
+  }
+}
+
+// MARK: - Scrolling (ScrollModifier)
+
+extension TerminalScreenView {
+  /// Scrolling: applied to the grid's ScrollView, it owns the anchor
+  /// (`scrollPosition`) and content-offset (`onScrollGeometryChange`)
+  /// tracking, follows the bottom when output arrives while pinned there,
+  /// and keeps `session.scrollbackOffset` in sync with the anchor (copy and
+  /// sidebar status read it). `anchorLine` and `scrollOffset` are owned by
+  /// the parent view so SelectionModifier can hit-test through the content
+  /// offset and auto-scroll the anchor during a drag.
+  struct ScrollModifier: ViewModifier {
+    @Bindable var session: TerminalSession
+    @Binding var anchorLine: Int?
+    @Binding var scrollOffset: CGFloat
+
+    func body(content: Content) -> some View {
+      content
+        // anchor: .top is REQUIRED — without it SwiftUI scrolls the MINIMAL
+        // amount on programmatic sets: the re-anchored bottom line is usually
+        // already inside the viewport, so the viewport never moves while the
+        // binding claims the new bottom (viewport no longer tails, and
+        // selection maps anchorLine + row to lines below the cursor). With
+        // .top, writing the binding aligns that line to the viewport's top
+        // edge deterministically, and the binding reports the true top-most
+        // line as the user scrolls.
+        .scrollPosition(id: $anchorLine, anchor: .top)
+        // The content offset, reported live by the scroll system. Hit-testing
+        // maps clicks through it (content coordinates) so the mapping is exact
+        // at every scroll position. NOTE: this MUST be onScrollGeometryChange
+        // (macOS 15+), not a background-GeometryReader preference — the scroll
+        // view moves the content without re-evaluating the reader, so a
+        // preference only fires at initial layout and hit-testing silently
+        // falls back to "scrolled to the top" (verified empirically Aug 2026).
+        .onScrollGeometryChange(for: CGFloat.self) { geometry in
+          geometry.contentOffset.y
+        } action: { _, newOffset in
+          scrollOffset = -newOffset
+        }
+        .onChange(of: session.snapshot.totalLines) { oldTotal, _ in
+          // New output: keep following the bottom only when already at bottom.
+          // The at-bottom test must use the PREVIOUS total — after a line is
+          // appended the stale anchor sits exactly `rows` above the new bottom,
+          // so `anchor + rows == oldTotal < newTotal` and the guard would fail
+          // on the very first new line, stopping tailing forever.
+          Self.followIfAtBottom(wasAtBottomOf: oldTotal, session: session, anchorLine: $anchorLine)
+        }
+        .onChange(of: session.snapshot.rows) { _, _ in
+          // Resize reflows the grid but keeps scrollback, so totalLines changed
+          // through rows alone; the current values are the correct baseline (at
+          // the bottom this is an exact equality — the anchor does not move).
+          Self.followIfAtBottom(wasAtBottomOf: session.snapshot.totalLines, session: session, anchorLine: $anchorLine)
+        }
+        .onChange(of: anchorLine) { _, newAnchor in
+          // Keep session.scrollbackOffset (used by copy/status) in sync.
+          session.scrollbackOffset = max(0, session.snapshot.maxOffset - (newAnchor ?? 0))
+        }
+        .onAppear {
+          Self.snapToBottom(session: session, anchorLine: $anchorLine)
+        }
+    }
+
+    /// Re-anchors to the new bottom when output arrived while the viewport was
+    /// pinned to the bottom of the PREVIOUS content (live tailing). When
+    /// scrolled up, the anchor is left alone — the frozen viewport keeps
+    /// showing the same logical lines (line ids are stable across scrollback
+    /// growth). `previousTotalLines` is the content height the current anchor
+    /// was computed against; judging against the new total instead fails the
+    /// guard the moment a line is added while at the bottom (see the
+    /// totalLines onChange above).
+    static func followIfAtBottom(wasAtBottomOf previousTotalLines: Int, session: TerminalSession, anchorLine: Binding<Int?>) {
+      let snapshot = session.snapshot
+      let anchor = anchorLine.wrappedValue ?? 0
+      guard anchor + snapshot.rows >= previousTotalLines else { return }
+      anchorLine.wrappedValue = max(0, snapshot.totalLines - snapshot.rows)
+    }
+
+    /// Re-anchors to the (new) bottom: the initial pin on appear, and the
+    /// snap after input that changes the content height (Cmd+K wipes the
+    /// scrollback; typing snaps back to the live grid).
+    static func snapToBottom(session: TerminalSession, anchorLine: Binding<Int?>) {
+      let snapshot = session.snapshot
+      anchorLine.wrappedValue = max(0, snapshot.totalLines - snapshot.rows)
+    }
+  }
+}
+
+// MARK: - Input (InputModifier)
+
+extension TerminalScreenView {
+  /// Input: focus (the terminal is focusable and grabs focus on appear;
+  /// selection flips the same state on mouse-down), keyboard via
+  /// `.onKeyPress` feeding TerminalKeyMapper, and Edit > Paste.
+  struct InputModifier: ViewModifier {
+    @Bindable var session: TerminalSession
+    /// The screen's focus state — owned by the parent view, applied here so
+    /// every input channel can reach it (the drag gesture's mouse-down also
+    /// grants focus).
+    let focused: FocusState<Bool>.Binding
+    /// Anchor binding: Cmd+K / typing snap back to the bottom after the
+    /// content height changes (see ScrollModifier.snapToBottom).
+    @Binding var anchorLine: Int?
+
+    func body(content: Content) -> some View {
+      content
+        .focusable()
+        .focused(focused)
+        #if os(macOS)
+        .focusEffectDisabled()
+        #endif
+        .onKeyPress { press in
+          handleKeyPress(press)
+        }
+        #if os(macOS)
+        .onPasteCommand(of: [UTType.plainText, UTType.utf8PlainText]) { _ in
+          pasteFromPasteboard()
+        }
+        #endif
+        .onAppear {
+          // Focus must be granted after the view is in the hierarchy.
+          DispatchQueue.main.async { focused.wrappedValue = true }
+        }
+    }
+
+    private func handleKeyPress(_ press: KeyPress) -> KeyPress.Result {
+      guard press.phase == .down || press.phase == .repeat else { return .ignored }
+
+      let flags = Self.nsFlags(from: press.modifiers)
+      // Cmd+K: clean stdout — the scrollback is wiped, so the viewport must
+      // snap to the (new) bottom too.
+      if flags.contains(.command), press.key.character.lowercased() == "k" {
+        session.clearStdout()
+        ScrollModifier.snapToBottom(session: session, anchorLine: $anchorLine)
+        return .handled
+      }
+      if !flags.contains(.command) {
+        // Typing clears the selection and snaps back to the bottom.
+        session.selectionStart = nil
+        session.selectionEnd = nil
+        ScrollModifier.snapToBottom(session: session, anchorLine: $anchorLine)
+      }
+
+      let keyCode = Self.keyCode(for: press.key)
+      // charactersIgnoringModifiers is only consulted for ctrl+key control
+      // sequences; printable keys report their KeyEquivalent character, while
+      // special keys (arrows etc., which have a real keyCode) report nil.
+      let charactersIgnoringModifiers = keyCode == 0 ? String(press.key.character) : nil
+      session.handleKey(
+        characters: press.characters,
+        charactersIgnoringModifiers: charactersIgnoringModifiers,
+        keyCode: keyCode,
+        modifierFlags: flags
+      )
+      return .handled
+    }
+
+    /// SwiftUI EventModifiers → portable TerminalModifierFlags (no direct
+    /// initializer exists for this conversion in the current SDK).
+    private static func nsFlags(from modifiers: EventModifiers) -> TerminalModifierFlags {
+      var flags = TerminalModifierFlags()
+      if modifiers.contains(.command) { flags.insert(.command) }
+      if modifiers.contains(.shift) { flags.insert(.shift) }
+      if modifiers.contains(.option) { flags.insert(.option) }
+      if modifiers.contains(.control) { flags.insert(.control) }
+      return flags
+    }
+
+    /// Maps a SwiftUI KeyEquivalent to the AppKit keyCode the terminal's key
+    /// mapper switches on (arrows, home/end, page keys, delete, tab, return,
+    /// escape). Printable characters don't need a keyCode (the mapper uses
+    /// characters for those), so they map to 0.
+    private static func keyCode(for key: KeyEquivalent) -> UInt16 {
+      switch key {
+      case .upArrow: return 126
+      case .downArrow: return 125
+      case .leftArrow: return 123
+      case .rightArrow: return 124
+      case .home: return 115
+      case .end: return 119
+      case .pageUp: return 116
+      case .pageDown: return 121
+      case .delete: return 51
+      case .deleteForward: return 117
+      case .return: return 36
+      case .tab: return 48
+      case .space: return 49
+      case .escape: return 53
+      case .clear: return 71
+      default: return 0
+      }
+    }
+
+    private func pasteFromPasteboard() {
+      #if os(macOS)
+      if let string = NSPasteboard.general.string(forType: .string) {
+        session.paste(string)
+      }
+      #else
+      if let string = UIPasteboard.general.string {
+        session.paste(string)
+      }
+      #endif
+    }
+  }
+}
+
+// MARK: - Mouse / selection (SelectionModifier)
+
+extension TerminalScreenView {
+  /// Mouse selection: a `DragGesture(minimumDistance: 0)` reproducing the old
+  /// mouseDown/Dragged/Up semantics — a click on ANY character pins the line
+  /// as the sidebar status, dragging selects (with edge auto-scroll via a
+  /// repeating timer). Hit-testing maps through the scroll CONTENT offset, so
+  /// it stays exact at every scroll position.
+  struct SelectionModifier: ViewModifier {
+    @Bindable var session: TerminalSession
+    /// Granted on mouse-down so the first click also routes the keyboard to
+    /// the terminal (owned by the parent view, see InputModifier).
+    let focused: FocusState<Bool>.Binding
+    /// Shared with ScrollModifier: auto-scroll during a drag moves the anchor.
+    @Binding var anchorLine: Int?
+    /// Shared with ScrollModifier: hit-testing maps clicks through the
+    /// content offset.
+    @Binding var scrollOffset: CGFloat
+    /// Written by the resize code; the drag-to-edge extension computes the
+    /// viewport's bottom line from it.
+    @Binding var viewportHeight: CGFloat
+
+    /// Non-nil while a drag is in progress (its first change is "mouseDown").
+    @State private var dragStart: TerminalCursor?
+    @State private var autoScrollTimer: Timer?
+    @State private var autoScrollDirection = 0
+
+    func body(content: Content) -> some View {
+      content
+        .gesture(dragGesture)
+        .onDisappear {
+          stopAutoScroll()
+        }
+    }
+
+    private var dragGesture: some Gesture {
+      DragGesture(minimumDistance: 0, coordinateSpace: .local)
+        .onChanged { value in
+          focused.wrappedValue = true
+          handleDragChanged(at: value.location)
+        }
+        .onEnded { value in
+          handleDragEnded(at: value.location)
+        }
+    }
+
+    /// First change = mouseDown (pin on last char or start selection);
+    /// later changes = mouseDragged (extend selection, edge auto-scroll).
+    private func handleDragChanged(at location: CGPoint) {
+      let snapshot = session.snapshot
+      // Defense in depth: the gesture now only exists on the grid branch,
+      // but the session can fail between a queued drag event and the view
+      // update that swaps in the message.
+      guard snapshot.message == nil else { return }
+      let target = cell(at: location)
+
+      if dragStart == nil {
+        dragStart = target
+        // Every mouse-down tentatively starts a selection; mouse-up decides
+        // whether it was a CLICK (pins the line as the sidebar status on
+        // ANY character) or a drag (keeps the selection).
+        let start = TerminalCursor(row: target.row, column: target.column)
+        session.selectionStart = start
+        session.selectionEnd = start
+        session.selectionEpoch = snapshot.selectionEpoch
+        return
+      }
+
+      guard session.selectionStart != nil else { return }
+      let rawRow = Int(floor(location.y / TerminalScreenView.metrics.lineHeight))
+      // Dragging past the top/bottom edge auto-scrolls the viewport and
+      // keeps extending the selection (Terminal.app behavior).
+      if rawRow < 0 {
+        startAutoScroll(direction: 1)  // toward older content
+        extendSelectionToEdge(direction: 1)
+      } else if rawRow >= snapshot.rows {
+        startAutoScroll(direction: -1)  // toward the live grid
+        extendSelectionToEdge(direction: -1)
+      } else {
+        stopAutoScroll()
+        session.selectionEnd = cell(at: location)
+      }
+    }
+
+    private func handleDragEnded(at location: CGPoint) {
+      stopAutoScroll()
+      if let start = session.selectionStart {
+        let end = cell(at: location)
+        session.selectionEnd = end
+        // A click without dragging pins the clicked line as the sidebar
+        // status — ANY character of the line works (previously only the
+        // last non-blank character did); dragging keeps the selection.
+        if start == end {
+          session.selectionStart = nil
+          session.selectionEnd = nil
+          session.toggleStatusPin(start.row)
+        }
+      }
+      dragStart = nil
+    }
+
+    /// A mouse-up on the same cell as mouse-down is a CLICK (pins the line
+    /// as the sidebar status, any character); any movement is a selection
+    /// drag. Kept as a named rule so the click/drag semantics are testable.
+    static func isClick(start: TerminalCursor, end: TerminalCursor) -> Bool {
+      start == end
+    }
+
+    /// The LOGICAL line/column under a point in the view's local space.
+    ///
+    /// Mapping goes through the scroll CONTENT offset, not the viewport:
+    /// logical line L spans content y [L*lh, (L+1)*lh) no matter where the
+    /// viewport is, so the result is exact at every scroll position. The old
+    /// `anchorLine + floor(localY / lineHeight)` formula assumed grid row 0
+    /// sat at the viewport's top — when the viewport height isn't a multiple
+    /// of lineHeight, scrolled to the bottom the grid actually sits
+    /// `H mod lineHeight` px BELOW the viewport top, and clicks in the lower
+    /// part of each line landed on the line BELOW the targeted one (and the
+    /// scrollback sliver peeking in above the grid hit the grid's first
+    /// line). Reported: "cursor selects the line below the targeted line,
+    /// around after half a line; only when scrolled to the bottom."
+    private func cell(at location: CGPoint) -> TerminalCursor {
+      let snapshot = session.snapshot
+      let line = Self.logicalLine(
+        contentOffset: scrollOffset,
+        localY: location.y,
+        lineHeight: TerminalScreenView.metrics.lineHeight,
+        totalLines: snapshot.totalLines
+      )
+      let column = min(max(Int(floor(location.x / TerminalScreenView.metrics.cellWidth)), 0), snapshot.columns - 1)
+      return TerminalCursor(row: line, column: column)
+    }
+
+    /// Pure hit-test mapping (unit-tested): the logical line under a click at
+    /// `localY` (view-local), given the scroll content offset and geometry.
+    static func logicalLine(contentOffset: CGFloat, localY: CGFloat, lineHeight: CGFloat, totalLines: Int) -> Int {
+      min(max(Int(floor((localY - contentOffset) / lineHeight)), 0), totalLines - 1)
+    }
+
+    // MARK: - Edge auto-scroll (selection drag)
+
+    private func startAutoScroll(direction: Int) {
+      guard autoScrollDirection != direction else { return }
+      stopAutoScroll()
+      autoScrollDirection = direction
+      let timer = Timer(timeInterval: 0.05, repeats: true) { _ in
+        self.autoScrollTick()
+      }
+      RunLoop.main.add(timer, forMode: .common)
+      autoScrollTimer = timer
+    }
+
+    private func stopAutoScroll() {
+      autoScrollTimer?.invalidate()
+      autoScrollTimer = nil
+      autoScrollDirection = 0
+    }
+
+    private func autoScrollTick() {
+      guard autoScrollDirection != 0 else { return }
+      let snapshot = session.snapshot
+      let anchor = anchorLine ?? 0
+      let newAnchor = min(max(0, anchor - autoScrollDirection * 2), snapshot.maxOffset)
+      if newAnchor != anchor {
+        anchorLine = newAnchor
+      }
+      extendSelectionToEdge(direction: autoScrollDirection)
+    }
+
+    /// Extends the selection endpoint to the viewport's top (direction > 0)
+    /// or bottom (direction < 0) edge line, computed in CONTENT coordinates
+    /// (exact — no anchor bookkeeping).
+    private func extendSelectionToEdge(direction: Int) {
+      let snapshot = session.snapshot
+      let topLine = Self.logicalLine(
+        contentOffset: scrollOffset,
+        localY: 0,
+        lineHeight: TerminalScreenView.metrics.lineHeight,
+        totalLines: snapshot.totalLines
+      )
+      let bottomLine = Self.logicalLine(
+        contentOffset: scrollOffset,
+        localY: viewportHeight,
+        lineHeight: TerminalScreenView.metrics.lineHeight,
+        totalLines: snapshot.totalLines
+      )
+      let edgeLine = direction > 0 ? topLine : bottomLine
+      let edgeColumn = direction > 0 ? 0 : snapshot.columns - 1
+      session.selectionEnd = TerminalCursor(row: edgeLine, column: edgeColumn)
+    }
   }
 }

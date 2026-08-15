@@ -13,7 +13,6 @@ public struct TerminalView: View {
   
   public var body: some View {
     TerminalScreenView(session: session)
-      .padding(4)
       .alert(item: $session.hostKeyPrompt) { prompt in
         Alert(
           title: Text("Untrusted host key"),

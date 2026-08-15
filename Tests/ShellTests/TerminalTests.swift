@@ -276,12 +276,12 @@ struct SelectionHitTestingTests {
 
     // Grid row 0 (logical line 6) spans viewport y [8, 25). A click in its
     // LOWER half (y = 20) must hit line 6 — the old mapping gave line 7.
-    #expect(TerminalScreenView.logicalLine(contentOffset: bottomOffset, localY: 20, lineHeight: lh, totalLines: totalLines) == 6)
+    #expect(TerminalScreenView.SelectionModifier.logicalLine(contentOffset: bottomOffset, localY: 20, lineHeight: lh, totalLines: totalLines) == 6)
     // The scrollback sliver peeking in above the grid (y = 4) is line 5,
     // not the grid's first line.
-    #expect(TerminalScreenView.logicalLine(contentOffset: bottomOffset, localY: 4, lineHeight: lh, totalLines: totalLines) == 5)
+    #expect(TerminalScreenView.SelectionModifier.logicalLine(contentOffset: bottomOffset, localY: 4, lineHeight: lh, totalLines: totalLines) == 5)
     // Bottom of the viewport: the last line.
-    #expect(TerminalScreenView.logicalLine(contentOffset: bottomOffset, localY: viewportHeight - 1, lineHeight: lh, totalLines: totalLines) == 29)
+    #expect(TerminalScreenView.SelectionModifier.logicalLine(contentOffset: bottomOffset, localY: viewportHeight - 1, lineHeight: lh, totalLines: totalLines) == 29)
   }
 
   @Test func scrolledUpOneLineStaysExact() {
@@ -293,9 +293,9 @@ struct SelectionHitTestingTests {
     let oneLineUp = -(contentHeight - viewportHeight) + lh
 
     // y = 20 now shows line 5 (its row spans viewport y [8, 25)).
-    #expect(TerminalScreenView.logicalLine(contentOffset: oneLineUp, localY: 20, lineHeight: lh, totalLines: totalLines) == 5)
+    #expect(TerminalScreenView.SelectionModifier.logicalLine(contentOffset: oneLineUp, localY: 20, lineHeight: lh, totalLines: totalLines) == 5)
     // The last line (29) has scrolled off; the last visible is 28.
-    #expect(TerminalScreenView.logicalLine(contentOffset: oneLineUp, localY: viewportHeight - 8, lineHeight: lh, totalLines: totalLines) == 28)
+    #expect(TerminalScreenView.SelectionModifier.logicalLine(contentOffset: oneLineUp, localY: viewportHeight - 8, lineHeight: lh, totalLines: totalLines) == 28)
   }
 
   @Test func exactMultipleViewportHeightIsUnaffected() {
@@ -305,14 +305,14 @@ struct SelectionHitTestingTests {
     let bottomOffset = -(CGFloat(totalLines) * lh - viewportHeight)
 
     // Grid row 0 (line 6) spans viewport y [0, 17); y = 20 is row 1 = line 7.
-    #expect(TerminalScreenView.logicalLine(contentOffset: bottomOffset, localY: 20, lineHeight: lh, totalLines: totalLines) == 7)
-    #expect(TerminalScreenView.logicalLine(contentOffset: bottomOffset, localY: 0, lineHeight: lh, totalLines: totalLines) == 6)
+    #expect(TerminalScreenView.SelectionModifier.logicalLine(contentOffset: bottomOffset, localY: 20, lineHeight: lh, totalLines: totalLines) == 7)
+    #expect(TerminalScreenView.SelectionModifier.logicalLine(contentOffset: bottomOffset, localY: 0, lineHeight: lh, totalLines: totalLines) == 6)
   }
 
   @Test func clampsToContentBounds() {
     // Dragging past the top/bottom still maps to the first/last line.
-    #expect(TerminalScreenView.logicalLine(contentOffset: 0, localY: -50, lineHeight: 17, totalLines: 10) == 0)
-    #expect(TerminalScreenView.logicalLine(contentOffset: -500, localY: 500, lineHeight: 17, totalLines: 10) == 9)
+    #expect(TerminalScreenView.SelectionModifier.logicalLine(contentOffset: 0, localY: -50, lineHeight: 17, totalLines: 10) == 0)
+    #expect(TerminalScreenView.SelectionModifier.logicalLine(contentOffset: -500, localY: 500, lineHeight: 17, totalLines: 10) == 9)
   }
 }
 
@@ -355,10 +355,10 @@ struct StatusPinTests {
   /// The click/drag rule: same cell = click (pin), any movement = drag.
   @Test func clickIsPinDragIsSelection() {
     let start = TerminalCursor(row: 10, column: 3)
-    #expect(TerminalScreenView.isClick(start: start, end: TerminalCursor(row: 10, column: 3)))
-    #expect(!TerminalScreenView.isClick(start: start, end: TerminalCursor(row: 10, column: 4)))
-    #expect(!TerminalScreenView.isClick(start: start, end: TerminalCursor(row: 11, column: 3)))
-    #expect(!TerminalScreenView.isClick(start: start, end: TerminalCursor(row: 9, column: 1)))
+    #expect(TerminalScreenView.SelectionModifier.isClick(start: start, end: TerminalCursor(row: 10, column: 3)))
+    #expect(!TerminalScreenView.SelectionModifier.isClick(start: start, end: TerminalCursor(row: 10, column: 4)))
+    #expect(!TerminalScreenView.SelectionModifier.isClick(start: start, end: TerminalCursor(row: 11, column: 3)))
+    #expect(!TerminalScreenView.SelectionModifier.isClick(start: start, end: TerminalCursor(row: 9, column: 1)))
   }
 }
 
