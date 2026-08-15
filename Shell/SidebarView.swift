@@ -132,15 +132,15 @@ struct SidebarView: View {
           Text("Persistent")
           Spacer()
           Button {
-            model.createScreenSession()
-          } label: {
-            Image(systemName: "plus")
-          }.buttonStyle(.borderless).help("New persistent zsh session")
-          Button {
             model.screenMonitor.refresh()
           } label: {
             Image(systemName: "arrow.clockwise")
           }.buttonStyle(.borderless).help("Refresh persistent sessions")
+          Button {
+            model.createScreenSession()
+          } label: {
+            Image(systemName: "plus")
+          }.buttonStyle(.borderless).help("New persistent zsh session")
         }.padding(.trailing, 4)
       }
       #endif // os(macOS) — Local + Persistent sections (no local terminals on iOS)
