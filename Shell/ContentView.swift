@@ -68,29 +68,6 @@ struct ContentView: View {
             }
             .help("Create Action")
           }
-        } else {
-          ToolbarItem {
-            Button {
-              if let session = model.selectedSession {
-                // Persistent sessions: quit the session itself
-                // (screen -S <name> -X quit / tmux kill-session -t <name>),
-                // which also kills every attached client.
-                if case .screen(let info) = model.kind(of: session) {
-                  #if os(macOS)
-                  model.closeScreenSession(info)
-                  #else
-                  model.removeSession(session.id)
-                  #endif
-                } else {
-                  model.removeSession(session.id)
-                }
-              }
-            } label: {
-              Label("Close Terminal", systemImage: "xmark")
-            }
-            .help("Close Terminal")
-            .disabled(model.selectedSession == nil)
-          }
         }
       }
       .sheet(isPresented: $model.showingNewConnection) {
