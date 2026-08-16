@@ -173,7 +173,8 @@ public struct TerminalScreenView: View {
         terminalGrid(
           snapshot: snapshot,
           selectionStart: selectionStart,
-          selectionEnd: selectionEnd
+          selectionEnd: selectionEnd,
+          topInset: geo.safeAreaInsets.top
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
@@ -217,7 +218,8 @@ public struct TerminalScreenView: View {
   private func terminalGrid(
     snapshot: TerminalSnapshot,
     selectionStart: TerminalCursor?,
-    selectionEnd: TerminalCursor?
+    selectionEnd: TerminalCursor?,
+    topInset: CGFloat
   ) -> some View {
     let rows = snapshot.rows
     let totalLines = snapshot.totalLines
@@ -245,7 +247,7 @@ public struct TerminalScreenView: View {
     }
     // Scrolling behavior (anchor tracking, content-offset reporting,
     // bottom-tailing) lives in ScrollModifier.
-    .modifier(ScrollModifier(session: session, anchorLine: $anchorLine, scrollOffset: $scrollOffset))
+    .modifier(ScrollModifier(session: session, anchorLine: $anchorLine, scrollOffset: $scrollOffset, topInset: topInset))
   }
 
   // MARK: - Per-glyph advance normalization
@@ -558,13 +560,14 @@ public struct TerminalScreenView: View {
     // The grid only ever occupies the safe area; the scroll view may span
     // more (auto-hidden toolbar on macOS, notch/home indicator on iOS), so
     // the size the grid can use is the proposal minus the insets.
-    let contentWidth = size.width - safeArea.leading - safeArea.trailing
-    let contentHeight = size.height - safeArea.top - safeArea.bottom
+    let contentWidth = size.width
+    let contentHeight = size.height
     // The viewport's visible bottom edge in local coordinates, used by
     // SelectionModifier to extend a drag to the last visible line.
     viewportHeight = size.height - safeArea.bottom
     let columns = max(1, Int(floor((contentWidth - Self.gridPadding * 2) / Self.metrics.cellWidth)))
     let rows = max(1, Int(floor((contentHeight - Self.gridPadding * 2) / Self.metrics.lineHeight)))
+    print(columns, rows)
     let grid = TerminalGridSize(rows: rows, columns: columns)
     guard grid != lastGridSize else { return }
     lastGridSize = grid
@@ -607,6 +610,7 @@ extension TerminalScreenView {
     @Bindable var session: TerminalSession
     @Binding var anchorLine: Int?
     @Binding var scrollOffset: CGFloat
+    let topInset: CGFloat
 
     func body(content: Content) -> some View {
       content
@@ -629,7 +633,7 @@ extension TerminalScreenView {
         .onScrollGeometryChange(for: CGFloat.self) { geometry in
           geometry.contentOffset.y
         } action: { _, newOffset in
-          scrollOffset = -newOffset
+          scrollOffset = -newOffset - topInset
         }
         .onChange(of: session.snapshot.totalLines) { oldTotal, _ in
           // New output: keep following the bottom only when already at bottom.
@@ -837,7 +841,9 @@ extension TerminalScreenView {
       DragGesture(minimumDistance: 0, coordinateSpace: .local)
         .onChanged { value in
           focused.wrappedValue = true
-          handleDragChanged(at: value.location)
+          let location = value.location
+          let padding = TerminalScreenView.gridPadding
+          handleDragChanged(at: CGPoint(x: location.x - padding, y: location.y - padding))
         }
         .onEnded { value in
           handleDragEnded(at: value.location)
