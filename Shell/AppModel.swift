@@ -469,6 +469,13 @@ final class AppModel {
     }
     SSHKeychain.deletePassword(account: config.passwordAccount)
   }
+
+  /// Persists an EDITED connection in place (same id, so the sidebar row
+  /// and any running sessions keep referring to the same connection).
+  /// Unlike `connect(to:)` it does not open a session.
+  func updateConnection(_ config: SSHConfig) {
+    connectionStore.save(config)
+  }
   
   // MARK: - Public keys
   

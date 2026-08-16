@@ -7,6 +7,8 @@ struct SidebarView: View {
   @Environment(AppModel.self) private var model
   /// The session currently being renamed (shows an inline text field).
   @State private var renamingSessionID: UUID?
+  /// The saved SSH connection currently being edited (opens the edit sheet).
+  @State private var editingConfig: SSHConfig?
   #if os(macOS)
   /// The screen session currently being renamed (keyed by full name).
   @State private var renamingScreenName: String?
@@ -150,7 +152,8 @@ struct SidebarView: View {
             renamingSessionID: renamingSessionID,
             onBeginRename: { renamingSessionID = $0 },
             onCommitRename: commitRename,
-            onCancelRename: { renamingSessionID = nil }
+            onCancelRename: { renamingSessionID = nil },
+            onEdit: { editingConfig = $0 }
           )
         }
         .onMove { source, destination in
@@ -234,6 +237,11 @@ struct SidebarView: View {
         AuthorizedKeysView(target: target)
           .environment(model)
       }
+    }
+    // The Edit… action on a saved SSH connection: the same form as new
+    // connections, prefilled, saving in place (same id).
+    .sheet(item: $editingConfig) { config in
+      NewConnectionView(config: config)
     }
     .alert("Authorized Keys", isPresented: Binding(
       get: { model.authorizedKeysError != nil },
@@ -375,12 +383,14 @@ private struct SSHConfigGroup: View {
   let onBeginRename: (UUID) -> Void
   let onCommitRename: (UUID, String) -> Void
   let onCancelRename: () -> Void
+  let onEdit: (SSHConfig) -> Void
   
   var body: some View {
     SSHConfigRow(config: config)
       .tag(config.id)
       .contextMenu {
         Button("Connect") { model.connect(to: config) }
+        Button("Edit…") { onEdit(config) }
         Button("Copy Public Key") { model.copyPublicKey() }
         Button("Authorized Keys", systemImage: "key.2.on.ring") {
           model.showAuthorizedKeys(for: .ssh(config))
@@ -575,25 +585,44 @@ private struct SessionRow: View {
   }
 }
 
-/// Sheet for creating a new SSH connection.
+/// Sheet for creating a NEW SSH connection, or EDITING a saved one (when
+/// initialized with a `config`): fields prefill and the toolbar button
+/// saves in place (same id) instead of connecting.
 struct NewConnectionView: View {
   @Environment(AppModel.self) private var model
   @Environment(\.dismiss) private var dismiss
   
-  @State private var name = ""
-  @State private var host = ""
-  @State private var user = NSUserName()
-  @State private var port = 22
-  @State private var authMethod = SSHConfig.AuthMethod.keychainKey
-  @State private var password = ""
-  @State private var savePassword = true
+  /// Non-nil when editing a saved connection.
+  private let editing: SSHConfig?
+  
+  @State private var name: String
+  @State private var host: String
+  @State private var user: String
+  @State private var port: Int
+  @State private var authMethod: SSHConfig.AuthMethod
+  @State private var password: String
+  @State private var savePassword: Bool
   @State private var keyError: String?
+  
+  init(config: SSHConfig? = nil) {
+    editing = config
+    _name = State(initialValue: config?.name ?? "")
+    _host = State(initialValue: config?.host ?? "")
+    _user = State(initialValue: config?.user ?? NSUserName())
+    _port = State(initialValue: config?.port ?? 22)
+    _authMethod = State(initialValue: config?.authMethod ?? .keychainKey)
+    _password = State(initialValue: "")
+    _savePassword = State(initialValue: config?.savePassword ?? true)
+    _keyError = State(initialValue: nil)
+  }
   
   private var canConnect: Bool {
     !host.trimmingCharacters(in: .whitespaces).isEmpty
     && !user.trimmingCharacters(in: .whitespaces).isEmpty
     && port > 0 && port < 65536
-    && (authMethod == .keychainKey || !password.isEmpty)
+    && (authMethod == .keychainKey
+        || !password.isEmpty
+        || editing?.authMethod == .password)  // stored password still applies
   }
   
   var body: some View {
@@ -639,8 +668,8 @@ struct NewConnectionView: View {
         }.formStyle(.grouped)
       }.toolbar {
         ToolbarItem(placement: .confirmationAction) {
-          Button("Connect", systemImage: "checkmark") {
-            connect()
+          Button(editing == nil ? "Connect" : "Save", systemImage: "checkmark") {
+            submit()
           }.keyboardShortcut(.defaultAction).disabled(!canConnect)
         }
       }.alert("Could not copy public key", isPresented: Binding(
@@ -650,15 +679,16 @@ struct NewConnectionView: View {
         Button("OK", role: .cancel) {}
       } message: {
         Text(keyError ?? "")
-      }.navigationTitle("New Connection")
+      }.navigationTitle(editing == nil ? "New Connection" : "Edit Connection")
 #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
 #endif
     }
   }
   
-  private func connect() {
+  private func submit() {
     let config = SSHConfig(
+      id: editing?.id ?? UUID(),
       name: name.trimmingCharacters(in: .whitespaces),
       host: host.trimmingCharacters(in: .whitespaces),
       user: user.trimmingCharacters(in: .whitespaces),
@@ -666,14 +696,25 @@ struct NewConnectionView: View {
       authMethod: authMethod,
       savePassword: savePassword
     )
+    // Password lifecycle: a typed password saves or clears per the toggle;
+    // editing without retyping leaves the stored password untouched; the
+    // toggle turned off without a new password deletes it.
     if authMethod == .password {
-      if savePassword {
-        try? SSHKeychain.savePassword(password, account: config.passwordAccount)
-      } else {
+      if !password.isEmpty {
+        if savePassword {
+          try? SSHKeychain.savePassword(password, account: config.passwordAccount)
+        } else {
+          SSHKeychain.deletePassword(account: config.passwordAccount)
+        }
+      } else if !savePassword {
         SSHKeychain.deletePassword(account: config.passwordAccount)
       }
     }
-    model.connect(to: config)
+    if editing != nil {
+      model.updateConnection(config)
+    } else {
+      model.connect(to: config)
+    }
     dismiss()
   }
 }
