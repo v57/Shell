@@ -633,19 +633,31 @@ final class AppModel {
   // MARK: - Actions
   
   /// Runs `action` by opening a separate terminal session in the selected
-  /// session's environment (the local machine, or the same SSH host).
+  /// session's environment (the local machine, or the same SSH host). With
+  /// NO session selected (e.g. nothing is open), defaults to the local
+  /// machine so ⌘R stays usable from a fresh start.
   func runAction(_ action: Action) {
-    guard let session = selectedSession else { return }
     actions.touch(action.id)
     let spec: ActionSpec
-    switch kind(of: session) {
-    case .local, .screen:
+    if let session = selectedSession {
+      switch kind(of: session) {
+      case .local, .screen:
+        spec = ActionSpec(action: action, config: nil)
+      case .ssh(let config):
+        spec = ActionSpec(action: action, config: config)
+      case .action:
+        // Running an action from an action session falls back to local.
+        spec = ActionSpec(action: action, config: nil)
+      }
+    } else {
+      #if os(macOS)
+      // Nothing selected (fresh start / nothing open): run locally.
       spec = ActionSpec(action: action, config: nil)
-    case .ssh(let config):
-      spec = ActionSpec(action: action, config: config)
-    case .action:
-      // Running an action from an action session falls back to local.
-      spec = ActionSpec(action: action, config: nil)
+      #else
+      // Local actions need a local pty, which iOS doesn't have; the
+      // overlay's applicability filter never offers one there anyway.
+      return
+      #endif
     }
     // The transport picks the environment: a fresh SSH exec channel for
     // remote actions, a local zsh -lc pty for local ones.

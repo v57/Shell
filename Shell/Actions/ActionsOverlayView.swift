@@ -6,8 +6,10 @@ import Terminal
 /// is always focused; Enter runs the first matching action (even with an
 /// empty query — it runs the first applicable one). Actions are grouped
 /// by category into sections; each section is a horizontal ScrollView of
-/// chips. Only actions applicable to the current environment are shown
-/// (everything is listed, but disabled, while no terminal is selected).
+/// chips. With a terminal selected, only actions applicable to that
+/// environment are shown; with none selected everything is listed and
+/// still runnable — `runAction` defaults to the local machine (macOS;
+/// on iOS there is no local pty, so chips stay disabled).
 struct ActionsOverlayView: View {
   @Environment(AppModel.self) private var model
   @State private var query = ""
@@ -205,7 +207,9 @@ struct ActionsOverlayView: View {
 }
 
 /// A single action chip; clicking it runs the action in the current
-/// environment (disabled while no terminal is selected).
+/// environment. With no terminal selected it runs on the local machine
+/// (macOS; disabled on iOS, where local actions need a pty that doesn't
+/// exist — see AppModel.runAction).
 private struct ActionChip: View {
   @Environment(AppModel.self) private var model
   let action: Action
@@ -222,7 +226,7 @@ private struct ActionChip: View {
         .colorScheme(.dark)
     }
     .buttonStyle(.plain)
-    .disabled(model.selectedSession == nil)
+    .disabled(!canRun)
     .contextMenu {
       Button("Edit…") {
         model.editAction(action)
@@ -231,13 +235,32 @@ private struct ActionChip: View {
         model.actions.remove(action.id)
       }
     }
-    .help(model.selectedSession == nil
-      ? "Select a terminal first"
-      : "Run in " + environmentLabel)
+    .help(helpText)
   }
 
-  private var environmentLabel: String {
-    guard let session = model.selectedSession else { return "the current environment" }
+  /// No terminal selected: macOS runs the action locally by default, iOS
+  /// has no local pty so the run would be a silent no-op — keep disabled.
+  private var canRun: Bool {
+    if model.selectedSession != nil { return true }
+    #if os(macOS)
+    return true
+    #else
+    return false
+    #endif
+  }
+
+  private var helpText: String {
+    guard let session = model.selectedSession else {
+      #if os(macOS)
+      return "Run locally (no terminal selected)"
+      #else
+      return "Select a terminal first"
+      #endif
+    }
+    return "Run in " + environmentLabel(for: session)
+  }
+
+  private func environmentLabel(for session: TerminalSession) -> String {
     switch model.kind(of: session) {
     case .local, .screen, .action:
       return "Local"
