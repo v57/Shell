@@ -104,7 +104,7 @@ struct ContentView: View {
               Button {
                 model.runSmartAction(action, in: directory)
               } label: {
-                Label(action.title, systemImage: "play")
+                Label(action.title, systemImage: smartActionIcon(for: action.kind))
               }
               .help(action.command)
             }
@@ -236,6 +236,15 @@ struct ContentView: View {
   private var smartActionsForDisplay: [IntegrationAction] {
     guard let target = smartActionsTarget else { return model.smartActionActions }
     return model.smartActionActions.filter { $0.target == nil || $0.target == target }
+  }
+
+  /// SF Symbol for a smart-action button by kind.
+  private func smartActionIcon(for kind: IntegrationActionKind) -> String {
+    switch kind {
+    case .build: return "hammer.fill"
+    case .run: return "play.fill"
+    case .test: return "play.diamond"
+    }
   }
 }
 
