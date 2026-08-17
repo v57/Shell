@@ -35,6 +35,20 @@ private final class RecordingIntegration: TerminalIntegration {
   }
 }
 
+private final class MultiActionIntegration: TerminalIntegration {
+  let id: String
+  let displayName: String
+  var isAvailable = true
+  let produced: [IntegrationAction]
+  init(id: String, produced: [IntegrationAction]) {
+    self.id = id
+    self.displayName = id
+    self.produced = produced
+  }
+  func relevance(files: [DirectoryEntry]) -> Bool { true }
+  func scan(directory: URL, files: [DirectoryEntry]) -> [IntegrationAction] { produced }
+}
+
 struct SmartActionsCoordinatorTests {
   private func makeDir() throws -> URL {
     let dir = FileManager.default.temporaryDirectory
@@ -109,6 +123,30 @@ struct SmartActionsCoordinatorTests {
     let actions = coordinator.refresh(directory: dir)
     #expect(integration.scanCalls == 0)
     #expect(actions.isEmpty)
+  }
+
+  @Test func refreshOrdersByKindThenIntegration() throws {
+    let dir = try makeDir()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let xcode = MultiActionIntegration(id: "xcode", produced: [
+      IntegrationAction(kind: .build, title: "XB", target: nil, command: "b"),
+      IntegrationAction(kind: .test, title: "XT", target: nil, command: "t"),
+      IntegrationAction(kind: .run, title: "XR", target: nil, command: "r"),
+    ])
+    let swift = MultiActionIntegration(id: "swift", produced: [
+      IntegrationAction(kind: .run, title: "SRun", target: nil, command: "sr"),
+      IntegrationAction(kind: .build, title: "SBuild", target: nil, command: "sb"),
+    ])
+    let coordinator = SmartActionsCoordinator(
+      integrations: [xcode, swift],
+      cacheStore: MemCacheStore(),
+      probe: { EnvironmentProbe(xcodebuildAvailable: true, swiftAvailable: true) }
+    )
+    coordinator.probeEnvironment()
+
+    let titles = coordinator.refresh(directory: dir).map(\.title)
+    // Kind order Run, Build, Test; within a kind, Xcode (index 0) before Swift.
+    #expect(titles == ["XR", "SRun", "XB", "SBuild", "XT"])
   }
 
   @Test func irrelevantIntegrationIsNotScanned() throws {

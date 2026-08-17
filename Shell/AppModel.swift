@@ -63,8 +63,8 @@ final class AppModel {
   /// probed once at startup; per-directory results are encrypted-cached.
   let smartActions = SmartActionsCoordinator(
     integrations: [
-      SwiftIntegration(isAvailable: false),
       XcodeIntegration(isAvailable: false),
+      SwiftIntegration(isAvailable: false),
     ],
     cacheStore: SmartActionsStore()
   )
@@ -766,10 +766,12 @@ final class AppModel {
     currentSmartActionByDirectory[directory.standardizedFileURL.path]
   }
 
-  /// Whether a smart-action run is in progress for the directory (gates the
-  /// toolbar's Stop button's disabled state).
-  func isSmartActionRunning(in directory: URL) -> Bool {
-    currentSmartAction(in: directory) != nil
+  /// Whether a specific smart action is currently running in `directory`
+  /// (gates the toolbar control's stop.fill state).
+  func isSmartActionRunning(_ actionID: UUID, in directory: URL) -> Bool {
+    guard let session = currentSmartAction(in: directory),
+          case .action(let spec) = kind(of: session) else { return false }
+    return spec.action.id == actionID
   }
 
   /// Runs a smart action as a Running-section session in `directory` with no
@@ -783,7 +785,7 @@ final class AppModel {
     let command = "cd \(shellQuote(directory.path)) && \(action.command)"
     let spec = ActionSpec(
       action: Action(
-        id: UUID(),
+        id: action.id,
         name: action.title,
         appliesToLocal: true,
         commands: command,

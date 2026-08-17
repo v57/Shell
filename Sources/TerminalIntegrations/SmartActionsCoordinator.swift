@@ -53,10 +53,24 @@ public final class SmartActionsCoordinator {
     }
 
     var actions: [IntegrationAction] = []
-    for integration in integrations
+    // Keep each action's integration index so the final list can be ordered
+    // (kind first, integration as tiebreaker: Run/Build/Test, Xcode before
+    // SwiftPM before other integrations).
+    var tagged: [(integration: Int, action: IntegrationAction)] = []
+    for (index, integration) in integrations.enumerated()
     where integration.isAvailable && integration.relevance(files: entries) {
-      actions += integration.scan(directory: canonical, files: entries)
+      for action in integration.scan(directory: canonical, files: entries) {
+        tagged.append((index, action))
+      }
     }
+    actions = tagged
+      .sorted { lhs, rhs in
+        if lhs.action.kind.toolbarOrder != rhs.action.kind.toolbarOrder {
+          return lhs.action.kind.toolbarOrder < rhs.action.kind.toolbarOrder
+        }
+        return lhs.integration < rhs.integration
+      }
+      .map(\.action)
 
     cacheStore.save(
       IntegrationCacheEntry(fingerprint: fingerprint, actions: actions),

@@ -103,13 +103,6 @@ struct ContentView: View {
             ForEach(smartActionGroups) { group in
               SmartActionMenu(actions: group.actions, directory: directory)
             }
-            Button {
-              model.stopSmartAction(in: directory)
-            } label: {
-              Label("Stop", systemImage: "stop.fill")
-            }
-            .disabled(!model.isSmartActionRunning(in: directory))
-            .help("Stop the running action")
           }
         }
         #endif
@@ -257,45 +250,57 @@ private struct SmartActionGroup: Identifiable {
 
 /// A smart-action control for one kind: renders a single button when there's
 /// one action, or a menu whose primary action runs the currently selected
-/// action (the dropdown switches the selection). Follows the same icon per
-/// kind (Build = hammer, Run = play, Test = play.diamond). Stop stays a
-/// separate always-visible button.
+/// action (the dropdown switches the selection). Normal icon per kind
+/// (Build = hammer, Run = play, Test = play.diamond); when the selected action
+/// is running the icon flips to `stop.fill` and the primary action stops it
+/// instead — so there's no separate Stop button.
 private struct SmartActionMenu: View {
   let actions: [IntegrationAction]
   let directory: URL
   @Environment(AppModel.self) private var model
   @State private var selectedAction: IntegrationAction?
 
+  private var selected: IntegrationAction { selectedAction ?? actions[0] }
+
   var body: some View {
     if actions.count > 1 {
-      let selected = selectedAction ?? actions[0]
       Menu {
         ForEach(actions) { action in
           Button {
             selectedAction = action
           } label: {
-            Label(action.title, systemImage: smartActionIcon(for: action.kind))
+            Label(action.title, systemImage: smartActionIcon(for: action))
           }
         }
       } label: {
-        Label(selected.title, systemImage: smartActionIcon(for: selected.kind))
+        Label(selected.title, systemImage: smartActionIcon(for: selected))
       } primaryAction: {
-        model.runSmartAction(selected, in: directory)
+        toggle(selected)
       }
       .menuIndicator(.hidden)
-      .help(selected.command)
     } else if let action = actions.first {
       Button {
-        model.runSmartAction(action, in: directory)
+        toggle(action)
       } label: {
-        Label(action.title, systemImage: smartActionIcon(for: action.kind))
+        Label(action.title, systemImage: smartActionIcon(for: action))
       }
-      .help(action.command)
     }
   }
 
-  private func smartActionIcon(for kind: IntegrationActionKind) -> String {
-    switch kind {
+  /// Run the action, or stop it when it's already the running one.
+  private func toggle(_ action: IntegrationAction) {
+    if model.isSmartActionRunning(action.id, in: directory) {
+      model.stopSmartAction(in: directory)
+    } else {
+      model.runSmartAction(action, in: directory)
+    }
+  }
+
+  private func smartActionIcon(for action: IntegrationAction) -> String {
+    if model.isSmartActionRunning(action.id, in: directory) {
+      return "stop.fill"
+    }
+    switch action.kind {
     case .build: return "hammer.fill"
     case .run: return "play.fill"
     case .test: return "play.diamond"
