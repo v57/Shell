@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 import Terminal
 
@@ -15,6 +16,10 @@ struct ContentView: View {
   /// SwiftData (observed as a launch crash in reload()). Init already
   /// loaded everything, so the first activation is skipped.
   @State private var hasActivatedOnce = false
+  /// Live cwd of the selected local session, polled every second (follows
+  /// the shell's `cd`). Empty for non-local sessions — no subtitle shown.
+  @State private var localDirectoryText = ""
+  private let directoryTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
   var body: some View {
     @Bindable var model = model
@@ -27,6 +32,7 @@ struct ContentView: View {
           TerminalView(session: session)
             .id(session.id)
             .navigationTitle(model.displayName(for: session))
+            .navigationDirectorySubtitle(localDirectoryText)
         } else if let historySession = model.selectedHistorySession {
           HistorySessionView(session: historySession)
             .id(historySession.id)
@@ -126,6 +132,9 @@ struct ContentView: View {
       }
     }
     .animation(.easeOut(duration: 0.15), value: model.showingActions)
+    .onReceive(directoryTimer) { _ in
+      refreshLocalDirectory()
+    }
     .onChange(of: model.showingActions) { _, showing in
       #if os(macOS)
       if showing {
@@ -141,6 +150,39 @@ struct ContentView: View {
         self.escMonitor = nil
       }
       #endif
+    }
+  }
+
+  /// Re-queries the selected local session's cwd so the window subtitle
+  /// follows the shell's `cd`. Non-local sessions clear the subtitle.
+  /// The home-directory prefix is shortened to `~` for display.
+  private func refreshLocalDirectory() {
+    guard let session = model.selectedSession,
+          case .local = model.kind(of: session),
+          let path = session.currentDirectory?.path else {
+      localDirectoryText = ""
+      return
+    }
+    let home = NSHomeDirectory()
+    if path == home {
+      localDirectoryText = "~"
+    } else if path.hasPrefix(home + "/") {
+      localDirectoryText = "~" + path.dropFirst(home.count)
+    } else {
+      localDirectoryText = path
+    }
+  }
+}
+
+/// Shows a navigation subtitle only when `text` is non-empty (empty text
+/// would otherwise render an empty subtitle slot).
+private extension View {
+  @ViewBuilder
+  func navigationDirectorySubtitle(_ text: String) -> some View {
+    if text.isEmpty {
+      self
+    } else {
+      self.navigationSubtitle(Text(text))
     }
   }
 }

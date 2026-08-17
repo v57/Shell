@@ -59,6 +59,12 @@ public protocol TerminalTransport: AnyObject {
   func write(_ data: Data)
   func resize(columns: Int, rows: Int)
   func close()
+
+  /// The OS process id of the transport's child process, when it owns one
+  /// (local pty). Nil for network transports (SSH) and test doubles. Lets
+  /// the session read live child state — e.g. the current working
+  /// directory via `proc_pidinfo`.
+  var childProcessID: pid_t? { get }
 }
 
 /// Non-SSH transports never produce auth prompts — default no-ops so
@@ -72,6 +78,9 @@ public extension TerminalTransport {
     get { nil }
     set {}
   }
+
+  /// Transports without a child process (SSH, test doubles) report nil.
+  var childProcessID: pid_t? { nil }
 }
 
 // MARK: - Local pty transport
@@ -93,6 +102,11 @@ public final class LocalPTYTransport: TerminalTransport {
   public var onConnected: (() -> Void)?
   public var onTerminated: ((String) -> Void)?
   public var onExit: ((Int32) -> Void)?
+
+  /// The child process's PID once spawned (nil before start and after
+  /// exit/close). The session uses it to read live child state such as
+  /// the current working directory.
+  public var childProcessID: pid_t? { childPID >= 0 ? childPID : nil }
 
   private let executable: String
   private let argv: [String]

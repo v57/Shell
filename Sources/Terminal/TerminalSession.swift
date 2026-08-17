@@ -1,5 +1,6 @@
 #if os(macOS)
 import AppKit
+import Darwin
 #else
 import UIKit
 #endif
@@ -50,6 +51,31 @@ public final class TerminalSession: Identifiable {
   /// Exit code of an action session's process (bits 8-15 of the wait
   /// status; nil for non-action sessions and while running).
   public var actionExitCode: Int32?
+
+  /// The current working directory of the child process, read live from
+  /// the OS on each access. Follows the shell's `cd` without any shell
+  /// cooperation (libproc `PROC_PIDVNODEPATHINFO`). Nil for non-local
+  /// transports (SSH has no local child) and while no child is running.
+  ///
+  /// Cheap to call (one syscall), so a view can poll it on a timer to
+  /// keep a subtitle or status line in sync.
+  public var currentDirectory: URL? {
+    #if os(macOS)
+    guard let pid = transport.childProcessID else { return nil }
+    var info = proc_vnodepathinfo()
+    let size = MemoryLayout<proc_vnodepathinfo>.size
+    let status = proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &info, Int32(size))
+    guard status == Int32(size), info.pvi_cdir.vip_path.0 != 0 else { return nil }
+    var pathBytes = info.pvi_cdir.vip_path
+    let path = withUnsafeBytes(of: &pathBytes) { raw -> String? in
+      guard let base = raw.baseAddress else { return nil }
+      return String(cString: base.assumingMemoryBound(to: CChar.self))
+    }
+    return path.map { URL(fileURLWithPath: $0) }
+    #else
+    return nil
+    #endif
+  }
 
   /// Called once when an action session completes (process exit or
   /// remote exec exit status). AppModel decides keep-vs-remove.

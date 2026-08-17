@@ -252,6 +252,30 @@ struct TerminalParserTests {
     #expect(countAfterExit > 0)
     #expect(events.value == countAfterExit)
   }
+
+  /// The session reads the child's cwd live from the OS: a local shell
+  /// spawned in the home directory reports it without any shell
+  /// cooperation (no `pwd` round-trip).
+  @MainActor
+  @Test func currentDirectoryReportsLocalChildCwd() async throws {
+    let transport = LocalPTYTransport(
+      executable: "/bin/sh",
+      argv: ["sh", "-c", "sleep 30"]
+    )
+    let session = TerminalSession(transport: transport)
+    defer { session.close() }
+    try await Task.sleep(for: .milliseconds(250))
+
+    #expect(session.currentDirectory?.path == URL(fileURLWithPath: NSHomeDirectory()).resolvingSymlinksInPath().path)
+  }
+
+  /// Non-local transports (SSH, test doubles) have no child process to
+  /// probe — currentDirectory stays nil.
+  @MainActor
+  @Test func currentDirectoryIsNilWithoutChildProcess() {
+    let session = TerminalSession(transport: CapturingTransport())
+    #expect(session.currentDirectory == nil)
+  }
 }
 
 // MARK: - Selection hit-testing (content-space mapping)
