@@ -100,13 +100,8 @@ struct ContentView: View {
               }
               .help("Select target")
             }
-            ForEach(smartActionsForDisplay) { action in
-              Button {
-                model.runSmartAction(action, in: directory)
-              } label: {
-                Label(action.title, systemImage: smartActionIcon(for: action.kind))
-              }
-              .help(action.command)
+            ForEach(smartActionGroups) { group in
+              SmartActionMenu(actions: group.actions, directory: directory)
             }
             Button {
               model.stopSmartAction(in: directory)
@@ -238,7 +233,67 @@ struct ContentView: View {
     return model.smartActionActions.filter { $0.target == nil || $0.target == target }
   }
 
-  /// SF Symbol for a smart-action button by kind.
+  /// Displayed actions grouped by kind (icon), preserving first-appearance
+  /// order. Groups with a single action render as a plain button; groups with
+  /// several render as a menu whose primary action runs the selected one.
+  private var smartActionGroups: [SmartActionGroup] {
+    var order: [IntegrationActionKind] = []
+    var map: [IntegrationActionKind: [IntegrationAction]] = [:]
+    for action in smartActionsForDisplay {
+      if map[action.kind] == nil { order.append(action.kind) }
+      map[action.kind, default: []].append(action)
+    }
+    return order.map { SmartActionGroup(kind: $0, actions: map[$0] ?? []) }
+  }
+}
+
+/// A group of smart actions sharing the same kind (icon). Used by the toolbar
+/// to render several same-icon actions as a menu instead of many buttons.
+private struct SmartActionGroup: Identifiable {
+  let kind: IntegrationActionKind
+  let actions: [IntegrationAction]
+  var id: IntegrationActionKind { kind }
+}
+
+/// A smart-action control for one kind: renders a single button when there's
+/// one action, or a menu whose primary action runs the currently selected
+/// action (the dropdown switches the selection). Follows the same icon per
+/// kind (Build = hammer, Run = play, Test = play.diamond). Stop stays a
+/// separate always-visible button.
+private struct SmartActionMenu: View {
+  let actions: [IntegrationAction]
+  let directory: URL
+  @Environment(AppModel.self) private var model
+  @State private var selectedAction: IntegrationAction?
+
+  var body: some View {
+    if actions.count > 1 {
+      let selected = selectedAction ?? actions[0]
+      Menu {
+        ForEach(actions) { action in
+          Button {
+            selectedAction = action
+          } label: {
+            Label(action.title, systemImage: smartActionIcon(for: action.kind))
+          }
+        }
+      } label: {
+        Label(selected.title, systemImage: smartActionIcon(for: selected.kind))
+      } primaryAction: {
+        model.runSmartAction(selected, in: directory)
+      }
+      .menuIndicator(.hidden)
+      .help(selected.command)
+    } else if let action = actions.first {
+      Button {
+        model.runSmartAction(action, in: directory)
+      } label: {
+        Label(action.title, systemImage: smartActionIcon(for: action.kind))
+      }
+      .help(action.command)
+    }
+  }
+
   private func smartActionIcon(for kind: IntegrationActionKind) -> String {
     switch kind {
     case .build: return "hammer.fill"
