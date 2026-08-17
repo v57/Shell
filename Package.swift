@@ -30,6 +30,18 @@ let package = Package(
                 .swiftLanguageMode(.v5),
             ]
         ),
-        .target(name: "TerminalIntegrations")
+        .target(
+            name: "TerminalIntegrations",
+            swiftSettings: [
+                .swiftLanguageMode(.v5),
+            ]
+        ),
+        .testTarget(
+            name: "TerminalIntegrationsTests",
+            dependencies: ["TerminalIntegrations"],
+            swiftSettings: [
+                .swiftLanguageMode(.v5),
+            ]
+        )
     ]
 )
