@@ -1,5 +1,6 @@
 import Crypto
 import Foundation
+import SwiftData
 import Testing
 import Terminal
 @testable import Shell
@@ -168,6 +169,98 @@ struct FeatureTests {
     _ = reader.decryptedNote(id: b.id)
     #expect(decryptCalls == 2)          // note B decrypts on demand only
   }
+
+  /// Notes are sorted by last usage: most recently updated first. Seeded
+  /// with explicit timestamps so the order is fully deterministic.
+  @Test @MainActor func notesSortMostRecentlyUpdatedFirst() throws {
+    let root = FileManager.default.temporaryDirectory
+      .appendingPathComponent("notes-sort-\(UUID().uuidString)", isDirectory: true)
+    let (stores, cleanup) = try NoteStores.makeTest(in: root)
+    defer { cleanup() }
+    let key = SymmetricKey(size: .bits256)
+    let context = stores.local.mainContext
+    let oldest = NoteRecord(id: UUID(), lastUpdate: Date(timeIntervalSince1970: 100), keyId: NoteKeyID.device)
+    let middle = NoteRecord(id: UUID(), lastUpdate: Date(timeIntervalSince1970: 200), keyId: NoteKeyID.device)
+    let newest = NoteRecord(id: UUID(), lastUpdate: Date(timeIntervalSince1970: 300), keyId: NoteKeyID.device)
+    for record in [oldest, middle, newest] { context.insert(record) }
+    try context.save()
+
+    let store = NotesStore(stores: stores)
+    store.deviceKeyProvider = { key }
+    store.iCloudKeyProvider = { key }
+    #expect(store.notes.map(\.id) == [newest.id, middle.id, oldest.id])
+  }
+
+  /// Editing a note moves it to the top immediately (the sort key bumps on
+  /// keystroke, not only when the 5s autosave lands).
+  @Test @MainActor func editingNoteMovesItToTopImmediately() throws {
+    let root = FileManager.default.temporaryDirectory
+      .appendingPathComponent("notes-edit-sort-\(UUID().uuidString)", isDirectory: true)
+    let (stores, cleanup) = try NoteStores.makeTest(in: root)
+    defer { cleanup() }
+    let key = SymmetricKey(size: .bits256)
+    let context = stores.local.mainContext
+    let older = NoteRecord(id: UUID(), lastUpdate: Date(timeIntervalSince1970: 100), keyId: NoteKeyID.device)
+    let newer = NoteRecord(id: UUID(), lastUpdate: Date(timeIntervalSince1970: 200), keyId: NoteKeyID.device)
+    for record in [older, newer] { context.insert(record) }
+    try context.save()
+
+    let store = NotesStore(stores: stores)
+    store.deviceKeyProvider = { key }
+    store.iCloudKeyProvider = { key }
+    #expect(store.notes.first?.id == newer.id)
+
+    store.updateText("edited", for: older.id)
+    #expect(store.notes.first?.id == older.id)
+
+    // The persisted date catches up at flush; order stays.
+    store.flush()
+    #expect(store.notes.first?.id == older.id)
+  }
+
+  /// A new note lands at the top (it is the most recently used) and the
+  /// order stays deterministic across reloads — no random shuffling.
+  @Test @MainActor func newNoteLandsAtTopAndOrderSurvivesReload() throws {
+    let root = FileManager.default.temporaryDirectory
+      .appendingPathComponent("notes-new-sort-\(UUID().uuidString)", isDirectory: true)
+    let (stores, cleanup) = try NoteStores.makeTest(in: root)
+    defer { cleanup() }
+    let key = SymmetricKey(size: .bits256)
+
+    let store = NotesStore(stores: stores)
+    store.deviceKeyProvider = { key }
+    store.iCloudKeyProvider = { key }
+    let first = store.addNote()
+    let second = store.addNote()
+    #expect(store.notes.first?.id == second.id)
+
+    // Reload from disk (fresh store, cold cache) preserves the order.
+    let reloaded = NotesStore(stores: stores)
+    reloaded.deviceKeyProvider = { key }
+    reloaded.iCloudKeyProvider = { key }
+    #expect(reloaded.notes.map(\.id) == [second.id, first.id])
+  }
+
+  /// Equal timestamps (e.g. notes created in the same instant) tie-break
+  /// by id, so the order never shuffles between reloads.
+  @Test @MainActor func equalTimestampsTieBreakDeterministically() throws {
+    let root = FileManager.default.temporaryDirectory
+      .appendingPathComponent("notes-tie-\(UUID().uuidString)", isDirectory: true)
+    let (stores, cleanup) = try NoteStores.makeTest(in: root)
+    defer { cleanup() }
+    let context = stores.local.mainContext
+    let a = NoteRecord(id: UUID(), lastUpdate: Date(timeIntervalSince1970: 500), keyId: NoteKeyID.device)
+    let b = NoteRecord(id: UUID(), lastUpdate: Date(timeIntervalSince1970: 500), keyId: NoteKeyID.device)
+    for record in [a, b] { context.insert(record) }
+    try context.save()
+
+    let expected = [a.id, b.id].sorted { $0.uuidString < $1.uuidString }
+    let store = NotesStore(stores: stores)
+    #expect(store.notes.map(\.id) == expected)
+    let reloaded = NotesStore(stores: stores)
+    #expect(reloaded.notes.map(\.id) == expected)
+  }
+
 }
 
 /// Opt-in because unsigned command-line test hosts cannot reliably access the

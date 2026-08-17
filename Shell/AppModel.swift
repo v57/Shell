@@ -523,7 +523,7 @@ final class AppModel {
   func deleteNote(_ id: UUID) {
     notes.deleteNote(id)
     if selection == id {
-      selection = notes.notes.last?.id
+      selection = notes.notes.first?.id
     }
   }
 

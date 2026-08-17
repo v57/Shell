@@ -36,7 +36,9 @@ final class NotesStore {
     var text: String
   }
 
-  /// All notes (local + iCloud), sorted by lastUpdate (oldest first).
+  /// All notes (local + iCloud), sorted by last usage: most recently
+  /// updated first. Equal timestamps tie-break by id so the order is
+  /// deterministic across reloads (Dictionary iteration is not stable).
   private(set) var notes: [NoteSummary] = []
 
   /// The most recent encryption or persistence failure. Plaintext is never
@@ -123,7 +125,7 @@ final class NotesStore {
   /// available) and returns its summary. The caller selects it.
   @discardableResult
   func addNote() -> NoteSummary {
-    let record = NoteRecord(keyId: NoteKeyID.device)
+    let record = NoteRecord(lastUpdate: Date(), keyId: NoteKeyID.device)
     localContext.insert(record)
     try? localContext.save()
     reload()
@@ -161,6 +163,12 @@ final class NotesStore {
       text: text
     )
     pendingText[id] = text
+    // Bump the sort key immediately so the sidebar reorders while typing
+    // (the persisted date catches up when the autosave lands).
+    if let index = notes.firstIndex(where: { $0.id == id }) {
+      notes[index].lastUpdate = Date()
+      resortNotes()
+    }
     scheduleSave(id, text: text)
   }
 
@@ -256,6 +264,7 @@ final class NotesStore {
       pendingText[id] = nil
       if let index = notes.firstIndex(where: { $0.id == id }) {
         notes[index].lastUpdate = record.lastUpdate
+        resortNotes()
       }
       storageError = nil
     } catch {
@@ -288,7 +297,18 @@ final class NotesStore {
         }
       }
     }
-    notes = byID.values.sorted { $0.lastUpdate < $1.lastUpdate }
+    notes = Array(byID.values)
+    resortNotes()
+  }
+
+  /// Sorts `notes` by last usage: most recently updated first, equal
+  /// timestamps tie-broken by id (stable, deterministic — Dictionary
+  /// iteration order is not).
+  private func resortNotes() {
+    notes.sort { a, b in
+      if a.lastUpdate == b.lastUpdate { return a.id.uuidString < b.id.uuidString }
+      return a.lastUpdate > b.lastUpdate
+    }
   }
 
   // MARK: - Title/subtitle derivation (also used at save time by NoteCrypto)
