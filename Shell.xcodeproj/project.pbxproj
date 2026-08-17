@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		26C2D067302C066C008363F2 /* Terminal in Frameworks */ = {isa = PBXBuildFile; productRef = 26C2D066302C066C008363F2 /* Terminal */; };
 		26D2B09730244F870016694B /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 26D2B09630244F870016694B /* AppIcon.icon */; };
+		A10000000000000000000002 /* TerminalIntegrations in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000001 /* TerminalIntegrations */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -57,6 +58,7 @@
 		000000000000000130000000 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
+				A10000000000000000000002 /* TerminalIntegrations in Frameworks */,
 				26C2D067302C066C008363F2 /* Terminal in Frameworks */,
 			);
 		};
@@ -105,6 +107,7 @@
 			);
 			name = Shell;
 			packageProductDependencies = (
+				A10000000000000000000001 /* TerminalIntegrations */,
 				26C2D066302C066C008363F2 /* Terminal */,
 			);
 			productName = MyApp;
@@ -529,6 +532,10 @@
 		26C2D066302C066C008363F2 /* Terminal */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = Terminal;
+		};
+		A10000000000000000000001 /* TerminalIntegrations */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = TerminalIntegrations;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
