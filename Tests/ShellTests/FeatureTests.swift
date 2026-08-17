@@ -261,6 +261,29 @@ struct FeatureTests {
     #expect(reloaded.notes.map(\.id) == expected)
   }
 
+  /// Archiving sessions keeps the history list sorted newest-first (the
+  /// sort HistoryStore relies on when a session is captured at quit).
+  @Test @MainActor func historyArchiveKeepsNewestFirst() throws {
+    let url = FileManager.default.temporaryDirectory
+      .appendingPathComponent("history-\(UUID().uuidString).shellhistory")
+    defer { try? FileManager.default.removeItem(at: url) }
+    let store = HistoryStore(fileURL: url)
+    let older = HistorySession(
+      id: UUID(),
+      commands: [SubmittedCommand(text: "older", submittedAt: Date(timeIntervalSince1970: 100))],
+      output: "",
+      archivedAt: Date(timeIntervalSince1970: 100)
+    )
+    let newer = HistorySession(
+      id: UUID(),
+      commands: [SubmittedCommand(text: "newer", submittedAt: Date(timeIntervalSince1970: 200))],
+      output: "",
+      archivedAt: Date(timeIntervalSince1970: 200)
+    )
+    store.archive(older)
+    store.archive(newer)
+    #expect(store.sessions.map(\.id) == [newer.id, older.id])
+  }
 }
 
 /// Opt-in because unsigned command-line test hosts cannot reliably access the
