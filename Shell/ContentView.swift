@@ -221,6 +221,7 @@ struct ContentView: View {
     let url = URL(fileURLWithPath: path)
     if activeDirectoryURL != url {
       activeDirectoryURL = url
+      smartActionsTarget = nil   // don't carry a stale target across projects
       model.refreshSmartActions(for: url)
     }
   }
