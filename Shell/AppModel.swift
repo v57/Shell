@@ -9,6 +9,7 @@ import Foundation
 import SwiftData
 import SwiftUI
 import Terminal
+import TerminalIntegrations
 
 /// Application-wide state: the list of terminal sessions, the sidebar
 /// selection, and the persisted SSH connection store.
@@ -55,6 +56,26 @@ final class AppModel {
   /// the observer can be torn down; AppModel is a singleton, so it lives
   /// for the process).
   private var cloudKitChangeObserver: NSObjectProtocol?
+
+  #if os(macOS)
+  /// Project detection over the active directory (Swift/Xcode integrations),
+  /// driving the toolbar's smart-action Run/Stop controls. Availability is
+  /// probed once at startup; per-directory results are encrypted-cached.
+  let smartActions = SmartActionsCoordinator(
+    integrations: [
+      SwiftIntegration(isAvailable: false),
+      XcodeIntegration(isAvailable: false),
+    ],
+    cacheStore: SmartActionsStore()
+  )
+  /// The smart actions for the active directory (refreshed on directory change).
+  private(set) var smartActionActions: [IntegrationAction] = []
+  /// The directory `smartActionActions` was computed for (nil = none active).
+  private(set) var smartActionDirectory: URL?
+  /// The currently running smart-action session per canonical directory path.
+  /// One per directory — a new Run replaces it (stop first), Stop kills it.
+  private var currentSmartActionByDirectory: [String: TerminalSession] = [:]
+  #endif
 
   private struct LocalHistoryDraft {
     var commands: [SubmittedCommand] = []
@@ -161,6 +182,9 @@ final class AppModel {
     deviceKeys.publishThisDevice()
     observeCloudKitRemoteChanges()
     #if os(macOS)
+    // Probe toolchains (xcodebuild/swift) once so integrations know their
+    // availability for the whole process.
+    smartActions.probeEnvironment()
     // Start with a local terminal so the window is never empty. iOS has no
     // local terminals — it starts with just the sidebar (SSH + notes).
     _ = addLocalTerminal()
@@ -618,6 +642,17 @@ final class AppModel {
     }
   }
 
+  /// Action-session capture that archives to history on completion: seeds the
+  /// executed command and captures output, so the run lands in History like a
+  /// terminal session. Used by both normal actions and smart actions
+  /// (history consistency).
+  private func registerActionCapture(for session: TerminalSession, seedCommand: String) {
+    registerCapture(for: session, archiveLocally: true)
+    let submitted = SubmittedCommand(text: seedCommand)
+    sessionCommands[session.id] = [submitted]
+    localHistoryDrafts[session.id]?.commands = [submitted]
+  }
+
   private func archiveLocalSession(_ id: UUID) {
     guard let draft = localHistoryDrafts.removeValue(forKey: id),
           !draft.commands.isEmpty
@@ -679,7 +714,7 @@ final class AppModel {
     }
     let newSession = TerminalSession(transport: transport, startupMessage: startupMessage)
     sessionKinds[newSession.id] = .action(spec)
-    registerCapture(for: newSession, archiveLocally: false)
+    registerActionCapture(for: newSession, seedCommand: spec.action.commands)
     newSession.actionCompletionHandler = { [weak self] in
       self?.actionSessionCompleted(newSession)
     }
@@ -693,8 +728,10 @@ final class AppModel {
 
   /// Clean exit (0): let the ✓ read for ~2s, then close + remove the row
   /// ("disappear on completion"). Non-zero / no status / connection
-  /// failure: the row stays until the user dismisses it.
+  /// failure: the row stays until the user dismisses it. Regardless of exit
+  /// status, the run is archived to history (consistency with terminals).
   func actionSessionCompleted(_ session: TerminalSession) {
+    archiveLocalSession(session.id)
     guard session.actionExitCode == 0 else { return }
     guard modelAction(for: session)?.keepAfterCompletion != true else { return }
     let id = session.id
@@ -709,7 +746,80 @@ final class AppModel {
   var actionSessions: [TerminalSession] {
     sessions.filter { if case .action = kind(of: $0) { return true }; return false }
   }
-  
+
+  // MARK: - Smart actions
+
+  #if os(macOS)
+  /// Recomputes the smart actions for the active local directory (the cache
+  /// short-circuits unchanged directories). Passing nil clears them.
+  func refreshSmartActions(for directory: URL?) {
+    smartActionDirectory = directory
+    guard let directory else {
+      smartActionActions = []
+      return
+    }
+    smartActionActions = smartActions.refresh(directory: directory)
+  }
+
+  /// The currently running smart-action session for a directory, if any.
+  func currentSmartAction(in directory: URL) -> TerminalSession? {
+    currentSmartActionByDirectory[directory.standardizedFileURL.path]
+  }
+
+  /// Whether a smart-action run is in progress for the directory (gates the
+  /// toolbar's Stop button's disabled state).
+  func isSmartActionRunning(in directory: URL) -> Bool {
+    currentSmartAction(in: directory) != nil
+  }
+
+  /// Runs a smart action as a Running-section session in `directory` with no
+  /// focus. Replaces any current run for that directory (stops it first);
+  /// archives to history on completion via `actionSessionCompleted`.
+  func runSmartAction(_ action: IntegrationAction, in directory: URL) {
+    // Replace semantics: stop the current run for this dir before starting.
+    stopSmartAction(in: directory)
+
+    // LocalPTYTransport has no working-dir parameter, so cd into the project.
+    let command = "cd \(shellQuote(directory.path)) && \(action.command)"
+    let spec = ActionSpec(
+      action: Action(
+        id: UUID(),
+        name: action.title,
+        appliesToLocal: true,
+        commands: command,
+        focusWindow: false,
+        keepAfterCompletion: false
+      ),
+      config: nil
+    )
+    let transport = LocalPTYTransport(executable: "/bin/zsh", argv: ["zsh", "-lc", command])
+    let newSession = TerminalSession(transport: transport)
+    sessionKinds[newSession.id] = .action(spec)
+    registerActionCapture(for: newSession, seedCommand: command)
+    currentSmartActionByDirectory[directory.standardizedFileURL.path] = newSession
+    newSession.actionCompletionHandler = { [weak self, weak newSession] in
+      guard let self, let newSession else { return }
+      self.currentSmartActionByDirectory[directory.standardizedFileURL.path] = nil
+      self.actionSessionCompleted(newSession)
+    }
+    sessions.append(newSession)
+    // No focus: the run stays in Running, the user's selection is unchanged.
+  }
+
+  /// Terminates the running smart-action session for a directory (no-op when
+  /// none is running).
+  func stopSmartAction(in directory: URL) {
+    guard let session = currentSmartActionByDirectory.removeValue(
+      forKey: directory.standardizedFileURL.path
+    ) else { return }
+    session.close()
+  }
+
+  private func shellQuote(_ path: String) -> String {
+    "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
+  }
+  #endif
+
   // MARK: - Reordering
   
   /// Moves an SSH connection within the sidebar list and persists the

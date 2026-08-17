@@ -1,6 +1,7 @@
 import Combine
 import SwiftUI
 import Terminal
+import TerminalIntegrations
 
 struct ContentView: View {
   @Environment(AppModel.self) private var model
@@ -19,6 +20,12 @@ struct ContentView: View {
   /// Live cwd of the selected local session, polled every second (follows
   /// the shell's `cd`). Empty for non-local sessions — no subtitle shown.
   @State private var localDirectoryText = ""
+  /// The last directory `refreshSmartActions` was computed for; smart actions
+  /// are refreshed only when this changes (the coordinator's cache makes
+  /// repeat refreshes of the same directory cheap anyway).
+  @State private var activeDirectoryURL: URL?
+  /// The picker's currently selected smart-action target (nil = all/project).
+  @State private var smartActionsTarget: String?
   private let directoryTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
   var body: some View {
@@ -75,6 +82,42 @@ struct ContentView: View {
             .help("Create Action")
           }
         }
+        #if os(macOS)
+        // Smart actions for the active local directory: a Run button per
+        // action, a Stop button (disabled unless something is running), and a
+        // target picker when the project has multiple targets/schemes.
+        if let directory = model.smartActionDirectory, !model.smartActionActions.isEmpty {
+          ToolbarItemGroup {
+            if smartActionsTargets.count > 1 {
+              Menu {
+                Button("Project") { smartActionsTarget = nil }
+                Divider()
+                ForEach(smartActionsTargets, id: \.self) { target in
+                  Button(target) { smartActionsTarget = target }
+                }
+              } label: {
+                Label(smartActionsTarget ?? "Project", systemImage: "scope")
+              }
+              .help("Select target")
+            }
+            ForEach(smartActionsForDisplay) { action in
+              Button {
+                model.runSmartAction(action, in: directory)
+              } label: {
+                Label(action.title, systemImage: "play")
+              }
+              .help(action.command)
+            }
+            Button {
+              model.stopSmartAction(in: directory)
+            } label: {
+              Label("Stop", systemImage: "stop.fill")
+            }
+            .disabled(!model.isSmartActionRunning(in: directory))
+            .help("Stop the running action")
+          }
+        }
+        #endif
       }
       .sheet(isPresented: $model.showingNewConnection) {
         NewConnectionView()
@@ -161,6 +204,10 @@ struct ContentView: View {
           case .local = model.kind(of: session),
           let path = session.currentDirectory?.path else {
       localDirectoryText = ""
+      if activeDirectoryURL != nil {
+        activeDirectoryURL = nil
+        model.refreshSmartActions(for: nil)
+      }
       return
     }
     let home = NSHomeDirectory()
@@ -171,6 +218,23 @@ struct ContentView: View {
     } else {
       localDirectoryText = path
     }
+    let url = URL(fileURLWithPath: path)
+    if activeDirectoryURL != url {
+      activeDirectoryURL = url
+      model.refreshSmartActions(for: url)
+    }
+  }
+
+  /// Non-nil smart-action targets (schemes/executables) sorted for the picker.
+  private var smartActionsTargets: [String] {
+    Array(Set(model.smartActionActions.compactMap(\.target))).sorted()
+  }
+
+  /// Smart actions to show in the toolbar: everything when no target is
+  /// selected, otherwise the selected target's actions plus project-wide ones.
+  private var smartActionsForDisplay: [IntegrationAction] {
+    guard let target = smartActionsTarget else { return model.smartActionActions }
+    return model.smartActionActions.filter { $0.target == nil || $0.target == target }
   }
 }
 
