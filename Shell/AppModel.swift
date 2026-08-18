@@ -82,6 +82,9 @@ final class AppModel {
   private(set) var smartActionActions: [IntegrationAction] = []
   /// The directory `smartActionActions` was computed for (nil = none active).
   private(set) var smartActionDirectory: URL?
+  /// The "Open With" apps offered for the active directory (empty = none,
+  /// e.g. no local terminal selected). Computed alongside the smart actions.
+  private(set) var openWithKinds: [OpenWithKind] = []
   /// Monotonic counter bumped on every `refreshSmartActions` call (including
   /// clears) so an in-flight background scan from a previous directory is
   /// discarded as stale instead of overwriting newer results.
@@ -784,18 +787,24 @@ final class AppModel {
     smartActionDirectory = directory
     guard let directory else {
       smartActionActions = []
+      openWithKinds = []
       return
     }
     let generation = smartActionsGeneration
     let coordinator = smartActions
     Task { @MainActor [weak self] in
-      // The coordinator is pure, non-MainActor-bound logic — run it off the
-      // main actor, then hop back to publish.
-      let actions = await Task.detached(priority: .userInitiated) {
-        coordinator.refresh(directory: directory)
+      // The coordinator (and the "Open With" resolution) are pure,
+      // non-MainActor-bound logic — run them off the main actor, then hop
+      // back to publish.
+      let result = await Task.detached(priority: .userInitiated) {
+        let actions = coordinator.refresh(directory: directory)
+        let entries = IntegrationFileLister.list(directory: directory.standardizedFileURL)
+        let openKinds = OpenWithResolver.kinds(for: entries)
+        return (actions: actions, openKinds: openKinds)
       }.value
       guard let self, self.smartActionsGeneration == generation else { return }
-      self.smartActionActions = actions
+      self.smartActionActions = result.actions
+      self.openWithKinds = result.openKinds
     }
   }
 

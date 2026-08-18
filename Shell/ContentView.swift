@@ -105,6 +105,14 @@ struct ContentView: View {
             }
           }
         }
+
+        // Open With for the active local directory — trailing secondary
+        // action, showing the available apps' real icons.
+        if let directory = model.smartActionDirectory, !model.openWithKinds.isEmpty {
+          ToolbarItemGroup(placement: .primaryAction) {
+            OpenWithMenu(directory: directory, kinds: model.openWithKinds)
+          }
+        }
         #endif
       }
       .sheet(isPresented: $model.showingNewConnection) {
@@ -323,3 +331,35 @@ private extension View {
     }
   }
 }
+
+#if os(macOS)
+/// The toolbar "Open With" control for the active local directory. The label
+/// shows the primary app's real icon; the menu lists every installed app with
+/// its own icon. Using the primary icon keeps the toolbar compact while still
+/// surfacing the apps. Apps that aren't installed are omitted entirely.
+private struct OpenWithMenu: View {
+  let directory: URL
+  let kinds: [OpenWithKind]
+
+  /// Only the kinds whose app is actually installed on this machine.
+  private var installedKinds: [OpenWithKind] {
+    kinds.filter { ProjectOpener.isInstalled($0) }
+  }
+
+  var body: some View {
+    ForEach(installedKinds, id: \.self) { kind in
+      Button {
+        ProjectOpener.open(kind, in: directory)
+      } label: {
+        Label {
+          Text(ProjectOpener.displayName(for: kind))
+        } icon: {
+          Image(nsImage: ProjectOpener.icon(for: kind))
+            .resizable()
+            .frame(width: 24, height: 24)
+        }
+      }.help("Open in \(ProjectOpener.displayName(for: kind))")
+    }
+  }
+}
+#endif // os(macOS)
