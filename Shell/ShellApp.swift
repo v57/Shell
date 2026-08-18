@@ -79,6 +79,17 @@ struct ShellCommands: Commands {
       .disabled(!AppModel.shared.canCreateActionFromCurrentSession)
 
       Divider()
+
+      // ⌘E opens the "insert into terminal" overlay. Menu key equivalents
+      // are processed before terminal keyDown, so it works while a terminal
+      // has focus (same precedent as the ⌘W/⌘N rebind).
+      Button("Insert into Terminal…") {
+        AppModel.shared.showingCommandInsert = true
+      }
+      .keyboardShortcut("e", modifiers: .command)
+      .disabled(AppModel.shared.selectedSession == nil)
+
+      Divider()
       
       // ⌘W closes the selected terminal and focuses its section neighbor
       // (the system File > Close was removed in AppDelegate, so this is

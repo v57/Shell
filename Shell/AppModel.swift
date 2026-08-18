@@ -40,6 +40,8 @@ final class AppModel {
   /// The actions overlay (⌘R) and the New Action sheet.
   var showingActions = false
   var showingNewAction = false
+  /// The ⌘E "insert into terminal" overlay.
+  var showingCommandInsert = false
   /// The action being edited in the sheet (nil = creating a new one).
   var editingAction: Action?
   var newActionCommands = ""
@@ -252,6 +254,16 @@ final class AppModel {
     }
   }
   
+  // MARK: - Insert into terminal (⌘E)
+
+  /// Sends `text` into `session`'s output stream (written to the child's
+  /// input, echoed to stdout). Newlines are translated to carriage returns
+  /// so a multi-line paste runs each line in the shell.
+  func insertCommandText(_ text: String, into session: TerminalSession) {
+    guard !text.isEmpty else { return }
+    session.send(text.replacingOccurrences(of: "\n", with: "\r"))
+  }
+
   // MARK: - Sessions
   
   #if os(macOS)

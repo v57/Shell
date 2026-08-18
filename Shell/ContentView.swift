@@ -117,6 +117,9 @@ struct ContentView: View {
           targetSSHConnectionID: model.newActionTargetSSHConnectionID
         )
       }
+      .sheet(isPresented: $model.showingCommandInsert) {
+        CommandInsertView()
+      }
       // Notes: refresh on activation (no-push sync trigger — re-fetch shows
       // changes the CloudKit store pulled while the app ran) and flush
       // pending edits when leaving the active scene (also flushed on quit
