@@ -86,6 +86,15 @@ struct NoteStores {
   /// schema, then drop that container so SwiftData owns the store.
   static func initializeCloudKitSchemaForDevelopment() {
     #if DEBUG
+    // Push the CloudKit schema only once per machine. `initializeCloudKitSchema`
+    // spins up a real NSPersistentCloudKitContainer and does network work each
+    // call, and this runs on EVERY app launch (from SSHConfigStore/DeviceKeyStore
+    // init) — that per-launch churn is pure waste once the schema exists.
+    // Cleared on success only, so a transient failure retries next launch.
+    // To force a re-push after a dev schema change:
+    //   defaults delete <bundle-id> DidInitializeCloudKitSchema
+    let defaults = UserDefaults.standard
+    guard !defaults.bool(forKey: Self.schemaInitializedDefaultsKey) else { return }
     // Requires a signed-in iCloud account; skip silently otherwise.
     guard NotesStore.iCloudContainerURL() != nil else { return }
     let config = ModelConfiguration("CloudNotes", cloudKitDatabase: .private("iCloud.dev.v57.sh"))
@@ -107,9 +116,15 @@ struct NoteStores {
           try container.persistentStoreCoordinator.remove(store)
         }
       }
+      defaults.set(true, forKey: Self.schemaInitializedDefaultsKey)
     } catch {
       NSLog("NoteStores: CloudKit schema initialization failed: \(error)")
     }
     #endif
   }
+
+  /// UserDefaults key recording that the development CloudKit schema has
+  /// already been initialized on this machine (see
+  /// `initializeCloudKitSchemaForDevelopment`).
+  private static let schemaInitializedDefaultsKey = "DidInitializeCloudKitSchema"
 }

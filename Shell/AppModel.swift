@@ -56,6 +56,14 @@ final class AppModel {
   /// the observer can be torn down; AppModel is a singleton, so it lives
   /// for the process).
   private var cloudKitChangeObserver: NSObjectProtocol?
+  /// Coalesces CloudKit remote-change bursts into a single store refresh.
+  /// Remote-change notifications fire in tight bursts while the CloudKit
+  /// mirror is working (each import polls our stores), and also on every
+  /// local write — refreshing once per notification is redundant main-thread
+  /// re-fetch work on top of the framework's own export loop.
+  private var cloudKitRefreshTask: Task<Void, Never>?
+  /// How long a remote-change burst is coalesced before one refresh runs.
+  private static let cloudKitRefreshCoalesceDelay: Duration = .milliseconds(400)
 
   #if os(macOS)
   /// Project detection over the active directory (Swift/Xcode integrations),
@@ -860,9 +868,24 @@ final class AppModel {
       object: nil,
       queue: .main
     ) { [weak self] _ in
+      // `queue: .main` runs this on the main queue, but the closure is still
+      // nonisolated to the compiler — hop to the main actor to refresh.
       Task { @MainActor [weak self] in
-        self?.refreshOnActivation()
+        self?.scheduleCloudKitRefresh()
       }
+    }
+  }
+
+  /// Debounces a store refresh: cancels any pending one and schedules a
+  /// single refresh shortly after the last trigger. A burst of remote-change
+  /// notifications (and the app's own writes, which also fire them) becomes
+  /// one re-fetch instead of N.
+  private func scheduleCloudKitRefresh() {
+    cloudKitRefreshTask?.cancel()
+    cloudKitRefreshTask = Task { @MainActor [weak self] in
+      try? await Task.sleep(for: Self.cloudKitRefreshCoalesceDelay)
+      guard !Task.isCancelled else { return }
+      self?.refreshOnActivation()
     }
   }
 
