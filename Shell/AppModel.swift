@@ -80,6 +80,10 @@ final class AppModel {
   private(set) var smartActionActions: [IntegrationAction] = []
   /// The directory `smartActionActions` was computed for (nil = none active).
   private(set) var smartActionDirectory: URL?
+  /// Monotonic counter bumped on every `refreshSmartActions` call (including
+  /// clears) so an in-flight background scan from a previous directory is
+  /// discarded as stale instead of overwriting newer results.
+  private var smartActionsGeneration = 0
   /// The currently running smart-action session per canonical directory path.
   /// One per directory — a new Run replaces it (stop first), Stop kills it.
   private var currentSmartActionByDirectory: [String: TerminalSession] = [:]
@@ -758,15 +762,29 @@ final class AppModel {
   // MARK: - Smart actions
 
   #if os(macOS)
-  /// Recomputes the smart actions for the active local directory (the cache
-  /// short-circuits unchanged directories). Passing nil clears them.
+  /// Recomputes the smart actions for the active local directory. Returns
+  /// immediately; the blocking scan (directory listing + integration scan +
+  /// cache save) runs off the main thread so a large directory never stalls
+  /// the UI. The cache short-circuits unchanged directories. Passing nil
+  /// clears them.
   func refreshSmartActions(for directory: URL?) {
+    smartActionsGeneration += 1
     smartActionDirectory = directory
     guard let directory else {
       smartActionActions = []
       return
     }
-    smartActionActions = smartActions.refresh(directory: directory)
+    let generation = smartActionsGeneration
+    let coordinator = smartActions
+    Task { @MainActor [weak self] in
+      // The coordinator is pure, non-MainActor-bound logic — run it off the
+      // main actor, then hop back to publish.
+      let actions = await Task.detached(priority: .userInitiated) {
+        coordinator.refresh(directory: directory)
+      }.value
+      guard let self, self.smartActionsGeneration == generation else { return }
+      self.smartActionActions = actions
+    }
   }
 
   /// The currently running smart-action session for a directory, if any.
