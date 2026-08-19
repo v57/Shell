@@ -107,6 +107,34 @@ public final class TerminalSession: Identifiable {
   @ObservationIgnored
   private var didCloseTransport = false
 
+  // MARK: Coalesced snapshot publishing
+  //
+  // Bulk pty output arrives in many small chunks (~100+/sec under
+  // `ping -i 0.01`). Publishing a full snapshot + re-render per chunk is
+  // the CPU amplifier that grows with scrollback length. Instead,
+  // receiveOutput only schedules a publish; a 10fps timer (or an explicit
+  // flush from interactive paths) coalesces chunks into ONE snapshot
+  // publish. Publishes that changed nothing VISIBLE (empty dirty set,
+  // same cursor/epoch/size) are skipped entirely.
+
+  /// 10fps: the user-chosen throttle for bulk output. Interactive paths
+  /// (typing, resize, clear, connect/exit) flush immediately.
+  public static let publishInterval: TimeInterval = 0.1
+  @ObservationIgnored
+  private var pendingPublish = false
+  @ObservationIgnored
+  private var publishTimer: Timer?
+  @ObservationIgnored
+  private var lastPublishedEpoch = 0
+  @ObservationIgnored
+  private var lastPublishedTotalLines = 0
+  @ObservationIgnored
+  private var lastPublishedCursor = TerminalCursor.zero
+  @ObservationIgnored
+  private var lastPublishedShowCursor = true
+  @ObservationIgnored
+  private var lastPublishedCursorBackground = TerminalPalette.selectionBackground
+
   /// Creates a session over `transport` and starts it immediately.
   /// `startupMessage` is shown while connecting (SSH: "Connecting to
   /// host…"); nil starts in `.starting` (local pty).
@@ -135,6 +163,9 @@ public final class TerminalSession: Identifiable {
       self?.passwordPrompt = prompt
     }
     transport.start()
+    // The initial grid is visible immediately (no pty output may ever
+    // arrive before the view appears). Force: it is the first publish.
+    publishNow(force: true)
   }
 
   deinit {
@@ -149,6 +180,9 @@ public final class TerminalSession: Identifiable {
   public func close() {
     guard !didCloseTransport else { return }
     didCloseTransport = true
+    publishTimer?.invalidate()
+    publishTimer = nil
+    pendingPublish = false
     transport.close()
   }
 
@@ -165,8 +199,9 @@ public final class TerminalSession: Identifiable {
 
     parser.resize(columns: columns, rows: rows)
     if connectionState == .connected {
-      snapshot = parser.snapshot()
-      snapshotUpdateHandler?(snapshot)
+      // Interactive: publish immediately so the reflow is visible now
+      // (force: the reflow can be pure cursor/geometry change).
+      publishNow(force: true)
     }
     transport.resize(columns: columns, rows: rows)
   }
@@ -222,8 +257,8 @@ public final class TerminalSession: Identifiable {
     selectionStart = nil
     selectionEnd = nil
     scrollbackOffset = 0
-    snapshot = parser.snapshot()
-    snapshotUpdateHandler?(snapshot)
+    // Force: the epoch bump + scrollback wipe must reach the view now.
+    publishNow()
   }
 
   public func paste(_ string: String) {
@@ -318,12 +353,70 @@ public final class TerminalSession: Identifiable {
 
   private func receiveOutput(_ data: Data) {
     parser.consume(data)
-    snapshot = parser.snapshot()
+    schedulePublish()
+  }
+
+  /// Coalesces bulk output into at most one publish per `publishInterval`
+  /// (10fps). Cheap per chunk: just marks pending and ensures the timer
+  /// is armed. Interactive paths call `flushPendingOutput()` directly.
+  private func schedulePublish() {
+    guard !pendingPublish else { return }
+    pendingPublish = true
+    if publishTimer == nil {
+      let timer = Timer(timeInterval: Self.publishInterval, repeats: true) { [weak self] _ in
+        self?.publishNow()
+      }
+      RunLoop.main.add(timer, forMode: .common)
+      publishTimer = timer
+    }
+  }
+
+  /// Publishes the latest parser state immediately if something is
+  /// pending. Interactive paths (typing, resize, clear, connect/exit) and
+  /// tests call this directly; the timer calls it on each tick.
+  public func flushPendingOutput() {
+    guard pendingPublish else { return }
+    publishNow()
+  }
+
+  /// The one place a snapshot becomes visible: rebuilds from the parser,
+  /// skips publishes that changed nothing VISIBLE, and notifies observers.
+  /// Called by the coalescing timer, explicit flushes, and interactive
+  /// paths (`force: true` — state transitions like connect/exit must
+  /// publish even when the grid pixels are unchanged, e.g. the startup
+  /// message clearing).
+  private func publishNow(force: Bool = false) {
+    pendingPublish = false
+    publishTimer?.invalidate()
+    publishTimer = nil
+
+    let newSnapshot = parser.snapshot()  // consumes the dirty set
+    // Skip when nothing VISIBLE changed since the last publish (bytes
+    // arrived, but they were OSC/title-only, SGR-only, or cursor moves):
+    // empty dirty set + same cursor + same epoch/size. Keeps `ping`-style
+    // no-op traffic from re-rendering the whole view at 10fps.
+    let visuallyChanged =
+      force
+      || !newSnapshot.dirtyLines.isEmpty
+      || newSnapshot.selectionEpoch != lastPublishedEpoch
+      || newSnapshot.totalLines != lastPublishedTotalLines
+      || newSnapshot.cursor != lastPublishedCursor
+      || newSnapshot.showCursor != lastPublishedShowCursor
+      || newSnapshot.cursorBackground != lastPublishedCursorBackground
+    guard visuallyChanged else { return }
+
+    snapshot = newSnapshot
+    lastPublishedEpoch = newSnapshot.selectionEpoch
+    lastPublishedTotalLines = newSnapshot.totalLines
+    lastPublishedCursor = newSnapshot.cursor
+    lastPublishedShowCursor = newSnapshot.showCursor
+    lastPublishedCursorBackground = newSnapshot.cursorBackground
     snapshotUpdateHandler?(snapshot)
+
     // Ordinary output keeps the selection; only content-invalidating
     // events (full clears, alt-screen switches — a snapshot epoch change)
     // drop it.
-    if selectionStart != nil, snapshot.selectionEpoch != selectionEpoch {
+    if selectionStart != nil, newSnapshot.selectionEpoch != selectionEpoch {
       selectionStart = nil
       selectionEnd = nil
     }
@@ -331,8 +424,8 @@ public final class TerminalSession: Identifiable {
 
   private func transportConnected() {
     connectionState = .connected
-    snapshot = parser.snapshot()
-    snapshotUpdateHandler?(snapshot)
+    // Force: clears the startup message even if the grid pixels match.
+    publishNow(force: true)
   }
 
   private func transportTerminated(_ message: String) {
@@ -345,8 +438,8 @@ public final class TerminalSession: Identifiable {
     actionExitCode = code
     connectionState = .closed
     // Keep the final output on screen (the parser holds the last state).
-    snapshot = parser.snapshot()
-    snapshotUpdateHandler?(snapshot)
+    // Force: the exit can be the only change (e.g. `exit` after output).
+    publishNow(force: true)
     exitHandler?(code)
     actionCompletionHandler?()
   }
