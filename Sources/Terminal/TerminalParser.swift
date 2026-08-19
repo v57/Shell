@@ -41,7 +41,17 @@ public final class TerminalOutputParser {
   }
   
   public func snapshot() -> TerminalSnapshot {
+    snapshot(clearDirty: true)
+  }
+
+  /// Snapshot of the active grid. When `clearDirty` is true (default), the
+  /// grid's dirty-line set is consumed: the returned snapshot carries the
+  /// lines that changed SINCE THE PREVIOUS snapshot, and the grid starts
+  /// fresh. Callers that snapshot repeatedly without the session's
+  /// coalescing (e.g. tests) pass `clearDirty: false` to accumulate.
+  public func snapshot(clearDirty: Bool) -> TerminalSnapshot {
     let active = activeGrid
+    let dirty = clearDirty ? consumeDirtyLines() : active.dirtyLines
     return TerminalSnapshot(
       rows: active.rows,
       columns: active.columns,
@@ -51,8 +61,23 @@ public final class TerminalOutputParser {
       showCursor: active.showCursor,
       cursorBackground: active.cursorBackground,
       message: nil,
-      selectionEpoch: selectionEpoch
+      selectionEpoch: selectionEpoch,
+      dirtyLines: dirty
     )
+  }
+
+  /// Reads and clears the ACTIVE grid's dirty set (the snapshot consumes
+  /// it so the next snapshot reports only what changed since).
+  private func consumeDirtyLines() -> Set<Int> {
+    var active = activeGrid
+    let dirty = active.dirtyLines
+    active.clearDirtyLines()
+    if usingAlternateScreen {
+      alternateGrid = active
+    } else {
+      grid = active
+    }
+    return dirty
   }
 
   /// Cmd+K "clean stdout": erase the scrollback and every row except the
@@ -435,6 +460,12 @@ struct TerminalGrid {
   /// real scrollback). Ordinary apps that use mid-screen regions (vim,
   /// less) keep their old behavior: those lines are not terminal history.
   var recordsRegionScroll = false
+  /// Screen rows whose VISIBLE content changed since the last snapshot
+  /// (the snapshot consumes the set). Only cell-writing operations mark
+  /// rows — pure cursor movement and SGR changes do not (nothing paints).
+  /// Used by the session to skip no-op publishes and by the renderer to
+  /// rebuild only changed lines.
+  fileprivate(set) var dirtyLines: Set<Int> = []
   /// Scrollback lines, oldest first. Each row keeps its historical width;
   /// trailing blank/clear-background cells are trimmed to save memory.
   private(set) var scrollback: [[TerminalCell]] = []
@@ -465,6 +496,7 @@ struct TerminalGrid {
     self.scrollBottom = rows - 1
     self.wrapPending = false
     self.cells = Array(repeating: TerminalCell.space, count: rows * columns)
+    markAllDirty()
     
     let copyRows = min(oldRows, rows)
     let copyColumns = min(oldColumns, columns)
@@ -488,6 +520,7 @@ struct TerminalGrid {
     wrapPending = false
     scrollback.removeAll()
     recordsRegionScroll = false
+    markAllDirty()
   }
   
   mutating func saveCursor() {
@@ -540,6 +573,7 @@ struct TerminalGrid {
     var cell = currentAttributes
     cell.character = character
     cells[index] = cell
+    markDirty(cursor.row)
     if cursor.column < columns - 1 {
       cursor.column += 1
     } else {
@@ -593,6 +627,7 @@ struct TerminalGrid {
       cells[index] = erasedCell()
     }
     cursor = .zero
+    markAllDirty()
   }
 
   /// Cmd+K "clean stdout": erase the scrollback and every row except the
@@ -606,8 +641,7 @@ struct TerminalGrid {
     for row in 0..<rows where row != keepRow {
       eraseRow(row)
     }
-  }
-  
+  }  
   mutating func eraseDisplay(mode: Int) {
     switch mode {
     case 0:
@@ -755,6 +789,14 @@ struct TerminalGrid {
       }
     }
     eraseRow(scrollBottom)
+    if scrollTop > 0 {
+      for row in scrollTop...scrollBottom {
+        markDirty(row)
+      }
+    } else {
+      // Full-screen scroll: every row shifted up one, all dirty.
+      markAllDirty()
+    }
   }
   
   mutating func scrollUp(count: Int) {
@@ -779,6 +821,9 @@ struct TerminalGrid {
       }
     }
     eraseRow(scrollTop)
+    for row in scrollTop...scrollBottom {
+      markDirty(row)
+    }
   }
   
   // MARK: Character / line editing (ECH, DCH, ICH, IL, DL)
@@ -790,6 +835,7 @@ struct TerminalGrid {
     for index in start..<(start + n) {
       cells[index] = erasedCell()
     }
+    markDirty(cursor.row)
   }
   
   mutating func deleteChars(_ count: Int) {
@@ -802,6 +848,7 @@ struct TerminalGrid {
     for column in (columns - n)..<columns {
       cells[rowStart + column] = erasedCell()
     }
+    markDirty(cursor.row)
   }
   
   mutating func insertChars(_ count: Int) {
@@ -814,6 +861,7 @@ struct TerminalGrid {
     for column in cursor.column..<(cursor.column + n) {
       cells[rowStart + column] = erasedCell()
     }
+    markDirty(cursor.row)
   }
   
   mutating func insertLines(_ count: Int) {
@@ -826,6 +874,9 @@ struct TerminalGrid {
     }
     for row in cursor.row..<(cursor.row + n) {
       eraseRow(row)
+    }
+    for row in cursor.row...scrollBottom {
+      markDirty(row)
     }
   }
   
@@ -846,6 +897,9 @@ struct TerminalGrid {
     for row in (scrollBottom - n + 1)...scrollBottom {
       eraseRow(row)
     }
+    for row in cursor.row...scrollBottom {
+      markDirty(row)
+    }
   }
   
   mutating func eraseRow(_ row: Int) {
@@ -855,6 +909,7 @@ struct TerminalGrid {
     for index in start..<end {
       cells[index] = erasedCell()
     }
+    markDirty(row)
   }
   
   /// A blank cell carrying the current SGR attributes (background color
@@ -864,6 +919,23 @@ struct TerminalGrid {
     var cell = currentAttributes
     cell.character = " "
     return cell
+  }
+
+  // MARK: Dirty-line tracking
+
+  fileprivate mutating func markDirty(_ row: Int) {
+    guard row >= 0, row < rows else { return }
+    dirtyLines.insert(row)
+  }
+
+  fileprivate mutating func markAllDirty() {
+    guard rows > 0 else { return }
+    dirtyLines.formUnion(0..<rows)
+  }
+
+  /// Consumed by `TerminalOutputParser.snapshot(clearDirty:)`.
+  fileprivate mutating func clearDirtyLines() {
+    dirtyLines.removeAll()
   }
 
   /// Pushes the current top row into the scrollback, trimming trailing

@@ -59,13 +59,18 @@ public struct TerminalSnapshot {
   /// screen clear, RIS, alternate-screen switch). Selections made against
   /// an older epoch are stale and get dropped.
   public var selectionEpoch: Int = 0
+  /// Screen rows of the grid whose content changed since the previous
+  /// snapshot (the snapshot consumes the set). Consumers use it to skip
+  /// no-op work: empty means nothing VISUALLY changed even though bytes
+  /// arrived (OSC/title-only or SGR-only output).
+  public var dirtyLines: Set<Int> = []
 
   /// Logical line count: scrollback plus the visible grid.
   public var totalLines: Int { scrollback.count + rows }
   /// Maximum scroll offset (lines above the bottom).
   public var maxOffset: Int { max(0, totalLines - rows) }
 
-  init(rows: Int = 24, columns: Int = 80, cells: [TerminalCell] = [], scrollback: [[TerminalCell]] = [], cursor: TerminalCursor = .zero, showCursor: Bool = true, cursorBackground: Color = TerminalPalette.selectionBackground, message: String? = nil, selectionEpoch: Int = 0) {
+  init(rows: Int = 24, columns: Int = 80, cells: [TerminalCell] = [], scrollback: [[TerminalCell]] = [], cursor: TerminalCursor = .zero, showCursor: Bool = true, cursorBackground: Color = TerminalPalette.selectionBackground, message: String? = nil, selectionEpoch: Int = 0, dirtyLines: Set<Int> = []) {
     self.rows = rows
     self.columns = columns
     self.cells = cells.isEmpty ? Array(repeating: TerminalCell.space, count: rows * columns) : cells
@@ -75,6 +80,7 @@ public struct TerminalSnapshot {
     self.cursorBackground = cursorBackground
     self.message = message
     self.selectionEpoch = selectionEpoch
+    self.dirtyLines = dirtyLines
   }
   
   public func cell(atRow row: Int, column: Int) -> TerminalCell {
@@ -196,6 +202,29 @@ public struct TerminalSnapshot {
   /// Trimmed text of a logical line (0 = top of scrollback).
   public func lineText(line: Int) -> String {
     lineText(line: line, from: 0, to: columns - 1)
+  }
+
+  /// Text of the visible grid — the last `rows` logical lines (logical
+  /// indices `scrollback.count..<totalLines`) — joined by newline, trailing
+  /// blank lines trimmed. The grid is small (one screen), so rebuilding it
+  /// per publish is cheap; history capture keeps the scrollback text
+  /// incremental and swaps THIS segment when the screen changes.
+  public var gridText: String {
+    guard message == nil else { return message ?? "" }
+    var lines = (scrollback.count..<totalLines).map { lineText(line: $0) }
+    while lines.last?.isEmpty == true { lines.removeLast() }
+    return lines.joined(separator: "\n")
+  }
+
+  /// Text of scrollback rows `[from..<scrollback.count]` joined by newline.
+  /// The scrollback is append-only (oldest first), so a capture that
+  /// remembers how many rows it already converted can append only the new
+  /// ones — O(new rows) instead of O(whole scrollback) per publish.
+  public func scrollbackText(after from: Int) -> String {
+    guard message == nil else { return message ?? "" }
+    guard from >= 0, from < scrollback.count else { return "" }
+    let lines = (from..<scrollback.count).map { lineText(line: $0) }
+    return lines.joined(separator: "\n")
   }
   
   /// Column of the last non-blank cell in a logical line, or -1 when the
