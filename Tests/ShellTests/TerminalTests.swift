@@ -145,6 +145,67 @@ struct TerminalParserTests {
     #expect(!p.bracketedPasteEnabled)
   }
 
+  @Test func dirtyLinesTrackedAcrossMutations() {
+    let p = parser()
+    p.resize(columns: 10, rows: 5)
+    var s = p.snapshot()
+    // A resize dirties every row (the whole grid reflows).
+    #expect(s.dirtyLines.count == 5)
+    // The snapshot consumed the set: a no-op read reports nothing dirty.
+    s = p.snapshot()
+    #expect(s.dirtyLines.isEmpty)
+
+    // Writing "abc" dirties row 0; LF moves the cursor without painting.
+    p.consume(Data("abc\n".utf8))
+    s = p.snapshot()
+    #expect(s.dirtyLines == [0])
+
+    // Writing on row 1 dirties only row 1.
+    p.consume(Data("x".utf8))
+    s = p.snapshot()
+    #expect(s.dirtyLines == [1])
+
+    // ED 2 (clearScreen) dirties every row.
+    p.consume(Data("\u{1b}[2J".utf8))
+    s = p.snapshot()
+    #expect(s.dirtyLines.count == 5)
+
+    // The snapshot consumed the set: a no-op read reports nothing dirty.
+    s = p.snapshot()
+    #expect(s.dirtyLines.isEmpty)
+  }
+
+  @Test func historyCaptureComposesIncrementally() {
+    let p = parser()
+    p.resize(columns: 10, rows: 3)
+    // Seed: the full text at capture start.
+    p.consume(Data("one\n".utf8))
+    let seed = p.snapshot()
+    var capturedScrollback = seed.scrollback.count
+
+    // Output that scrolls "one" into the scrollback and writes a new
+    // grid.
+    p.consume(Data("two\nthree\nfour\n".utf8))
+    let snapshot = p.snapshot()
+
+    // The incremental composition (new scrollback rows + current grid)
+    // must equal a full rebuild of the SAME snapshot — the invariant the
+    // history capture relies on.
+    let newScrollback = snapshot.scrollbackText(after: capturedScrollback)
+    let grid = snapshot.gridText
+    var composed = newScrollback
+    if !grid.isEmpty {
+      if !composed.isEmpty { composed += "\n" }
+      composed += grid
+    }
+    #expect(composed == snapshot.fullPlainText)
+    #expect(snapshot.scrollback.count >= capturedScrollback)
+    capturedScrollback = snapshot.scrollback.count
+    // A later capture with nothing new appends nothing.
+    let later = p.snapshot()
+    #expect(later.scrollbackText(after: capturedScrollback).isEmpty)
+  }
+
   @Test func regionScrollRespectsDECSTBM() {
     let p = parser()
     p.resize(columns: 10, rows: 5)
@@ -350,6 +411,9 @@ struct StatusPinTests {
     let transport = CapturingTransport()
     let session = TerminalSession(transport: transport)
     transport.injectOutput(Data("line one\nline two\nline three\n".utf8))
+    // Output publishing is coalesced; read the LATEST parser state by
+    // flushing the pending publish.
+    session.flushPendingOutput()
 
     let snapshot = session.snapshot
     #expect(session.statusRank == 0)
@@ -383,6 +447,73 @@ struct StatusPinTests {
     #expect(!TerminalScreenView.SelectionModifier.isClick(start: start, end: TerminalCursor(row: 10, column: 4)))
     #expect(!TerminalScreenView.SelectionModifier.isClick(start: start, end: TerminalCursor(row: 11, column: 3)))
     #expect(!TerminalScreenView.SelectionModifier.isClick(start: start, end: TerminalCursor(row: 9, column: 1)))
+  }
+}
+
+/// Output-publishing coalescing: bulk pty chunks publish at most once per
+/// 10fps window, no-op publishes (nothing VISIBLE changed) are skipped, and
+/// interactive paths flush synchronously.
+struct TerminalSessionCoalescingTests {
+  @MainActor
+  @Test func outputPublishingIsCoalesced() {
+    let transport = CapturingTransport()
+    let session = TerminalSession(transport: transport)
+    var published = 0
+    session.snapshotUpdateHandler = { _ in published += 1 }
+
+    // Two chunks arrive before the 10fps timer fires: still zero publishes.
+    transport.injectOutput(Data("hello\n".utf8))
+    transport.injectOutput(Data("world\n".utf8))
+    #expect(published == 0)
+
+    // One explicit flush coalesces both into a single publish.
+    session.flushPendingOutput()
+    #expect(published == 1)
+    #expect(session.snapshot.plainText.contains("hello"))
+    #expect(session.snapshot.plainText.contains("world"))
+  }
+
+  @MainActor
+  @Test func flushIsIdempotent() {
+    let transport = CapturingTransport()
+    let session = TerminalSession(transport: transport)
+    var published = 0
+    session.snapshotUpdateHandler = { _ in published += 1 }
+
+    transport.injectOutput(Data("a".utf8))
+    session.flushPendingOutput()
+    session.flushPendingOutput()
+    #expect(published == 1)
+  }
+
+  @MainActor
+  @Test func cursorOnlyOutputSkipsPublish() {
+    let transport = CapturingTransport()
+    let session = TerminalSession(transport: transport)
+    var published = 0
+    session.snapshotUpdateHandler = { _ in published += 1 }
+    transport.injectOutput(Data("x".utf8))
+    session.flushPendingOutput()
+    #expect(published == 1)   // the "x" published
+
+    // A pure cursor-move sequence paints nothing: the dirty set is empty,
+    // the cursor may move — but if the cursor is UNCHANGED after the move
+    // (e.g. OSC/title-only bytes), the publish is skipped.
+    transport.injectOutput(Data("\u{1b}]0;title\u{7}".utf8))
+    session.flushPendingOutput()
+    #expect(published == 1)   // skipped: nothing visible changed
+  }
+
+  @MainActor
+  @Test func closeInvalidatesPublishTimer() async throws {
+    let transport = CapturingTransport()
+    let session = TerminalSession(transport: transport)
+    var published = 0
+    session.snapshotUpdateHandler = { _ in published += 1 }
+    transport.injectOutput(Data("x\n".utf8))
+    session.close()
+    try await Task.sleep(for: .milliseconds(150))  // well past one 10fps tick
+    #expect(published == 0)   // the timer never fired after close
   }
 }
 

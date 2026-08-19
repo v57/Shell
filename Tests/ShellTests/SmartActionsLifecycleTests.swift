@@ -25,7 +25,7 @@ struct SmartActionsLifecycleTests {
     #expect(!model.smartActionActions.isEmpty)
     #expect(model.smartActionActions.contains { $0.kind == .build })
     #expect(model.smartActionActions.contains { $0.kind == .run && $0.target == "Demo" })
-    #expect(model.isSmartActionRunning(in: dir) == false)
+    #expect(model.isSmartActionRunning(UUID(), in: dir) == false)
 
     // Clearing the active directory empties the actions.
     model.refreshSmartActions(for: nil)

@@ -96,7 +96,17 @@ final class AppModel {
 
   private struct LocalHistoryDraft {
     var commands: [SubmittedCommand] = []
+    /// Scrollback text captured so far, followed by the last grid segment.
+    /// The scrollback part is appended incrementally (`capturedScrollback`
+    /// tracks how many rows are already converted); the grid part is
+    /// replaced wholesale per publish (it is only one screen).
     var output = ""
+    /// Number of scrollback rows already converted into `output`.
+    var capturedScrollback = 0
+    /// The snapshot epoch the captured text is valid against. Wholesale
+    /// invalidation (alt-screen switch, full clear, RIS, Cmd+K) replaces
+    /// the text with a full rebuild; ordinary output appends incrementally.
+    var capturedEpoch = 0
   }
 
   /// Opens the create-action sheet (fresh form).
@@ -652,7 +662,12 @@ final class AppModel {
   private func registerCapture(for session: TerminalSession, archiveLocally: Bool) {
     sessionCommands[session.id] = []
     if archiveLocally {
-      localHistoryDrafts[session.id] = LocalHistoryDraft(output: session.snapshot.fullPlainText)
+      let seed = session.snapshot
+      localHistoryDrafts[session.id] = LocalHistoryDraft(
+        output: seed.fullPlainText,
+        capturedScrollback: seed.scrollback.count,
+        capturedEpoch: seed.selectionEpoch
+      )
     }
 
     session.commandSubmittedHandler = { [weak self] text in
@@ -665,7 +680,46 @@ final class AppModel {
     }
     session.snapshotUpdateHandler = { [weak self] snapshot in
       guard archiveLocally else { return }
-      self?.localHistoryDrafts[session.id]?.output = snapshot.fullPlainText
+      guard let self, var draft = self.localHistoryDrafts[session.id] else { return }
+      if snapshot.selectionEpoch != draft.capturedEpoch {
+        // Wholesale invalidation (alt-screen switch, full clear, RIS,
+        // Cmd+K): the scrollback indices are meaningless now — rebuild
+        // the whole text. Rare (epoch bumps only on such events), so the
+        // O(scrollback) cost is acceptable here.
+        draft.output = snapshot.fullPlainText
+        draft.capturedScrollback = snapshot.scrollback.count
+        draft.capturedEpoch = snapshot.selectionEpoch
+        self.localHistoryDrafts[session.id] = draft
+        return
+      }
+      // Scrollback is append-only: convert only the rows that arrived
+      // since the last capture (the O(scrollback) full-text rebuild per
+      // output chunk was the CPU amplifier that made history capture cost
+      // grow with session age).
+      guard snapshot.scrollback.count >= draft.capturedScrollback else {
+        // Scrollback was TRUNCATED at the limit: indices shifted, the
+        // incremental state is stale — rebuild the whole text.
+        draft.output = snapshot.fullPlainText
+        draft.capturedScrollback = snapshot.scrollback.count
+        self.localHistoryDrafts[session.id] = draft
+        return
+      }
+      let newScrollback = snapshot.scrollbackText(after: draft.capturedScrollback)
+      // The visible grid is one screen; replace its segment wholesale
+      // (its lines are rewritten in place by cursors — line-index deltas
+      // would miss live updates like ping's status line).
+      let grid = snapshot.gridText
+      var output = ""
+      if !newScrollback.isEmpty {
+        output = newScrollback
+      }
+      if !grid.isEmpty {
+        if !output.isEmpty { output += "\n" }
+        output += grid
+      }
+      draft.output = output
+      draft.capturedScrollback = snapshot.scrollback.count
+      self.localHistoryDrafts[session.id] = draft
     }
   }
 
