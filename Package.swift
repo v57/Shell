@@ -6,7 +6,7 @@ import PackageDescription
 let package = Package(
     name: "Terminal",
     platforms: [.macOS(.v15), .iOS(.v18)],
-    products: [.library(name: "Terminal", targets: ["Terminal"]), .library(name: "TerminalIntegrations", targets: ["TerminalIntegrations"])],
+    products: [.library(name: "Terminal", targets: ["Terminal"]), .library(name: "TerminalIntegrations", targets: ["TerminalIntegrations"]), .library(name: "Monitoring", targets: ["Monitoring"])],
     dependencies: [
         .package(url: "https://github.com/apple/swift-nio-ssh", exact: "0.15.0"),
         .package(url: "https://github.com/apple/swift-nio", from: "2.81.0"),
@@ -32,6 +32,12 @@ let package = Package(
         ),
         .target(
             name: "TerminalIntegrations",
+            swiftSettings: [
+                .swiftLanguageMode(.v5),
+            ]
+        ),
+        .target(
+            name: "Monitoring",
             swiftSettings: [
                 .swiftLanguageMode(.v5),
             ]

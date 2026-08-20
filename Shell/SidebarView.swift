@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import Terminal
+import Monitoring
 
 /// Sidebar: lists local terminals and saved SSH connections.
 struct SidebarView: View {
@@ -12,6 +13,9 @@ struct SidebarView: View {
   #if os(macOS)
   /// The screen session currently being renamed (keyed by full name).
   @State private var renamingScreenName: String?
+  /// Live CPU/GPU/wattage for the Local section header (macOS only —
+  /// the reads need IOKit's AppleSMC / IOAccelerator).
+  @State private var statsMonitor = SystemStatsMonitor()
   #endif
   
   private var localSessions: [TerminalSession] {
@@ -70,7 +74,15 @@ struct SidebarView: View {
         }
       } header: {
         HStack {
+          #if os(macOS)
+          if model.historyMode {
+            Text("Local History")
+          } else {
+            statsHeader
+          }
+          #else
           Text(model.historyMode ? "Local History" : "Local")
+          #endif
           if model.historyMode {
             Button(role: .destructive) {
               model.deleteAllHistory()
@@ -251,8 +263,33 @@ struct SidebarView: View {
     } message: {
       Text(model.authorizedKeysError ?? "")
     }
+    #if os(macOS)
+    .background(WindowStatsObserver(monitor: statsMonitor))
+    .onAppear { statsMonitor.start() }
+    .onDisappear { statsMonitor.stop() }
+    #endif
   }
-  
+
+  #if os(macOS)
+  /// The Local section header showing live CPU/GPU usage and total
+  /// wattage, e.g. "  5% 12% 13W" (percentages right-aligned to 3 chars,
+  /// wattage right-aligned to 2 chars). Falls back to plain "Local" when
+  /// the stats aren't available yet (first tick).
+  @ViewBuilder
+  private var statsHeader: some View {
+    let cpu = Int(statsMonitor.cpuPercent.rounded())
+    let gpu = Int(statsMonitor.gpuPercent.rounded())
+    if statsMonitor.watts > 0 {
+      Text("\(String(format: "%3d", cpu))% \(String(format: "%3d", gpu))% \(String(format: "%2d", statsMonitor.watts))W")
+        .font(.caption.weight(.medium))
+        .monospaced()
+        .help("CPU · GPU · System power draw")
+    } else {
+      Text("Local")
+    }
+  }
+  #endif
+
   /// True while an action session can still be interrupted (its process
   /// or remote exec is alive); Cancel sends Ctrl+C in that state.
   private func isRunning(_ session: TerminalSession) -> Bool {

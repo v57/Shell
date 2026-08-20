@@ -10,6 +10,7 @@
 		26C2D067302C066C008363F2 /* Terminal in Frameworks */ = {isa = PBXBuildFile; productRef = 26C2D066302C066C008363F2 /* Terminal */; };
 		26D2B09730244F870016694B /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 26D2B09630244F870016694B /* AppIcon.icon */; };
 		A10000000000000000000002 /* TerminalIntegrations in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000001 /* TerminalIntegrations */; };
+		A10000000000000000000004 /* Monitoring in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000003 /* Monitoring */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -58,6 +59,7 @@
 		000000000000000130000000 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
+				A10000000000000000000004 /* Monitoring in Frameworks */,
 				A10000000000000000000002 /* TerminalIntegrations in Frameworks */,
 				26C2D067302C066C008363F2 /* Terminal in Frameworks */,
 			);
@@ -107,6 +109,7 @@
 			);
 			name = Shell;
 			packageProductDependencies = (
+				A10000000000000000000003 /* Monitoring */,
 				A10000000000000000000001 /* TerminalIntegrations */,
 				26C2D066302C066C008363F2 /* Terminal */,
 			);
@@ -536,6 +539,10 @@
 		A10000000000000000000001 /* TerminalIntegrations */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = TerminalIntegrations;
+		};
+		A10000000000000000000003 /* Monitoring */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Monitoring;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
