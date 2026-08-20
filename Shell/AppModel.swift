@@ -89,9 +89,21 @@ final class AppModel {
   /// clears) so an in-flight background scan from a previous directory is
   /// discarded as stale instead of overwriting newer results.
   private var smartActionsGeneration = 0
+  /// In-memory display state per canonical directory path, published
+  /// synchronously when a session switch revisits the directory — avoids
+  /// waiting on the encrypted cache read (Secure Enclave round-trip) that
+  /// makes the toolbar actions pop in late. Every background refresh
+  /// revalidates (and replaces) the memoized result.
+  private var smartActionResultMemo: [String: SmartActionResult] = [:]
   /// The currently running smart-action session per canonical directory path.
   /// One per directory — a new Run replaces it (stop first), Stop kills it.
   private var currentSmartActionByDirectory: [String: TerminalSession] = [:]
+  /// Memoized smart-action display state for one directory (actions plus the
+  /// matching "Open With" apps).
+  private struct SmartActionResult {
+    let actions: [IntegrationAction]
+    let openKinds: [OpenWithKind]
+  }
   #endif
 
   private struct LocalHistoryDraft {
@@ -841,6 +853,12 @@ final class AppModel {
   /// cache save) runs off the main thread so a large directory never stalls
   /// the UI. The cache short-circuits unchanged directories. Passing nil
   /// clears them.
+  ///
+  /// A directory visited before publishes its memoized actions SYNCHRONOUSLY
+  /// (the memo is keyed by canonical path and survives session switches), so
+  /// switching sessions shows the toolbar controls instantly instead of
+  /// waiting on the encrypted cache read. The background refresh still runs
+  /// to revalidate the memo.
   func refreshSmartActions(for directory: URL?) {
     smartActionsGeneration += 1
     smartActionDirectory = directory
@@ -849,6 +867,17 @@ final class AppModel {
       openWithKinds = []
       return
     }
+    let canonical = directory.standardizedFileURL
+    // First visit: publish nothing yet so the toolbar never shows the
+    // previous directory's actions under this one. Revisit: publish the
+    // memoized result immediately, then revalidate in the background.
+    if let memo = smartActionResultMemo[canonical.path] {
+      smartActionActions = memo.actions
+      openWithKinds = memo.openKinds
+    } else {
+      smartActionActions = []
+      openWithKinds = []
+    }
     let generation = smartActionsGeneration
     let coordinator = smartActions
     Task { @MainActor [weak self] in
@@ -856,14 +885,16 @@ final class AppModel {
       // non-MainActor-bound logic — run them off the main actor, then hop
       // back to publish.
       let result = await Task.detached(priority: .userInitiated) {
-        let actions = coordinator.refresh(directory: directory)
-        let entries = IntegrationFileLister.list(directory: directory.standardizedFileURL)
+        let actions = coordinator.refresh(directory: canonical)
+        let entries = IntegrationFileLister.list(directory: canonical)
         let openKinds = OpenWithResolver.kinds(for: entries)
         return (actions: actions, openKinds: openKinds)
       }.value
       guard let self, self.smartActionsGeneration == generation else { return }
-      self.smartActionActions = result.actions
-      self.openWithKinds = result.openKinds
+      let memo = SmartActionResult(actions: result.actions, openKinds: result.openKinds)
+      self.smartActionResultMemo[canonical.path] = memo
+      self.smartActionActions = memo.actions
+      self.openWithKinds = memo.openKinds
     }
   }
 

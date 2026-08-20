@@ -177,6 +177,12 @@ struct ContentView: View {
     .onReceive(directoryTimer) { _ in
       refreshLocalDirectory()
     }
+    // Kick the directory refresh the moment the selected session changes
+    // (the timer alone adds up to a second of lag before the toolbar
+    // actions refresh when switching sessions in the sidebar).
+    .onChange(of: model.selectedSession?.id) { _, _ in
+      refreshLocalDirectory()
+    }
     .onChange(of: model.showingActions) { _, showing in
       #if os(macOS)
       if showing {
