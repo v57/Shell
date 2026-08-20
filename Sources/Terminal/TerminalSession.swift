@@ -251,11 +251,14 @@ public final class TerminalSession: Identifiable {
     }
   }
 
-  /// Cmd+K "clean stdout": erase the scrollback and every row except the
-  /// cursor's (the current prompt line survives), drop any selection, and
-  /// publish the refreshed snapshot. Local-only — nothing is sent to the
-  /// shell, so its line editor keeps the cursor exactly where it was.
+  /// Cmd+K "clean stdout": tell the shell to redraw its prompt at the top
+  /// of the screen (Ctrl-L — zsh's line editor handles it itself, so the
+  /// shell's internal cursor stays in sync and the prompt MOVES UP like
+  /// Terminal.app), then erase the scrollback and every row except the
+  /// cursor's locally as a safety net for programs that ignore ^L. Drops
+  /// any selection and publishes the refreshed snapshot.
   public func clearStdout() {
+    sendClearScreen()
     parser.clearStdout()
     parser.drainParseQueue()
     selectionStart = nil
@@ -263,6 +266,18 @@ public final class TerminalSession: Identifiable {
     scrollbackOffset = 0
     // Force: the epoch bump + scrollback wipe must reach the view now.
     publishNow()
+  }
+
+  /// Sends Ctrl-L to the child. zsh's line editor (zle) handles it itself:
+  /// it emits ESC[H ESC[2J and redraws the prompt at the TOP of the
+  /// screen, cursor included — so the current line MOVES UP and the shell's
+  /// internal cursor stays in sync (the key difference from a terminal-side
+  /// clear, which zsh can't see and which leaves its editor pointing at a
+  /// stale screen row). Interactive programs that don't bind ^L (a running
+  /// ping, top) just pass it through as literal input, so callers must
+  /// still clear the local grid afterward.
+  public func sendClearScreen() {
+    send(Data([0x0c]))
   }
 
   public func paste(_ string: String) {

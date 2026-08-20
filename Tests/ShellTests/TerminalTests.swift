@@ -296,6 +296,30 @@ struct TerminalParserTests {
     #expect(session.connectionState == .closed)
   }
 
+  @MainActor
+  @Test func clearStdoutSendsCtrlLToChildAndWipesScrollback() {
+    let transport = CapturingTransport()
+    let session = TerminalSession(transport: transport)
+    // Fill the grid + scrollback so there's something to clear. The flush
+    // settles the background parse queue first (real usage: output has
+    // rendered before Cmd+K); otherwise queued pre-clear bytes are parsed
+    // AFTER the wipe and repopulate the scrollback, making the assertion
+    // below timing-dependent.
+    transport.injectOutput(Data((0..<40).map { "line\($0)\n" }.joined().utf8))
+    session.flushPendingOutput()
+    #expect(!session.snapshot.scrollback.isEmpty)  // precondition: content to clear
+
+    session.clearStdout()
+
+    // The shell-sync part: Cmd+K sends Ctrl-L to the child, so zsh's own
+    // line editor clears the screen and redraws the prompt at the TOP
+    // (cursor stays in sync). Terminal-side clears can't do this.
+    #expect(transport.writes.contains(Data([0x0c])))
+    // The safety-net part: the scrollback is wiped locally for programs
+    // that ignore ^L.
+    #expect(session.snapshot.scrollback.isEmpty)
+  }
+
   @Test func localPTYReadSourceStopsAfterEOF() async throws {
     let transport = LocalPTYTransport(
       executable: "/bin/sh",
