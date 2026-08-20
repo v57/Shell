@@ -270,11 +270,16 @@ final class AppModel {
   // MARK: - Insert into terminal (⌘E)
 
   /// Sends `text` into `session`'s output stream (written to the child's
-  /// input, echoed to stdout). Newlines are translated to carriage returns
-  /// so a multi-line paste runs each line in the shell.
-  func insertCommandText(_ text: String, into session: TerminalSession) {
+  /// input, echoed to stdout). With `sendAsSeparateCommands` (default
+  /// true), newlines are translated to carriage returns so a multi-line
+  /// paste runs each line in the shell. With it false, newlines go through
+  /// as literal `\n` — the text is pasted verbatim.
+  func insertCommandText(_ text: String, into session: TerminalSession, sendAsSeparateCommands: Bool = true) {
     guard !text.isEmpty else { return }
-    session.send(text.replacingOccurrences(of: "\n", with: "\r"))
+    let translated = sendAsSeparateCommands
+      ? text.replacingOccurrences(of: "\n", with: "\r")
+      : text
+    session.send(translated)
   }
 
   // MARK: - Sessions

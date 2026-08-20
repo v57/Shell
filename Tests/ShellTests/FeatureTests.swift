@@ -102,6 +102,23 @@ struct FeatureTests {
     #expect(!ScreenSessionsMonitor.isTmuxMissingTarget("permission denied"))
   }
 
+  /// ⌘E insert: "Send as separate commands" (default) translates newlines to
+  /// carriage returns so each line runs as its own Enter; when disabled, the
+  /// newlines pass through verbatim.
+  @Test @MainActor func insertCommandTextTranslatesNewlinesPerToggle() {
+    let transport = CommandInsertProbeTransport()
+    let session = TerminalSession(transport: transport)
+    let model = AppModel.shared
+
+    // Default (separate commands): each line becomes an Enter.
+    model.insertCommandText("echo one\necho two", into: session)
+    #expect(transport.writes.last == Data("echo one\recho two".utf8))
+
+    // Disabled: newlines stay literal.
+    model.insertCommandText("echo one\necho two", into: session, sendAsSeparateCommands: false)
+    #expect(transport.writes.last == Data("echo one\necho two".utf8))
+  }
+
   /// Store-level move test, fully hermetic: temp SwiftData stores + injected
   /// generated keys (no real keychain needed — runs on any machine, even
   /// with a locked screen or no iCloud session).
@@ -308,4 +325,19 @@ struct SecureEnclaveEncryptedFileSmokeTests {
       try SecureFileStore.read(from: file, domain: .history)
     }
   }
+}
+
+/// Minimal transport stub: captures what the session writes to the child so
+/// tests can assert on the exact bytes `insertCommandText` produces.
+@MainActor
+private final class CommandInsertProbeTransport: TerminalTransport {
+  var onOutput: ((Data) -> Void)?
+  var onConnected: (() -> Void)?
+  var onTerminated: ((String) -> Void)?
+  var onExit: ((Int32) -> Void)?
+  var writes: [Data] = []
+  func start() { onConnected?() }
+  func write(_ data: Data) { writes.append(data) }
+  func resize(columns: Int, rows: Int) {}
+  func close() {}
 }

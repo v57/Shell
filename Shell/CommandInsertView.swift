@@ -3,15 +3,27 @@ import Terminal
 
 /// The ⌘E "insert into terminal" overlay: a multiline text area plus Apply.
 ///
-/// Applying sends the typed text into the focused terminal's output stream
-/// with newlines translated to carriage returns, so multi-line input each
-/// becomes an Enter in the shell (e.g. a small script or a sequence of
-/// commands, one per line).
+/// Applying sends the typed text into the focused terminal's output stream.
+/// With "Send as separate commands" on (default), newlines are translated to
+/// carriage returns so each line runs as its own Enter in the shell (a small
+/// script or a sequence of commands, one per line). With it off, newlines go
+/// through as literal `\n` — the text is pasted verbatim into the line
+/// editor (e.g. a multi-line paste inside a heredoc or a quoted string).
 struct CommandInsertView: View {
   @Environment(AppModel.self) private var model
   @Environment(\.dismiss) private var dismiss
   @State private var text = ""
   @FocusState private var editorFocused: Bool
+
+  /// Persisted choice: send each line as a separate Enter (true) vs. send
+  /// the newlines verbatim (false). Defaults to separate commands.
+  @AppStorage("sendAsSeparateCommands") private var sendAsSeparateCommands = true
+
+  /// The toggle is only meaningful for multi-line input: a single line has
+  /// no newlines to translate either way.
+  private var isMultiline: Bool {
+    text.contains("\n")
+  }
 
   private var sessionName: String {
     guard let session = model.selectedSession else { return "no terminal selected" }
@@ -42,9 +54,20 @@ struct CommandInsertView: View {
         )
         .focused($editorFocused)
 
-      Text("Each line is sent as Enter, so multi-line text runs line-by-line in the shell.")
-        .font(.caption)
-        .foregroundStyle(.secondary)
+      if isMultiline {
+        Toggle("Send as separate commands", isOn: $sendAsSeparateCommands)
+          .toggleStyle(.checkbox)
+          .font(.caption)
+        Text(sendAsSeparateCommands
+          ? "Each line is sent as Enter, so multi-line text runs line-by-line in the shell."
+          : "Newlines are sent as-is, so multi-line text is pasted verbatim.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      } else {
+        Text("Each line is sent as Enter, so multi-line text runs line-by-line in the shell.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
 
       HStack {
         Spacer()
@@ -63,7 +86,7 @@ struct CommandInsertView: View {
 
   private func apply() {
     guard let session = model.selectedSession else { return }
-    model.insertCommandText(text, into: session)
+    model.insertCommandText(text, into: session, sendAsSeparateCommands: sendAsSeparateCommands)
     dismiss()
   }
 }
