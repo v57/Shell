@@ -112,14 +112,14 @@ public final class TerminalSession: Identifiable {
   // Bulk pty output arrives in many small chunks (~100+/sec under
   // `ping -i 0.01`). Publishing a full snapshot + re-render per chunk is
   // the CPU amplifier that grows with scrollback length. Instead,
-  // receiveOutput only schedules a publish; a 10fps timer (or an explicit
+  // receiveOutput only schedules a publish; a 30fps timer (or an explicit
   // flush from interactive paths) coalesces chunks into ONE snapshot
   // publish. Publishes that changed nothing VISIBLE (empty dirty set,
   // same cursor/epoch/size) are skipped entirely.
 
-  /// 10fps: the user-chosen throttle for bulk output. Interactive paths
+  /// 30fps: the publish throttle for bulk output. Interactive paths
   /// (typing, resize, clear, connect/exit) flush immediately.
-  public static let publishInterval: TimeInterval = 0.1
+  public static let publishInterval: TimeInterval = 1.0 / 30.0
   @ObservationIgnored
   private var pendingPublish = false
   @ObservationIgnored

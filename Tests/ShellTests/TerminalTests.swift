@@ -451,7 +451,7 @@ struct StatusPinTests {
 }
 
 /// Output-publishing coalescing: bulk pty chunks publish at most once per
-/// 10fps window, no-op publishes (nothing VISIBLE changed) are skipped, and
+/// 30fps window, no-op publishes (nothing VISIBLE changed) are skipped, and
 /// interactive paths flush synchronously.
 struct TerminalSessionCoalescingTests {
   @MainActor
@@ -461,7 +461,7 @@ struct TerminalSessionCoalescingTests {
     var published = 0
     session.snapshotUpdateHandler = { _ in published += 1 }
 
-    // Two chunks arrive before the 10fps timer fires: still zero publishes.
+    // Two chunks arrive before the 30fps timer fires: still zero publishes.
     transport.injectOutput(Data("hello\n".utf8))
     transport.injectOutput(Data("world\n".utf8))
     #expect(published == 0)
@@ -512,7 +512,7 @@ struct TerminalSessionCoalescingTests {
     session.snapshotUpdateHandler = { _ in published += 1 }
     transport.injectOutput(Data("x\n".utf8))
     session.close()
-    try await Task.sleep(for: .milliseconds(150))  // well past one 10fps tick
+    try await Task.sleep(for: .milliseconds(150))  // well past one 30fps tick
     #expect(published == 0)   // the timer never fired after close
   }
 }
