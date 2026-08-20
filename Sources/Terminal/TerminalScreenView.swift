@@ -846,7 +846,9 @@ extension TerminalScreenView {
           handleDragChanged(at: CGPoint(x: location.x - padding, y: location.y - padding))
         }
         .onEnded { value in
-          handleDragEnded(at: value.location)
+          let location = value.location
+          let padding = TerminalScreenView.gridPadding
+          handleDragEnded(at: CGPoint(x: location.x - padding, y: location.y - padding))
         }
     }
 
