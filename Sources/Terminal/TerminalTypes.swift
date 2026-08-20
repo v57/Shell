@@ -64,6 +64,11 @@ public struct TerminalSnapshot {
   /// no-op work: empty means nothing VISUALLY changed even though bytes
   /// arrived (OSC/title-only or SGR-only output).
   public var dirtyLines: Set<Int> = []
+  /// True while the child is in bracketed-paste mode (DECSET 2004) — the
+  /// session consults it to wrap pasted text in the paste markers. Read
+  /// on the main thread; written by the parser on its parse queue, so
+  /// guarded by the parser's lock (see `bracketedPasteEnabled` below).
+  public var bracketedPasteEnabled = false
 
   /// Logical line count: scrollback plus the visible grid.
   public var totalLines: Int { scrollback.count + rows }

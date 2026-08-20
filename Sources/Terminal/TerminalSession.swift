@@ -197,7 +197,10 @@ public final class TerminalSession: Identifiable {
   public func resize(columns: Int, rows: Int) {
     guard columns > 0, rows > 0 else { return }
 
+    // resize/clearStdout run on the main thread but mutate the parser;
+    // the parser's internal lock serializes them against the parse queue.
     parser.resize(columns: columns, rows: rows)
+    parser.drainParseQueue()
     if connectionState == .connected {
       // Interactive: publish immediately so the reflow is visible now
       // (force: the reflow can be pure cursor/geometry change).
@@ -254,6 +257,7 @@ public final class TerminalSession: Identifiable {
   /// shell, so its line editor keeps the cursor exactly where it was.
   public func clearStdout() {
     parser.clearStdout()
+    parser.drainParseQueue()
     selectionStart = nil
     selectionEnd = nil
     scrollbackOffset = 0
@@ -270,7 +274,9 @@ public final class TerminalSession: Identifiable {
         .replacingOccurrences(of: "\r", with: "\n")
     )
 
-    if parser.bracketedPasteEnabled {
+    // The parser's bracketed-paste flag is mirrored onto the snapshot on
+    // every publish, so this main-thread read never races the parse queue.
+    if snapshot.bracketedPasteEnabled {
       send(Data("\u{1b}[200~".utf8))
       send(string.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n"))
       send(Data("\u{1b}[201~".utf8))
@@ -352,7 +358,10 @@ public final class TerminalSession: Identifiable {
   // MARK: - Transport callbacks (all on the main thread)
 
   private func receiveOutput(_ data: Data) {
-    parser.consume(data)
+    // Parse on the background parse queue (efficiency cores) — never block
+    // the main thread on byte parsing. The 30fps publish timer picks up
+    // the latest state when it fires.
+    parser.consumeAsync(data)
     schedulePublish()
   }
 
@@ -374,8 +383,15 @@ public final class TerminalSession: Identifiable {
   /// Publishes the latest parser state immediately if something is
   /// pending. Interactive paths (typing, resize, clear, connect/exit) and
   /// tests call this directly; the timer calls it on each tick.
+  ///
+  /// Synchronous-by-construction: drains the parse queue first so any
+  /// `consumeAsync` work enqueued before the flush has landed in the grid
+  /// before the snapshot is taken. (Safe from the main thread — the parse
+  /// queue is a serial background queue, never the main queue, so
+  /// `sync` can't deadlock.)
   public func flushPendingOutput() {
     guard pendingPublish else { return }
+    parser.drainParseQueue()
     publishNow()
   }
 
@@ -390,7 +406,7 @@ public final class TerminalSession: Identifiable {
     publishTimer?.invalidate()
     publishTimer = nil
 
-    let newSnapshot = parser.snapshot()  // consumes the dirty set
+    let newSnapshot = parser.snapshotForPublish()  // consumes the dirty set
     // Skip when nothing VISIBLE changed since the last publish (bytes
     // arrived, but they were OSC/title-only, SGR-only, or cursor moves):
     // empty dirty set + same cursor + same epoch/size. Keeps `ping`-style

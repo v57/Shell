@@ -20,6 +20,17 @@ public final class TerminalOutputParser {
   /// Bumped on content-invalidating events (full clears, RIS, alt-screen
   /// switches) so stale selections can be dropped (see TerminalSession).
   private(set) var selectionEpoch = 0
+  /// Serializes parser mutation (consume on the parse queue) against the
+  /// session's main-thread reads (snapshot, resize, clearStdout, paste
+  /// mode). All mutation happens on ONE queue (the parse queue) so the
+  /// lock is only contended by reads — cheap.
+  private let lock = NSLock()
+  /// The parse queue: background QoS so parsing lands on efficiency cores
+  /// and never blocks the main thread. All parser mutation runs here.
+  private let parseQueue = DispatchQueue(
+    label: "Terminal.TerminalOutputParser.parse",
+    qos: .utility   // background-ish: efficiency cores
+  )
   
   public init(sendResponse: @escaping (String) -> Void) {
     self.sendResponse = sendResponse
@@ -28,18 +39,48 @@ public final class TerminalOutputParser {
     // capture into the alt grid's scrollback (see recordsRegionScroll).
     alternateGrid.recordsScrollback = false
   }
-  
+
+  /// Consumes output asynchronously on the parse queue. The snapshot is
+  /// published later by the session's coalescing timer; callers that need
+  /// the result synchronously use `snapshot()` (which locks).
+  public func consumeAsync(_ data: Data) {
+    parseQueue.async { [self] in
+      lock.lock()
+      defer { lock.unlock() }
+      consumeLocked(data)
+    }
+  }
+
+  /// Blocks until every previously-enqueued `consumeAsync` block has run.
+  /// Used by `flushPendingOutput` so a synchronous publish sees all the
+  /// output that was already delivered. Safe from the main thread: the
+  /// parse queue is a serial background queue, so `sync` from main never
+  /// deadlocks (the parse blocks never hop back to main).
+  public func drainParseQueue() {
+    parseQueue.sync {}
+  }
+
+  /// Consumes output on the CALLING thread (used by tests and by
+  /// synchronous paths). Serialized against other access via `lock`.
   public func consume(_ data: Data) {
+    lock.lock()
+    defer { lock.unlock() }
+    consumeLocked(data)
+  }
+
+  private func consumeLocked(_ data: Data) {
     for byte in data {
       consume(byte: byte)
     }
   }
-  
+
   public func resize(columns: Int, rows: Int) {
+    lock.lock()
+    defer { lock.unlock() }
     grid.resize(rows: rows, columns: columns)
     alternateGrid.resize(rows: rows, columns: columns)
   }
-  
+
   public func snapshot() -> TerminalSnapshot {
     snapshot(clearDirty: true)
   }
@@ -50,8 +91,26 @@ public final class TerminalOutputParser {
   /// fresh. Callers that snapshot repeatedly without the session's
   /// coalescing (e.g. tests) pass `clearDirty: false` to accumulate.
   public func snapshot(clearDirty: Bool) -> TerminalSnapshot {
+    lock.lock()
+    defer { lock.unlock() }
+    return snapshotLocked(clearDirty: clearDirty)
+  }
+
+  /// Snapshot the session's coalescing timer takes: consumes the dirty set
+  /// AND reflects `bracketedPasteEnabled` (a parser field the session
+  /// reads for paste wrapping) into the snapshot so the main thread never
+  /// touches parser state unsynchronized.
+  public func snapshotForPublish() -> TerminalSnapshot {
+    lock.lock()
+    defer { lock.unlock() }
+    var s = snapshotLocked(clearDirty: true)
+    s.bracketedPasteEnabled = bracketedPasteEnabled
+    return s
+  }
+
+  private func snapshotLocked(clearDirty: Bool) -> TerminalSnapshot {
     let active = activeGrid
-    let dirty = clearDirty ? consumeDirtyLines() : active.dirtyLines
+    let dirty = clearDirty ? consumeDirtyLinesLocked() : active.dirtyLines
     return TerminalSnapshot(
       rows: active.rows,
       columns: active.columns,
@@ -67,8 +126,9 @@ public final class TerminalOutputParser {
   }
 
   /// Reads and clears the ACTIVE grid's dirty set (the snapshot consumes
-  /// it so the next snapshot reports only what changed since).
-  private func consumeDirtyLines() -> Set<Int> {
+  /// it so the next snapshot reports only what changed since). Must be
+  /// called with `lock` held.
+  private func consumeDirtyLinesLocked() -> Set<Int> {
     var active = activeGrid
     let dirty = active.dirtyLines
     active.clearDirtyLines()
@@ -83,7 +143,11 @@ public final class TerminalOutputParser {
   /// Cmd+K "clean stdout": erase the scrollback and every row except the
   /// cursor's, keeping the current prompt line. Bumps the selection epoch
   /// so any selection (now pointing at erased content) is dropped.
+  /// Locked: called from the main thread, serialized against the parse
+  /// queue.
   func clearStdout() {
+    lock.lock()
+    defer { lock.unlock() }
     mutateActiveGrid { $0.clearStdout() }
     selectionEpoch += 1
   }
