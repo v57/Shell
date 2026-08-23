@@ -40,10 +40,72 @@ struct ContentView: View {
             .id(session.id)
             .navigationTitle(model.displayName(for: session))
             .navigationDirectorySubtitle(localDirectoryText)
+            .toolbar {
+#if os(macOS)
+              // Smart actions for the active local directory: a Run button per
+              // action, a Stop button (disabled unless something is running), and a
+              // target picker when the project has multiple targets/schemes.
+              if let directory = model.smartActionDirectory, !model.smartActionActions.isEmpty {
+                ToolbarItemGroup(placement: .primaryAction) {
+                  if smartActionsTargets.count > 1 {
+                    Menu {
+                      Button("Project") { smartActionsTarget = nil }
+                      Divider()
+                      ForEach(smartActionsTargets, id: \.self) { target in
+                        Button(target) { smartActionsTarget = target }
+                      }
+                    } label: {
+                      Label(smartActionsTarget ?? "Project", systemImage: "scope")
+                    }
+                    .help("Select target")
+                  }
+                  ForEach(smartActionGroups) { group in
+                    SmartActionMenu(actions: group.actions, directory: directory)
+                  }
+                }
+              }
+              
+              if #available(macOS 26.0, *) {
+                ToolbarSpacer()
+              }
+              
+              // Open With for the active local directory — trailing secondary
+              // action, showing the available apps' real icons.
+              if let directory = model.smartActionDirectory, !model.openWithKinds.isEmpty {
+                ToolbarItemGroup(placement: .primaryAction) {
+                  OpenWithMenu(directory: directory, kinds: model.openWithKinds)
+                }
+              }
+#endif
+            }
         } else if let historySession = model.selectedHistorySession {
           HistorySessionView(session: historySession)
             .id(historySession.id)
             .navigationTitle(historySession.title)
+            .toolbar {
+              ToolbarItemGroup {
+                Button(role: .destructive) {
+                  model.deleteHistorySession(historySession.id)
+                } label: {
+                  Label("Delete History", systemImage: "trash")
+                }
+                .help("Delete History")
+                
+                Button {
+                  model.replayHistorySession(historySession)
+                } label: {
+                  Label("Replay Commands", systemImage: "play")
+                }
+                .help("Replay Commands")
+                
+                Button {
+                  model.createAction(from: historySession)
+                } label: {
+                  Label("Create Action", systemImage: "command")
+                }
+                .help("Create Action")
+              }
+            }
         } else if let note = model.selectedNote {
           NoteEditorView(noteID: note.id)
             .id(note.id)
@@ -56,64 +118,6 @@ struct ContentView: View {
           )
           .navigationTitle("Terminals")
         }
-      }
-      .toolbar {
-        if let historySession = model.selectedHistorySession {
-          ToolbarItemGroup {
-            Button(role: .destructive) {
-              model.deleteHistorySession(historySession.id)
-            } label: {
-              Label("Delete History", systemImage: "trash")
-            }
-            .help("Delete History")
-
-            Button {
-              model.replayHistorySession(historySession)
-            } label: {
-              Label("Replay Commands", systemImage: "play")
-            }
-            .help("Replay Commands")
-
-            Button {
-              model.createAction(from: historySession)
-            } label: {
-              Label("Create Action", systemImage: "command")
-            }
-            .help("Create Action")
-          }
-        }
-        #if os(macOS)
-        // Smart actions for the active local directory: a Run button per
-        // action, a Stop button (disabled unless something is running), and a
-        // target picker when the project has multiple targets/schemes.
-        if let directory = model.smartActionDirectory, !model.smartActionActions.isEmpty {
-          ToolbarItemGroup {
-            if smartActionsTargets.count > 1 {
-              Menu {
-                Button("Project") { smartActionsTarget = nil }
-                Divider()
-                ForEach(smartActionsTargets, id: \.self) { target in
-                  Button(target) { smartActionsTarget = target }
-                }
-              } label: {
-                Label(smartActionsTarget ?? "Project", systemImage: "scope")
-              }
-              .help("Select target")
-            }
-            ForEach(smartActionGroups) { group in
-              SmartActionMenu(actions: group.actions, directory: directory)
-            }
-          }
-        }
-
-        // Open With for the active local directory — trailing secondary
-        // action, showing the available apps' real icons.
-        if let directory = model.smartActionDirectory, !model.openWithKinds.isEmpty {
-          ToolbarItemGroup(placement: .primaryAction) {
-            OpenWithMenu(directory: directory, kinds: model.openWithKinds)
-          }
-        }
-        #endif
       }
       .sheet(isPresented: $model.showingNewConnection) {
         NewConnectionView()
@@ -283,10 +287,8 @@ private struct SmartActionMenu: View {
     if actions.count > 1 {
       Menu {
         ForEach(actions) { action in
-          Button {
+          Button(action.title, systemImage: smartActionIcon(for: action)) {
             selectedAction = action
-          } label: {
-            Label(action.title, systemImage: smartActionIcon(for: action))
           }
         }
       } label: {
@@ -294,12 +296,9 @@ private struct SmartActionMenu: View {
       } primaryAction: {
         toggle(selected)
       }
-      .menuIndicator(.hidden)
     } else if let action = actions.first {
-      Button {
+      Button(action.title, systemImage: smartActionIcon(for: action)) {
         toggle(action)
-      } label: {
-        Label(action.title, systemImage: smartActionIcon(for: action))
       }
     }
   }
