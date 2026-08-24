@@ -90,6 +90,16 @@ struct ShellCommands: Commands {
       .disabled(AppModel.shared.selectedSession == nil)
 
       Divider()
+
+      // ⌘⇧H opens the Themes sheet. Menu key equivalents dispatch before
+      // terminal keyDown, so it works while a terminal has focus (and ⌘⇧H
+      // doesn't collide with Hide/Hide Others, which are ⌘H/⌥⌘H).
+      Button("Themes…") {
+        AppModel.shared.showingThemes = true
+      }
+      .keyboardShortcut("h", modifiers: [.command, .shift])
+
+      Divider()
       
       // ⌘W closes the selected terminal and focuses its section neighbor
       // (the system File > Close was removed in AppDelegate, so this is

@@ -132,6 +132,9 @@ struct ContentView: View {
       .sheet(isPresented: $model.showingCommandInsert) {
         CommandInsertView()
       }
+      .sheet(isPresented: $model.showingThemes) {
+        ThemesView()
+      }
       // Notes: refresh on activation (no-push sync trigger — re-fetch shows
       // changes the CloudKit store pulled while the app ran) and flush
       // pending edits when leaving the active scene (also flushed on quit
@@ -178,6 +181,8 @@ struct ContentView: View {
       }
     }
     .animation(.easeOut(duration: 0.15), value: model.showingActions)
+    .preferredColorScheme(model.appearanceMode.colorScheme)
+    .environment(\.terminalBackgroundsDisabled, model.disableTerminalBackgrounds)
     .onReceive(directoryTimer) { _ in
       refreshLocalDirectory()
     }
