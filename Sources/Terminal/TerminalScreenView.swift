@@ -156,6 +156,12 @@ public struct TerminalScreenView: View {
   @State private var anchorLine: Int?
   @State private var lastGridSize = TerminalGridSize.zero
 
+  /// Theme plumbing: whether character backgrounds are suppressed (set by the
+  /// app via the environment) and the EFFECTIVE color scheme (after any
+  /// preferredColorScheme override) that contrast decisions key on.
+  @Environment(\.terminalBackgroundsDisabled) private var backgroundsDisabled
+  @Environment(\.colorScheme) private var colorScheme
+
   public var body: some View {
     // Read observable properties in body (not inside closures) so SwiftUI
     // re-renders on every snapshot/selection change.
@@ -339,7 +345,9 @@ public struct TerminalScreenView: View {
         isCursor: run.isCursor,
         isSelected: run.isSelected,
         cursorBackground: snapshot.cursorBackground,
-        terminalBackground: terminalBackground
+        terminalBackground: terminalBackground,
+        backgroundsDisabled: backgroundsDisabled,
+        scheme: colorScheme
       )
       let baseAttrs = base.attrs
       let baseBackground = base.background
@@ -508,7 +516,9 @@ public struct TerminalScreenView: View {
     isCursor: Bool,
     isSelected: Bool,
     cursorBackground: Color,
-    terminalBackground: Color
+    terminalBackground: Color,
+    backgroundsDisabled: Bool,
+    scheme: ColorScheme
   ) -> (attrs: AttributeContainer, background: Color?) {
     let cellForeground = cell.effectiveForeground()
     let cellBackground = cell.effectiveBackground(defaultingTo: terminalBackground)
@@ -518,9 +528,7 @@ public struct TerminalScreenView: View {
       weight: cell.bold ? .semibold : .regular,
       design: .monospaced
     )
-    if cell.italic {
-      font = font.italic()
-    }
+    if cell.italic { font = font.italic() }
 
     var foreground: Color
     var background: Color?
@@ -532,12 +540,23 @@ public struct TerminalScreenView: View {
       background = cursorBackground
       foreground = cell.inverse ? cellForeground : (cellBackground ?? terminalBackground)
     } else if cell.inverse {
-      background = cellForeground
-      foreground = cellBackground ?? terminalBackground
+      if backgroundsDisabled {
+        // Suppressed: no inverted block. The foreground candidate is the
+        // cell's background color; .default/.clear resolve to the terminal
+        // background itself → primary.
+        background = nil
+        foreground = TerminalContrast.suppressedBackgroundForeground(for: cell.background, scheme: scheme)
+      } else {
+        background = cellForeground
+        foreground = cellBackground ?? terminalBackground
+      }
     } else {
-      foreground = cellForeground
-      if let cellBackground {
-        background = cellBackground
+      if backgroundsDisabled {
+        background = nil
+        foreground = TerminalContrast.suppressedBackgroundForeground(for: cell.foreground, scheme: scheme)
+      } else {
+        foreground = cellForeground
+        if let cellBackground { background = cellBackground }
       }
     }
     if cell.dim && !isSelected {
