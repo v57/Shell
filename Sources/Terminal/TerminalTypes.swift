@@ -355,53 +355,49 @@ public enum TerminalColor: Equatable {
     }
   }
 
-  /// Standard 16-color ANSI palette, tuned for a dark background
-  /// (near-black is lifted so it stays visible; the rest are the
-  /// conventional xterm hues).
-  private static let palette16: [Color] = [
-    rgb(0x2a, 0x2a, 0x2a), // 0 black
-    rgb(0xe0, 0x55, 0x61), // 1 red
-    rgb(0x8c, 0xc2, 0x65), // 2 green
-    rgb(0xd1, 0x8f, 0x52), // 3 yellow
-    rgb(0x4a, 0xa5, 0xf0), // 4 blue
-    rgb(0xc5, 0x86, 0xc0), // 5 magenta
-    rgb(0x42, 0xb3, 0xc2), // 6 cyan
-    rgb(0xdf, 0xdf, 0xdf), // 7 white
-    rgb(0x66, 0x66, 0x66), // 8 bright black
-    rgb(0xff, 0x61, 0x6e), // 9 bright red
-    rgb(0xa5, 0xe0, 0x75), // 10 bright green
-    rgb(0xf0, 0xa4, 0x5d), // 11 bright yellow
-    rgb(0x71, 0xb8, 0xf9), // 12 bright blue
-    rgb(0xe2, 0xa8, 0xdf), // 13 bright magenta
-    rgb(0x6c, 0xd8, 0xe0), // 14 bright cyan
-    rgb(0xff, 0xff, 0xff)  // 15 bright white
+  /// Standard 16-color ANSI palette, tuned for a dark background (near-black
+  /// is lifted so it stays visible; the rest are the conventional xterm
+  /// hues). Stored as hex so the same source drives both the SwiftUI Color
+  /// and the luminance math.
+  private static let palette16Hex: [Int] = [
+    0x2a2a2a, 0xe05561, 0x8cc265, 0xd18f52,
+    0x4aa5f0, 0xc586c0, 0x42b3c2, 0xdfdfdf,
+    0x666666, 0xff616e, 0xa5e075, 0xf0a45d,
+    0x71b8f9, 0xe2a8df, 0x6cd8e0, 0xffffff
   ]
 
-  /// 6x6x6 color cube (indices 16...231).
-  private static let colorCube: [Color] = {
+  private nonisolated static func components(_ hex: Int) -> (r: CGFloat, g: CGFloat, b: CGFloat) {
+    (CGFloat((hex >> 16) & 0xff) / 255,
+     CGFloat((hex >> 8) & 0xff) / 255,
+     CGFloat(hex & 0xff) / 255)
+  }
+
+  private static let palette16Components = palette16Hex.map(components)
+  private static let palette16: [Color] = palette16Components.map { Color(red: $0.r, green: $0.g, blue: $0.b) }
+
+  /// 6x6x6 color cube (indices 16...231), kept as components.
+  private static let colorCubeComponents: [(r: CGFloat, g: CGFloat, b: CGFloat)] = {
     let levels: [CGFloat] = [0, 95, 135, 175, 215, 255]
-    var colors: [Color] = []
+    var colors: [(r: CGFloat, g: CGFloat, b: CGFloat)] = []
     colors.reserveCapacity(216)
-    for red in levels {
-      for green in levels {
-        for blue in levels {
-          colors.append(Color(red: red / 255, green: green / 255, blue: blue / 255))
-        }
-      }
-    }
+    for red in levels { for green in levels { for blue in levels {
+      colors.append((red / 255, green / 255, blue / 255))
+    } } }
     return colors
   }()
+  private static let colorCube: [Color] = colorCubeComponents.map { Color(red: $0.r, green: $0.g, blue: $0.b) }
 
-  /// Grayscale ramp (indices 232...255).
-  private static let grayscale: [Color] = {
-    var colors: [Color] = []
+  /// Grayscale ramp (indices 232...255), kept as components.
+  private static let grayscaleComponents: [(r: CGFloat, g: CGFloat, b: CGFloat)] = {
+    var colors: [(r: CGFloat, g: CGFloat, b: CGFloat)] = []
     colors.reserveCapacity(24)
     for step in 0..<24 {
       let value = CGFloat(8 + 10 * step) / 255
-      colors.append(Color(red: value, green: value, blue: value))
+      colors.append((value, value, value))
     }
     return colors
   }()
+  private static let grayscale: [Color] = grayscaleComponents.map { Color(red: $0.r, green: $0.g, blue: $0.b) }
 
   /// xterm-256color palette lookup. Returns nil for out-of-range indices so
   /// the caller can fall back to the default label color.
@@ -418,7 +414,22 @@ public enum TerminalColor: Equatable {
     }
   }
 
-  private static func rgb(_ red: Int, _ green: Int, _ blue: Int) -> Color {
-    Color(red: CGFloat(red) / 255, green: CGFloat(green) / 255, blue: CGFloat(blue) / 255)
+  /// sRGB components of an explicit color (.rgb/.ansi); nil for .clear/.default.
+  public func colorComponents() -> (r: CGFloat, g: CGFloat, b: CGFloat)? {
+    switch self {
+    case .rgb(let red, let green, let blue):
+      return (red, green, blue)
+    case .ansi(let index):
+      switch index {
+      case 0..<16: return Self.palette16Components[index]
+      case 16..<232: return Self.colorCubeComponents[index - 16]
+      case 232..<256: return Self.grayscaleComponents[index - 232]
+      default: return nil
+      }
+    case .clear, .default:
+      return nil
+    }
   }
 }
+
+extension TerminalColor: Hashable {}   // synthesized; CGFloat components are Hashable
