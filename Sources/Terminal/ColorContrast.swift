@@ -52,4 +52,38 @@ public enum TerminalContrast {
     guard let c = color.colorComponents() else { return false }
     return contrastRatio(c, background(for: scheme)) < minimumRatio
   }
+
+  // MARK: - Memoized decision (rendering path)
+
+  /// True when the explicit color gets replaced by `.primary` in
+  /// background-suppressed rendering. The decision is pure and stable per
+  /// (color, scheme), and truecolor apps reuse colors constantly, so memoize
+  /// it. Process-lifetime; never invalidated (the mapping is fixed).
+  private static var decisionCache: [TerminalColor: [ColorScheme: Bool]] = [:]
+
+  public static func shouldReplace(withPrimary color: TerminalColor, on scheme: ColorScheme) -> Bool {
+    if let byScheme = decisionCache[color], let cached = byScheme[scheme] { return cached }
+    let decision = isLowContrast(color, on: scheme)
+    decisionCache[color, default: [:]][scheme] = decision
+    return decision
+  }
+
+  /// The foreground for a cell's own color when character backgrounds are
+  /// suppressed: .default/.clear → primary; explicit colors → primary when
+  /// low contrast, the color itself otherwise.
+  public static func suppressedBackgroundForeground(for color: TerminalColor, scheme: ColorScheme) -> Color {
+    switch color {
+    case .clear, .default:
+      return Color.primary
+    case .rgb, .ansi:
+      return shouldReplace(withPrimary: color, on: scheme) ? Color.primary : (color.color ?? Color.primary)
+    }
+  }
+}
+
+extension EnvironmentValues {
+  /// Suppresses per-character background fills and replaces low-contrast
+  /// foreground colors with primary (the "Disable Background Colors" theme
+  /// option). Default false → current rendering unchanged.
+  @Entry public var terminalBackgroundsDisabled = false
 }
