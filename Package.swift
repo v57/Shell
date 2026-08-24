@@ -48,6 +48,13 @@ let package = Package(
             swiftSettings: [
                 .swiftLanguageMode(.v5),
             ]
+        ),
+        .testTarget(
+            name: "MonitoringTests",
+            dependencies: ["Monitoring"],
+            swiftSettings: [
+                .swiftLanguageMode(.v5),
+            ]
         )
     ]
 )

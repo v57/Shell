@@ -155,8 +155,12 @@ final class NotesStore {
 
   /// Replaces a note's text. The plaintext is cached immediately (so the
   /// sidebar title follows typing) and persisted 5s after the last edit.
+  /// Unchanged text is a no-op: the editor repopulates its content when a
+  /// note opens, and treating that echo as an edit made every open bump
+  /// `lastUpdate` (resorting the sidebar) and re-encrypt + save the note.
   func updateText(_ text: String, for id: UUID) {
     guard notes.contains(where: { $0.id == id }) else { return }
+    if let current = decryptedNote(id: id), current.text == text { return }
     decryptionCache[id] = DecryptedContents(
       title: Self.title(for: text),
       subtitle: Self.subtitle(for: text),

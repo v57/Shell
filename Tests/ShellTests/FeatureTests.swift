@@ -278,6 +278,64 @@ struct FeatureTests {
     #expect(reloaded.notes.map(\.id) == expected)
   }
 
+  /// Opening a note repopulates the editor with the decrypted text; that
+  /// echo must not count as an edit — no `lastUpdate` bump (no resort),
+  /// no pending save, no re-encryption. Only a real change does.
+  @Test @MainActor func updateTextIgnoresUnchangedContent() throws {
+    let root = FileManager.default.temporaryDirectory
+      .appendingPathComponent(
+        "notes-unchanged-" + String(ProcessInfo.processInfo.processIdentifier),
+        isDirectory: true)
+    let (stores, cleanup) = try NoteStores.makeTest(in: root)
+    defer { cleanup() }
+    let key = SymmetricKey(size: .bits256)
+
+    // Seed a note with persisted content plus a newer note edited long
+    // after, so the seeded one does not sit at the top of the sidebar.
+    // Explicit timestamps keep the order deterministic.
+    let seededCiphers = try NoteCrypto.encrypt(text: "original\nSecond line", using: key)
+    let context = stores.local.mainContext
+    let seeded = NoteRecord(
+      id: UUID(),
+      lastUpdate: Date(timeIntervalSince1970: 100),
+      keyId: NoteKeyID.device,
+      titleCipher: seededCiphers.titleCipher,
+      subtitleCipher: seededCiphers.subtitleCipher,
+      contentCipher: seededCiphers.contentCipher)
+    let newer = NoteRecord(id: UUID(), lastUpdate: Date(timeIntervalSince1970: 500), keyId: NoteKeyID.device)
+    context.insert(seeded)
+    context.insert(newer)
+    try context.save()
+
+    let store = NotesStore(stores: stores)
+    store.deviceKeyProvider = { key }
+    store.iCloudKeyProvider = { key }
+    #expect(store.notes.first?.id == newer.id)
+
+    // The editor's onAppear round-trip: decrypt, hand back the same text.
+    let echoed = store.decryptedNote(id: seeded.id)?.text
+    #expect(echoed == "original\nSecond line")
+    store.updateText(echoed ?? "", for: seeded.id)
+    #expect(store.notes.first?.id == newer.id)
+    store.flush()
+
+    // Cold read back: the echo wrote nothing — content and order intact.
+    let reader = NotesStore(stores: stores)
+    reader.deviceKeyProvider = { key }
+    reader.iCloudKeyProvider = { key }
+    #expect(reader.notes.map(\.id) == [newer.id, seeded.id])
+    #expect(reader.decryptedNote(id: seeded.id)?.text == "original\nSecond line")
+
+    // A genuine change still edits normally: jumps to top and persists.
+    store.updateText("changed", for: seeded.id)
+    #expect(store.notes.first?.id == seeded.id)
+    store.flush()
+    let reader2 = NotesStore(stores: stores)
+    reader2.deviceKeyProvider = { key }
+    reader2.iCloudKeyProvider = { key }
+    #expect(reader2.decryptedNote(id: seeded.id)?.text == "changed")
+  }
+
   /// Archiving sessions keeps the history list sorted newest-first (the
   /// sort HistoryStore relies on when a session is captured at quit).
   @Test @MainActor func historyArchiveKeepsNewestFirst() throws {

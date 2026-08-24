@@ -16,6 +16,8 @@ struct SidebarView: View {
   /// Live CPU/GPU/wattage for the Local section header (macOS only —
   /// the reads need IOKit's AppleSMC / IOAccelerator).
   @State private var statsMonitor = SystemStatsMonitor()
+  /// The stats graphs sheet, opened by clicking the Local section header.
+  @State private var showingStatsGraphs = false
   #endif
   
   private var localSessions: [TerminalSession] {
@@ -267,6 +269,10 @@ struct SidebarView: View {
     .background(WindowStatsObserver(monitor: statsMonitor))
     .onAppear { statsMonitor.start() }
     .onDisappear { statsMonitor.stop() }
+    // Stats graphs for the last minute, opened from the Local header.
+    .sheet(isPresented: $showingStatsGraphs) {
+      StatsGraphView(monitor: statsMonitor)
+    }
     #endif
   }
 
@@ -274,16 +280,22 @@ struct SidebarView: View {
   /// The Local section header showing live CPU/GPU usage and total
   /// wattage, e.g. "  5% 12% 13W" (percentages right-aligned to 3 chars,
   /// wattage right-aligned to 2 chars). Falls back to plain "Local" when
-  /// the stats aren't available yet (first tick).
+  /// the stats aren't available yet (first tick). Clicking it opens the
+  /// stats graphs for the last minute.
   @ViewBuilder
   private var statsHeader: some View {
     let cpu = Int(statsMonitor.cpuPercent.rounded())
     let gpu = Int(statsMonitor.gpuPercent.rounded())
     if statsMonitor.watts > 0 {
-      Text("\(String(format: "%3d", cpu))% \(String(format: "%3d", gpu))% \(String(format: "%2d", statsMonitor.watts))W")
-        .font(.caption.weight(.medium))
-        .monospaced()
-        .help("CPU · GPU · System power draw")
+      Button {
+        showingStatsGraphs = true
+      } label: {
+        Text("\(String(format: "%3d", cpu))% \(String(format: "%3d", gpu))% \(String(format: "%2d", statsMonitor.watts))W")
+          .font(.caption.weight(.medium))
+          .monospaced()
+      }
+      .buttonStyle(.plain)
+      .help("CPU · GPU · System power draw — click for graphs")
     } else {
       Text("Local")
     }

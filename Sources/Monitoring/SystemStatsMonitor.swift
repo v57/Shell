@@ -24,6 +24,22 @@ public final class SystemStatsMonitor {
   /// fire SwiftUI updates when unchanged).
   public private(set) var watts: Int = 0
 
+  // MARK: - History (ring buffers for the stats graphs)
+
+  /// Ring size: one slot per second for the visible minute, padded so a
+  /// slow reader can never race a writer into an inconsistent window.
+  static let historyCapacity = 600
+  /// CPU% samples, most recent write at `(updatesCount - 1) % capacity`.
+  public private(set) var cpuHistory: [Int] = Array(repeating: 0, count: historyCapacity)
+  /// GPU% samples, same indexing as `cpuHistory`.
+  public private(set) var gpuHistory: [Int] = Array(repeating: 0, count: historyCapacity)
+  /// Wattage samples, same indexing as `cpuHistory`.
+  public private(set) var wattHistory: [Int] = Array(repeating: 0, count: historyCapacity)
+  /// Total samples written since start. `updatesCount % capacity` is the
+  /// next slot to overwrite; the newest sample sits at index
+  /// `(updatesCount - 1) % capacity` once at least one tick has landed.
+  public private(set) var updatesCount = 0
+
   private var timer: Timer?
   private let sampler = SystemStatsSampler()
   /// Monotonic tick counter: a slow background sample from an older tick
@@ -64,8 +80,20 @@ public final class SystemStatsMonitor {
         self.cpuPercent = result.cpu
         self.gpuPercent = result.gpu
         self.watts = result.watts
+        self.record(cpu: Int(result.cpu.rounded()), gpu: Int(result.gpu.rounded()), watts: result.watts)
       }
     }
+  }
+
+  /// Appends one sample to the three history ring buffers at slot
+  /// `updatesCount % capacity`, then bumps `updatesCount`. Also used by
+  /// tests to drive the buffers deterministically.
+  func record(cpu: Int, gpu: Int, watts: Int) {
+    let slot = updatesCount % Self.historyCapacity
+    cpuHistory[slot] = cpu
+    gpuHistory[slot] = gpu
+    wattHistory[slot] = watts
+    updatesCount += 1
   }
 }
 
