@@ -295,7 +295,7 @@ private struct SmartActionMenu: View {
         Label(selected.title, systemImage: smartActionIcon(for: selected))
       } primaryAction: {
         toggle(selected)
-      }
+      }.menuIndicator(.hidden)
     } else if let action = actions.first {
       Button(action.title, systemImage: smartActionIcon(for: action)) {
         toggle(action)
