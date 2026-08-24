@@ -11,9 +11,9 @@ import SwiftUI
 ///   dark  ≈ #272727 (0.153)    light ≈ #ECECEC (0.925)
 public enum TerminalContrast {
   /// The floor below which an explicit foreground is considered unreadable
-  /// and replaced with `.primary`. 2.0 keeps mid-grays on light, kills
+  /// and replaced with `.primary`. 1.8 keeps mid-grays on light, kills
   /// bright-white-on-light and near-black-on-dark. Tunable.
-  public static let minimumRatio: CGFloat = 2.0
+  public static let minimumRatio: CGFloat = 1.8
 
   // MARK: - Scheme backgrounds used for contrast decisions
 
