@@ -47,6 +47,26 @@ final class AppModel {
   var newActionCommands = ""
   var newActionTargetSSHConnectionID: UUID?
 
+  // MARK: - Theme settings (persisted)
+
+  /// UserDefaults keys for the theme settings (non-sensitive UI prefs).
+  private static let appearanceModeKey = "appearanceMode"
+  private static let disableTerminalBackgroundsKey = "disableTerminalBackgrounds"
+
+  /// Forced color scheme for the whole window (see `appearanceMode.colorScheme`).
+  var appearanceMode: AppearanceMode {
+    didSet { UserDefaults.standard.set(appearanceMode.rawValue, forKey: Self.appearanceModeKey) }
+  }
+
+  /// When true, terminals stop drawing character backgrounds and replace
+  /// low-contrast foreground colors with the default text color.
+  var disableTerminalBackgrounds: Bool {
+    didSet { UserDefaults.standard.set(disableTerminalBackgrounds, forKey: Self.disableTerminalBackgroundsKey) }
+  }
+
+  /// The Themes sheet (Shell menu: Themes… ⌘⇧H).
+  var showingThemes = false
+
   /// App-side kind per session id (the library session is transport-based
   /// and kind-agnostic). Written when a session is created, removed on
   /// removal — every session in `sessions` has an entry.
@@ -212,6 +232,8 @@ final class AppModel {
   }()
 
   private init() {
+    appearanceMode = AppearanceMode(rawValue: UserDefaults.standard.string(forKey: Self.appearanceModeKey) ?? "") ?? .system
+    disableTerminalBackgrounds = UserDefaults.standard.bool(forKey: Self.disableTerminalBackgroundsKey)
     connectionStore = SSHConfigStore(container: Self.sharedSSHContainer)
     deviceKeys = DeviceKeyStore(container: Self.sharedSSHContainer)
     notes = NotesStore(stores: Self.notesStores)
