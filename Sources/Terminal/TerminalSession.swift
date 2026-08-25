@@ -48,6 +48,26 @@ public final class TerminalSession: Identifiable {
   /// the status by its rank, so it follows output as lines scroll.
   public var statusRank = 0
 
+  /// Whether the status line is explicitly pinned to a line vs following
+  /// the automatic default. Kept separate from `statusRank` because a
+  /// pinned line can have rank 0 (indistinguishable from automatic by
+  /// rank alone); the pin flag disambiguates so the start-character
+  /// granularity works on the last non-empty line too.
+  public var statusPinned = false
+
+  /// When the status is pinned, whether the line renders in
+  /// start-character mode (the line shown FROM `statusStartColumn`,
+  /// skipping every character before it) vs full-line mode (the whole
+  /// line shown). Toggled by clicking the current start character;
+  /// clicking any other character of the selected line re-anchors the
+  /// start there.
+  public var statusStartMarked = false
+
+  /// The column the status line starts from in start-character mode — the
+  /// clicked character. In full-line mode it is still remembered so
+  /// clicking that same character toggles back to start-character mode.
+  public var statusStartColumn = 0
+
   /// Exit code of an action session's process (bits 8-15 of the wait
   /// status; nil for non-action sessions and while running).
   public var actionExitCode: Int32?
@@ -347,12 +367,50 @@ public final class TerminalSession: Identifiable {
     #endif
   }
 
-  /// Pins a line as the sidebar status by its rank from the bottom
-  /// (0 = the last non-empty line); clicking the line that is already
-  /// the status returns to automatic (rank 0).
-  public func toggleStatusPin(_ line: Int) {
-    guard let rank = snapshot.nonEmptyRank(fromBottomOf: line) else { return }
-    statusRank = (rank == statusRank) ? 0 : rank
+  /// A click (mouse-down == mouse-up) on the terminal grid.
+  ///
+  /// The mode is sticky: full-line mode keeps the whole line when you click
+  /// a DIFFERENT line, and offset mode (the line shown FROM the clicked
+  /// character) keeps offsetting when you click a different line. You can
+  /// only switch modes on the currently observed line:
+  ///  - Full-line mode: click the observed line → switch to offset mode,
+  ///    anchored at the clicked character. Click a different line → keep
+  ///    the whole line for it.
+  ///  - Offset mode: click a different line → keep offsetting that line
+  ///    from the clicked character. Click a non-start character of the
+  ///    observed line → re-anchor. Click the current start character →
+  ///    back to full-line mode.
+  public func clickStatusPin(at cursor: TerminalCursor) {
+    guard let rank = snapshot.nonEmptyRank(fromBottomOf: cursor.row) else { return }
+    if rank != statusRank {
+      // Clicking a different line: select it, preserving the current mode
+      // (offset stays offset; full-line stays full-line).
+      statusRank = rank
+      statusPinned = true
+      statusStartColumn = cursor.column
+      // statusStartMarked is intentionally left unchanged — the mode is sticky.
+      return
+    }
+    // Clicking the currently observed line (rank == statusRank): engaging it
+    // makes it explicitly selected, even if it was the automatic (unpinned)
+    // default line.
+    statusPinned = true
+    if statusStartMarked {
+      // Offset mode.
+      if cursor.column == statusStartColumn {
+        // Clicking the current start character → back to full-line mode.
+        statusStartMarked = false
+      } else {
+        // Clicking any other character re-anchors the offset.
+        statusStartColumn = cursor.column
+        statusStartMarked = true
+      }
+    } else {
+      // Full-line mode → clicking the observed line switches to offset
+      // mode, anchored at the clicked character.
+      statusStartColumn = cursor.column
+      statusStartMarked = true
+    }
   }
 
   /// How far up the scrollback can go with the current snapshot.

@@ -354,6 +354,35 @@ struct TerminalParserTests {
     #expect(session.currentDirectory?.path == URL(fileURLWithPath: NSHomeDirectory()).resolvingSymlinksInPath().path)
   }
 
+  /// The working-directory transport (⌘T) spawns the child in the given
+  /// directory, not the home directory. Verified live via proc_pidinfo.
+  @MainActor
+  @Test func workingDirectoryStartsChildInThatDirectory() async throws {
+    let dir = FileManager.default.temporaryDirectory
+      .appendingPathComponent("hermes-cwd-test-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let transport = LocalPTYTransport(
+      executable: "/bin/sh",
+      argv: ["sh", "-c", "sleep 30"],
+      workingDirectory: dir.path
+    )
+    let session = TerminalSession(transport: transport)
+    defer { session.close() }
+    try await Task.sleep(for: .milliseconds(250))
+
+    // proc_pidinfo returns the symlink/firmlink-resolved path (e.g. /var →
+    // /private/var). Foundation's resolvingSymlinksInPath does NOT follow
+    // macOS firmlinks, so resolve with realpath (what the kernel does).
+    var expected = dir.path
+    if let resolved = realpath(dir.path, nil) {
+      expected = String(cString: resolved)
+      free(resolved)
+    }
+    #expect(session.currentDirectory?.path == expected)
+  }
+
   /// Non-local transports (SSH, test doubles) have no child process to
   /// probe — currentDirectory stays nil.
   @MainActor
@@ -425,43 +454,129 @@ struct SelectionHitTestingTests {
   }
 }
 
-/// The sidebar-status pin: a click (mouse-down == mouse-up cell) on ANY
-/// character of a line pins that line as the status; dragging selects.
+/// The sidebar-status pin: clicking a character shows the line FROM that
+/// character (offset mode) or the whole line (full-line mode). The mode is
+/// sticky across line changes; you only switch it on the currently observed
+/// line. Dragging selects. Tests establish a starting state then exercise
+/// one click.
 struct StatusPinTests {
-  /// A click pins the clicked line (rank from bottom); clicking the pinned
-  /// line again unpins back to automatic (rank 0 = last non-empty line).
-  @MainActor
-  @Test func clickingAnyCharacterPinsAndTogglesLine() {
+  private func fixture() -> (session: TerminalSession, snapshot: TerminalSnapshot) {
     let transport = CapturingTransport()
     let session = TerminalSession(transport: transport)
     transport.injectOutput(Data("line one\nline two\nline three\n".utf8))
-    // Output publishing is coalesced; read the LATEST parser state by
-    // flushing the pending publish.
     session.flushPendingOutput()
+    return (session, session.snapshot)
+  }
 
-    let snapshot = session.snapshot
-    #expect(session.statusRank == 0)
-    // Rank API: 0 = last non-empty line, 1 = the one above it. (Raw
-    // totalLines arithmetic would miscount the trailing empty line a
-    // final newline leaves behind.)
-    let last = snapshot.nonEmptyLineIndexFromBottom(0)
-    let middle = snapshot.nonEmptyLineIndexFromBottom(1)
-    #expect(last != nil && middle != nil)
+  /// In full-line mode, clicking a DIFFERENT line keeps it a full (whole)
+  /// line — it does not switch to offset mode.
+  @MainActor
+  @Test func lineModeDifferentLineStaysWholeLine() {
+    let (session, snapshot) = fixture()
+    let top = snapshot.nonEmptyLineIndexFromBottom(2)!
+    // Establish full-line mode observing the middle line (rank 1).
+    session.statusRank = 1
+    session.statusPinned = true
+    session.statusStartMarked = false
+    session.statusStartColumn = 0
+    let col = snapshot.firstNonBlankColumn(ofLine: top) + 1
 
-    // Pin the middle line — rank 1 from the bottom.
-    session.toggleStatusPin(middle!)
+    session.clickStatusPin(at: TerminalCursor(row: top, column: col))
+    #expect(session.statusRank == 2)
+    #expect(session.statusPinned == true)
+    #expect(session.statusStartMarked == false)   // stays full-line
+    #expect(snapshot.nonEmptyLineIndexFromBottom(session.statusRank) == top)
+  }
+
+  /// In full-line mode, clicking the CURRENTLY OBSERVED line switches to
+  /// offset mode, anchored at the clicked character.
+  @MainActor
+  @Test func lineModeObservedLineEntersOffset() {
+    let (session, snapshot) = fixture()
+    let middle = snapshot.nonEmptyLineIndexFromBottom(1)!
+    session.statusRank = 1
+    session.statusPinned = true
+    session.statusStartMarked = false
+    session.statusStartColumn = 0
+    let anchor = snapshot.firstNonBlankColumn(ofLine: middle) + 1
+
+    session.clickStatusPin(at: TerminalCursor(row: middle, column: anchor))
+    #expect(session.statusStartMarked == true)   // → offset mode
+    #expect(session.statusStartColumn == anchor)
     #expect(session.statusRank == 1)
-    #expect(snapshot.nonEmptyLineIndexFromBottom(session.statusRank) == middle)
+  }
 
-    // Clicking the pinned line again unpins to automatic.
-    session.toggleStatusPin(middle!)
-    #expect(session.statusRank == 0)
-    #expect(snapshot.nonEmptyLineIndexFromBottom(0) == last)
+  /// In offset mode, clicking a DIFFERENT line keeps offset mode and
+  /// offsets that line from the clicked character.
+  @MainActor
+  @Test func offsetModeDifferentLineKeepsOffset() {
+    let (session, snapshot) = fixture()
+    let top = snapshot.nonEmptyLineIndexFromBottom(2)!
+    session.statusRank = 1
+    session.statusPinned = true
+    session.statusStartMarked = true
+    session.statusStartColumn = 9
+    let col = snapshot.firstNonBlankColumn(ofLine: top) + 1
 
-    // The same line, pinned via a click on ANY of its characters.
-    session.toggleStatusPin(middle!)
-    session.toggleStatusPin(middle!)
+    session.clickStatusPin(at: TerminalCursor(row: top, column: col))
+    #expect(session.statusRank == 2)
+    #expect(session.statusStartMarked == true)    // offset persists
+    #expect(session.statusStartColumn == col)
+  }
+
+  /// In offset mode, clicking a NON-start character of the observed line
+  /// re-anchors the offset there.
+  @MainActor
+  @Test func offsetModeObservedLineNonStartReanchors() {
+    let (session, snapshot) = fixture()
+    let middle = snapshot.nonEmptyLineIndexFromBottom(1)!
+    let first = snapshot.firstNonBlankColumn(ofLine: middle)
+    let anchor = first + 1
+    session.statusRank = 1
+    session.statusPinned = true
+    session.statusStartMarked = true
+    session.statusStartColumn = anchor
+    let reanchor = first + 5
+
+    session.clickStatusPin(at: TerminalCursor(row: middle, column: reanchor))
+    #expect(session.statusStartMarked == true)   // stays offset
+    #expect(session.statusStartColumn == reanchor)
+  }
+
+  /// In offset mode, clicking the CURRENT start character returns to
+  /// full-line mode (whole line), remembering the anchor.
+  @MainActor
+  @Test func offsetModeObservedStartCharReturnsToLineMode() {
+    let (session, snapshot) = fixture()
+    let middle = snapshot.nonEmptyLineIndexFromBottom(1)!
+    let anchor = snapshot.firstNonBlankColumn(ofLine: middle) + 1
+    session.statusRank = 1
+    session.statusPinned = true
+    session.statusStartMarked = true
+    session.statusStartColumn = anchor
+
+    session.clickStatusPin(at: TerminalCursor(row: middle, column: anchor))
+    #expect(session.statusStartMarked == false)   // → full-line mode
+    #expect(session.statusStartColumn == anchor)   // remembered
+  }
+
+  /// Clicking the auto (unpinned) observed line in full-line mode also
+  /// enters offset mode (rank 0 line).
+  @MainActor
+  @Test func autoObservedLineEntersOffset() {
+    let (session, snapshot) = fixture()
+    let last = snapshot.nonEmptyLineIndexFromBottom(0)!
+    // Auto state: rank 0, unpinned, full-line mode.
     #expect(session.statusRank == 0)
+    #expect(session.statusPinned == false)
+    #expect(session.statusStartMarked == false)
+    let anchor = snapshot.firstNonBlankColumn(ofLine: last) + 1
+
+    session.clickStatusPin(at: TerminalCursor(row: last, column: anchor))
+    #expect(session.statusRank == 0)   // rank stays 0
+    #expect(session.statusPinned == true)
+    #expect(session.statusStartMarked == true)   // → offset mode
+    #expect(session.statusStartColumn == anchor)
   }
 
   /// The click/drag rule: same cell = click (pin), any movement = drag.

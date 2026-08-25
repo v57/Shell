@@ -241,6 +241,17 @@ public struct TerminalSnapshot {
     }
     return -1
   }
+
+  /// Column of the FIRST non-blank cell in a logical line, or -1 when the
+  /// line is blank. This is the "start character" the status line anchors
+  /// on when rendering in start-character mode.
+  public func firstNonBlankColumn(ofLine line: Int) -> Int {
+    guard line >= 0, line < totalLines else { return -1 }
+    for column in 0..<columns {
+      if !cell(atLine: line, column: column).isBlank { return column }
+    }
+    return -1
+  }
   
   /// Logical line index of the n-th non-empty line from the bottom
   /// (n = 0 → the last non-empty line). Clamps to the topmost

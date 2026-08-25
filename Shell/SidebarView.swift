@@ -353,6 +353,9 @@ private struct ActionRunRow: View {
   var session: TerminalSession
   let spec: ActionSpec?
 
+  @Environment(\.terminalBackgroundsDisabled) private var disableBackgrounds
+  @Environment(\.colorScheme) private var colorScheme
+
   private var environmentLabel: String {
     spec?.config?.displayName ?? "Local"
   }
@@ -406,15 +409,15 @@ private struct ActionRunRow: View {
           .font(.caption2.monospaced())
           .foregroundStyle(.red)
           .lineLimit(1)
-      } else if !session.statusAttributedString.characters.isEmpty {
-        Text(session.statusAttributedString)
+      } else if !session.statusAttributedString(disableBackgrounds: disableBackgrounds, scheme: colorScheme).characters.isEmpty {
+        Text(session.statusAttributedString(disableBackgrounds: disableBackgrounds, scheme: colorScheme))
           .font(.caption2.monospaced())
           .lineLimit(1)
           .truncationMode(.tail)
       }
     default:
-      if !session.statusAttributedString.characters.isEmpty {
-        Text(session.statusAttributedString)
+      if !session.statusAttributedString(disableBackgrounds: disableBackgrounds, scheme: colorScheme).characters.isEmpty {
+        Text(session.statusAttributedString(disableBackgrounds: disableBackgrounds, scheme: colorScheme))
           .font(.caption2.monospaced())
           .lineLimit(1)
           .truncationMode(.tail)
@@ -500,6 +503,8 @@ private struct SSHConfigRow: View {
 /// Escape cancels.
 private struct ScreenSessionRow: View {
   @Environment(AppModel.self) private var model
+  @Environment(\.terminalBackgroundsDisabled) private var disableBackgrounds
+  @Environment(\.colorScheme) private var colorScheme
   let info: ScreenSessionInfo
   let isRenaming: Bool
   let onCommitRename: (String) -> Void
@@ -549,8 +554,8 @@ private struct ScreenSessionRow: View {
             ? "tmux session"
             : "GNU screen session")
       }
-      if let session = attachedSession, !session.statusAttributedString.characters.isEmpty {
-        Text(session.statusAttributedString)
+      if let session = attachedSession, !session.statusAttributedString(disableBackgrounds: disableBackgrounds, scheme: colorScheme).characters.isEmpty {
+        Text(session.statusAttributedString(disableBackgrounds: disableBackgrounds, scheme: colorScheme))
           .font(.caption2.monospaced())
           .lineLimit(1)
           .truncationMode(.tail)
@@ -577,6 +582,9 @@ private struct SessionRow: View {
   let isRenaming: Bool
   let onCommitRename: (String) -> Void
   let onCancelRename: () -> Void
+
+  @Environment(\.terminalBackgroundsDisabled) private var disableBackgrounds
+  @Environment(\.colorScheme) private var colorScheme
   
   @State private var draft = ""
   @FocusState private var fieldFocused: Bool
@@ -607,8 +615,8 @@ private struct SessionRow: View {
       // Second line: the session's status (n-th non-empty terminal line
       // from the bottom, or the line pinned by clicking its last
       // character), rendered in the terminal's own colors.
-      if !session.statusAttributedString.characters.isEmpty {
-        Text(session.statusAttributedString).font(.caption2.monospaced()).lineLimit(1).truncationMode(.middle)
+      if !session.statusAttributedString(disableBackgrounds: disableBackgrounds, scheme: colorScheme).characters.isEmpty {
+        Text(session.statusAttributedString(disableBackgrounds: disableBackgrounds, scheme: colorScheme)).font(.caption2.monospaced()).lineLimit(1).truncationMode(.middle)
           .clipShape(.capsule)
       }
     }
@@ -856,7 +864,13 @@ extension TerminalSession {
   /// and styles (prompts, git status, vim bars, ...). Runs without an
   /// explicit color keep the sidebar's secondary style; bold cells use
   /// a semibold monospaced face.
-  var statusAttributedString: AttributedString {
+  ///
+  /// `disableBackgrounds: true` mirrors the canvas's background-suppression
+  /// theme (the "Disable Background Colors" option): no character
+  /// backgrounds, and explicit low-contrast colors replaced with `.primary`
+  /// per `TerminalContrast`. `scheme` is the EFFECTIVE color scheme (after
+  /// any preferredColorScheme override), matching the canvas's contrast keys.
+  func statusAttributedString(disableBackgrounds: Bool, scheme: ColorScheme) -> AttributedString {
     if let message = snapshot.message {
       return AttributedString(message)
     }
@@ -865,11 +879,16 @@ extension TerminalSession {
     }
     let lastColumn = snapshot.lastNonBlankColumn(ofLine: line)
     guard lastColumn >= 0 else { return AttributedString() }
+    // Start-character mode shows the line FROM the clicked character
+    // (skipping the prefix before it); full-line mode shows the whole
+    // line. Clamp to the line's content so a click past its end doesn't
+    // produce an empty range.
+    let startColumn = statusStartMarked ? min(max(0, statusStartColumn), lastColumn) : 0
     
     let baseFont = Font.caption2.monospaced()
     let boldFont = Font.caption2.monospaced().weight(.semibold)
     var result = AttributedString()
-    for column in 0...lastColumn {
+    for column in startColumn...lastColumn {
       let cell = snapshot.cell(atLine: line, column: column)
       // Blank cells (including \0) render as spaces — internal spacing
       // must survive; lastColumn already bounds trailing blanks.
@@ -877,15 +896,25 @@ extension TerminalSession {
       var attrs = AttributeContainer()
       attrs.font = cell.bold ? boldFont : baseFont
       // Inverse swaps the background into the foreground (like the canvas).
-      if cell.inverse {
-        if let color = cell.background.sidebarColor {
+      if disableBackgrounds {
+        // Apple theme: no character backgrounds; the cell's own color
+        // (the background color for inverse cells) unless low-contrast,
+        // then primary. Exactly the canvas's suppression contract.
+        attrs.foregroundColor = TerminalContrast.suppressedBackgroundForeground(
+          for: cell.inverse ? cell.background : cell.foreground,
+          scheme: scheme
+        )
+      } else {
+        if cell.inverse {
+          if let color = cell.background.sidebarColor {
+            attrs.foregroundColor = color
+          }
+        } else if let color = cell.foreground.sidebarColor {
           attrs.foregroundColor = color
         }
-      } else if let color = cell.foreground.sidebarColor {
-        attrs.foregroundColor = color
-      }
-      if !cell.inverse, let background = cell.background.sidebarColor {
-        attrs.backgroundColor = background
+        if !cell.inverse, let background = cell.background.sidebarColor {
+          attrs.backgroundColor = background
+        }
       }
       result.append(AttributedString(character, attributes: attrs))
     }

@@ -915,12 +915,14 @@ extension TerminalScreenView {
         let end = cell(at: location)
         session.selectionEnd = end
         // A click without dragging pins the clicked line as the sidebar
-        // status — ANY character of the line works (previously only the
-        // last non-blank character did); dragging keeps the selection.
+        // status — ANY character of the line pins it (full-line), clicking
+        // the pinned line's start character toggles start-character mode,
+        // clicking another character of the pinned line selects the start
+        // character (see clickStatusPin); dragging keeps the selection.
         if start == end {
           session.selectionStart = nil
           session.selectionEnd = nil
-          session.toggleStatusPin(start.row)
+          session.clickStatusPin(at: start)
         }
       }
       dragStart = nil
