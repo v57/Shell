@@ -633,7 +633,13 @@ private struct SessionRow: View {
   private var stateDot: some View {
     switch session.connectionState {
     case .connected:
-      Circle().fill(.green).frame(width: 7, height: 7)
+      // Green only while the session produced output recently; after
+      // `TerminalSession.inactivityTimeout` of quiet the session is idle
+      // and the dot hides. Read via @Observable so the row re-renders when
+      // `hasActivity` flips.
+      if session.hasActivity {
+        Circle().fill(.green).frame(width: 7, height: 7)
+      }
     case .failed:
       Circle().fill(.red).frame(width: 7, height: 7)
     case .starting, .connecting, .closed:

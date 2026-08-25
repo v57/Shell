@@ -38,6 +38,11 @@ public final class TerminalSession: Identifiable {
   public var connectionState: ConnectionState = .starting
   public var hostKeyPrompt: TerminalHostKeyPrompt?
   public var passwordPrompt: TerminalPasswordPrompt?
+  /// Whether the session produced stdout recently. Observed by the sidebar
+  /// `SessionRow` to show/hide the active (green) status dot: set true on
+  /// stdout, then set false by the inactivity timer once `inactivityTimeout`
+  /// passes with no output (idle session). See the inactivity timer below.
+  public var hasActivity = false
   /// Lines scrolled up from the bottom of the scrollback (0 = at bottom).
   /// Owned by the view; stored here so copy actions can see it.
   public var scrollbackOffset = 0
@@ -140,6 +145,10 @@ public final class TerminalSession: Identifiable {
   /// 30fps: the publish throttle for bulk output. Interactive paths
   /// (typing, resize, clear, connect/exit) flush immediately.
   public static let publishInterval: TimeInterval = 1.0 / 30.0
+
+  /// Seconds of stdout quiet before `hasActivity` flips false and the
+  /// sidebar hides the active (green) dot for an idle session.
+  public static let inactivityTimeout: TimeInterval = 30
   @ObservationIgnored
   private var pendingPublish = false
   @ObservationIgnored
@@ -154,6 +163,26 @@ public final class TerminalSession: Identifiable {
   private var lastPublishedShowCursor = true
   @ObservationIgnored
   private var lastPublishedCursorBackground = TerminalPalette.selectionBackground
+
+  // MARK: Activity inactivity timer
+  //
+  // Single-fire debounce that hides the sidebar's active (green) dot after
+  // `inactivityTimeout` of stdout quiet. Optimization: it is armed ONLY
+  // when no timer is running (the first activity after an idle period); the
+  // deadline slides, not by touching the timer on every chunk (bulk output
+  // is ~100+ chunks/sec), but by the firing tick re-reading the last
+  // activity time and re-arming to `lastActivity + timeout` when output
+  // arrived inside the window. At most ONE timer is ever alive.
+
+  @ObservationIgnored
+  private var inactivityTimer: Timer?
+  /// When the most recent stdout chunk arrived (the sliding deadline anchor).
+  @ObservationIgnored
+  private var lastActivityDate: Date?
+  /// Whether any stdout arrived since the timer was last armed — the firing
+  /// tick uses this to decide re-arm (still active) vs confirm idle.
+  @ObservationIgnored
+  private var activityPending = false
 
   /// Creates a session over `transport` and starts it immediately.
   /// `startupMessage` is shown while connecting (SSH: "Connecting to
@@ -203,6 +232,10 @@ public final class TerminalSession: Identifiable {
     publishTimer?.invalidate()
     publishTimer = nil
     pendingPublish = false
+    inactivityTimer?.invalidate()
+    inactivityTimer = nil
+    lastActivityDate = nil
+    activityPending = false
     transport.close()
   }
 
@@ -435,6 +468,7 @@ public final class TerminalSession: Identifiable {
     // the main thread on byte parsing. The 30fps publish timer picks up
     // the latest state when it fires.
     parser.consumeAsync(data)
+    noteActivity()
     schedulePublish()
   }
 
@@ -509,6 +543,60 @@ public final class TerminalSession: Identifiable {
       selectionStart = nil
       selectionEnd = nil
     }
+  }
+
+  // MARK: - Activity inactivity timer
+
+  /// Called on every stdout chunk (main thread). Marks the session active
+  /// (hasActivity flips true only on the first chunk after idle) and arms
+  /// the single inactivity timer if none is running. The deadline is NOT
+  /// reset per chunk — the running timer's firing tick re-anchors it to the
+  /// last real activity time, so the timer is never churned under bulk
+  /// output (see THE inactivity timer definition above).
+  private func noteActivity() {
+    let now = Date()
+    lastActivityDate = now
+    activityPending = true
+    if !hasActivity {
+      hasActivity = true
+    }
+    if inactivityTimer == nil {
+      armInactivityTimer(at: now.addingTimeInterval(Self.inactivityTimeout))
+    }
+  }
+
+  /// Arms a single-fire (never repeating) timer to run `self`'s firing tick
+  /// at `deadline`. Called only when no timer is running (the first activity
+  /// after idle) or to re-anchor after a firing tick found fresh output.
+  private func armInactivityTimer(at deadline: Date) {
+    activityPending = false
+    let timer = Timer(fire: deadline, interval: 0, repeats: false) { [weak self] _ in
+      self?.inactivityTimerFired()
+    }
+    RunLoop.main.add(timer, forMode: .common)
+    inactivityTimer = timer
+  }
+
+  /// The single inactivity timer's firing tick (main thread). If stdout
+  /// arrived while it was armed, re-arm to `lastActivity + timeout` (the
+  /// deadline slides forward from the most recent real output, and still
+  /// exactly one timer is live). Otherwise the full `inactivityTimeout` of
+  /// quiet is confirmed: flip `hasActivity` false (the sidebar hides the
+  /// active dot) and clear the anchor.
+  private func inactivityTimerFired() {
+    inactivityTimer?.invalidate()
+    inactivityTimer = nil
+    if activityPending, let last = lastActivityDate {
+      let deadline = last.addingTimeInterval(Self.inactivityTimeout)
+      if deadline > Date() {
+        armInactivityTimer(at: deadline)
+        return
+      }
+    }
+    // Confirmed idle: no stdout for the full timeout.
+    hasActivity = false
+    lastActivityDate = nil
+    activityPending = false
   }
 
   private func transportConnected() {
