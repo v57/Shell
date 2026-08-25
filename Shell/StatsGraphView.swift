@@ -7,54 +7,44 @@ import Monitoring
 /// the full 600-slot ring buffer, oldest at the left, newest ("now") at
 /// the right edge.
 ///
-/// The three charts share ONE horizontal scroll strip (with a visible
-/// scrollbar) so dragging pans every metric in time together; the left
-/// column keeps the metric titles and their live values pinned while you
-/// scroll back through the array. Live: SwiftUI re-renders each tick
-/// through `@Observable`.
+/// Each metric is a leading-aligned title row above its chart; the three
+/// charts fill the container width (no horizontal scrolling) so the whole
+/// 600-sample window is always visible without panning. Live: SwiftUI
+/// re-renders each tick through `@Observable`.
 struct StatsGraphView: View {
   /// The sidebar's shared monitor — same instance the header reads.
   let monitor: SystemStatsMonitor
 
   var body: some View {
-    HStack(alignment: .top, spacing: 12) {
-      VStack(alignment: .leading, spacing: 16) {
-        StatTitle(title: "CPU", unit: "%", value: monitor.latestCPU)
-          .frame(width: 72, height: 140, alignment: .topLeading)
-        StatTitle(title: "GPU", unit: "%", value: monitor.latestGPU)
-          .frame(width: 72, height: 140, alignment: .topLeading)
-        StatTitle(title: "Power", unit: "W", value: monitor.latestWatts)
-          .frame(width: 72, height: 140, alignment: .topLeading)
-      }
-      ScrollView(.horizontal, showsIndicators: true) {
-        VStack(alignment: .leading, spacing: 16) {
-          StatChart(
-            color: .blue,
-            samples: monitor.cpuHistory,
-            updatesCount: monitor.updatesCount,
-            yRange: 0...100
-          )
-          StatChart(
-            color: .purple,
-            samples: monitor.gpuHistory,
-            updatesCount: monitor.updatesCount,
-            yRange: 0...100
-          )
-          StatChart(
-            color: .orange,
-            samples: monitor.wattHistory,
-            updatesCount: monitor.updatesCount,
-            yRange: nil   // autoscale — watts aren't bounded like percentages
-          )
-        }
-      }
+    VStack(alignment: .leading, spacing: 16) {
+      StatTitle(title: "CPU", unit: "%", value: monitor.latestCPU)
+      StatChart(
+        color: .blue,
+        samples: monitor.cpuHistory,
+        updatesCount: monitor.updatesCount,
+        yRange: 0...100
+      )
+      StatTitle(title: "GPU", unit: "%", value: monitor.latestGPU)
+      StatChart(
+        color: .purple,
+        samples: monitor.gpuHistory,
+        updatesCount: monitor.updatesCount,
+        yRange: 0...100
+      )
+      StatTitle(title: "Power", unit: "W", value: monitor.latestWatts)
+      StatChart(
+        color: .orange,
+        samples: monitor.wattHistory,
+        updatesCount: monitor.updatesCount,
+        yRange: nil   // autoscale — watts aren't bounded like percentages
+      )
     }
     .padding(20)
-    .frame(width: 440, height: 560)
+    .frame(width: 440, height: 620)
   }
 }
 
-/// One metric's pinned header: title plus the newest sample (absent until
+/// One metric's header: title plus the newest sample (absent until
 /// the first tick lands).
 private struct StatTitle: View {
   let title: String
@@ -76,10 +66,10 @@ private struct StatTitle: View {
 
 /// One metric's line chart over the full ring: all written samples mapped
 /// onto the 600-position window (0 = ten minutes ago, 599 = now), plotted
-/// at 2 pt per second inside the shared horizontal scroll strip. Before
-/// the first sample lands (`updatesCount == 0`) there is no data yet and
-/// the chart renders empty instead of a fake flat line; a partially
-/// filled ring occupies the right end ("now") with an empty left region.
+/// across the container width. Before the first sample lands
+/// (`updatesCount == 0`) there is no data yet and the chart renders empty
+/// instead of a fake flat line; a partially filled ring occupies the right
+/// end ("now") with an empty left region.
 private struct StatChart: View {
   let color: Color
   let samples: [Int]
@@ -133,7 +123,8 @@ private struct StatChart: View {
     }
     .chartYScale(domain: yRange.map { Double($0.lowerBound)...Double($0.upperBound) } ?? domainForPoints)
     .chartXScale(domain: 0...Double(samples.count - 1))
-    .frame(width: CGFloat(samples.count) * 2, height: 140)
+    .frame(maxWidth: .infinity)
+    .frame(height: 140)
   }
 
   /// Minute marks across the window plus the final "now" tick.
