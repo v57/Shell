@@ -3,53 +3,84 @@ import Charts
 import Monitoring
 
 /// The stats graphs sheet, opened by clicking the Local section header in
-/// the sidebar: CPU%, GPU%, and system wattage over the last minute (the
-/// 60 newest slots of the monitor's ring buffers, oldest → newest left to
-/// right; the leading zero-filled segment is simply "not sampled yet").
-/// Live: SwiftUI re-renders each tick through `@Observable`.
+/// the sidebar: CPU%, GPU%, and system wattage over the last 10 minutes —
+/// the full 600-slot ring buffer, oldest at the left, newest ("now") at
+/// the right edge.
+///
+/// The three charts share ONE horizontal scroll strip (with a visible
+/// scrollbar) so dragging pans every metric in time together; the left
+/// column keeps the metric titles and their live values pinned while you
+/// scroll back through the array. Live: SwiftUI re-renders each tick
+/// through `@Observable`.
 struct StatsGraphView: View {
   /// The sidebar's shared monitor — same instance the header reads.
   let monitor: SystemStatsMonitor
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 16) {
-      StatChart(
-        title: "CPU",
-        unit: "%",
-        color: .blue,
-        samples: monitor.cpuHistory,
-        updatesCount: monitor.updatesCount,
-        yRange: 0...100
-      )
-      StatChart(
-        title: "GPU",
-        unit: "%",
-        color: .purple,
-        samples: monitor.gpuHistory,
-        updatesCount: monitor.updatesCount,
-        yRange: 0...100
-      )
-      StatChart(
-        title: "Power",
-        unit: "W",
-        color: .orange,
-        samples: monitor.wattHistory,
-        updatesCount: monitor.updatesCount,
-        yRange: nil   // autoscale — watts aren't bounded like percentages
-      )
-      Spacer(minLength: 0)
+    HStack(alignment: .top, spacing: 12) {
+      VStack(alignment: .leading, spacing: 16) {
+        StatTitle(title: "CPU", unit: "%", value: monitor.latestCPU)
+          .frame(width: 72, height: 140, alignment: .topLeading)
+        StatTitle(title: "GPU", unit: "%", value: monitor.latestGPU)
+          .frame(width: 72, height: 140, alignment: .topLeading)
+        StatTitle(title: "Power", unit: "W", value: monitor.latestWatts)
+          .frame(width: 72, height: 140, alignment: .topLeading)
+      }
+      ScrollView(.horizontal, showsIndicators: true) {
+        VStack(alignment: .leading, spacing: 16) {
+          StatChart(
+            color: .blue,
+            samples: monitor.cpuHistory,
+            updatesCount: monitor.updatesCount,
+            yRange: 0...100
+          )
+          StatChart(
+            color: .purple,
+            samples: monitor.gpuHistory,
+            updatesCount: monitor.updatesCount,
+            yRange: 0...100
+          )
+          StatChart(
+            color: .orange,
+            samples: monitor.wattHistory,
+            updatesCount: monitor.updatesCount,
+            yRange: nil   // autoscale — watts aren't bounded like percentages
+          )
+        }
+      }
     }
     .padding(20)
     .frame(width: 440, height: 560)
   }
 }
 
-/// One metric's line chart over the last minute. The window ends at the
-/// current second ("now") and extends back through the 60 newest ring
-/// entries; x values are whole seconds before now.
-private struct StatChart: View {
+/// One metric's pinned header: title plus the newest sample (absent until
+/// the first tick lands).
+private struct StatTitle: View {
   let title: String
   let unit: String
+  let value: Int?
+
+  var body: some View {
+    HStack(spacing: 6) {
+      Text(title)
+        .font(.headline)
+      if let value {
+        Text("\(value)\(unit)")
+          .font(.callout.monospacedDigit())
+          .foregroundStyle(.secondary)
+      }
+    }
+  }
+}
+
+/// One metric's line chart over the full ring: all written samples mapped
+/// onto the 600-position window (0 = ten minutes ago, 599 = now), plotted
+/// at 2 pt per second inside the shared horizontal scroll strip. Before
+/// the first sample lands (`updatesCount == 0`) there is no data yet and
+/// the chart renders empty instead of a fake flat line; a partially
+/// filled ring occupies the right end ("now") with an empty left region.
+private struct StatChart: View {
   let color: Color
   let samples: [Int]
   let updatesCount: Int
@@ -57,65 +88,61 @@ private struct StatChart: View {
   let yRange: ClosedRange<Int>?
 
   private struct Point: Identifiable {
-    let secondsAgo: Int
+    /// Axis position: 0 = oldest end of the window, `count-1` = now.
+    let position: Int
     let value: Int
-    var id: Int { secondsAgo }
+    var id: Int { position }
   }
 
-  /// The last 60 written samples mapped to "seconds ago", oldest first.
-  /// Before the first sample lands (`updatesCount == 0`) there is no
-  /// window yet and the chart renders empty instead of a fake flat line.
+  /// The newest written samples, oldest first, mapped onto the full
+  /// window so the newest sample is always the right edge ("now").
   private var points: [Point] {
     guard updatesCount > 0 else { return [] }
-    let count = min(60, updatesCount)
-    return (0..<count).reversed().map { offset in
-      let slot = (updatesCount - 1 - offset) % samples.count
-      return Point(secondsAgo: count - 1 - offset, value: samples[slot])
+    let written = min(samples.count, updatesCount)
+    return (0..<written).map { age in
+      let slot = (updatesCount - 1 - age) % samples.count
+      return Point(position: samples.count - 1 - age, value: samples[slot])
     }
   }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 4) {
-      HStack(spacing: 6) {
-        Text(title)
-          .font(.headline)
-        if let last = points.last {
-          Text("\(last.value)\(unit)")
-            .font(.callout.monospacedDigit())
-            .foregroundStyle(.secondary)
-        }
-      }
-      Chart(points) { point in
-        LineMark(
-          x: .value("Seconds ago", point.secondsAgo),
-          y: .value(title, point.value)
+    Chart(points) { point in
+      LineMark(
+        x: .value("Position", point.position),
+        y: .value("Value", point.value)
+      )
+      .foregroundStyle(color)
+      .interpolationMethod(.catmullRom)
+      AreaMark(
+        x: .value("Position", point.position),
+        y: .value("Value", point.value)
+      )
+      .foregroundStyle(
+        .linearGradient(
+          colors: [color.opacity(0.25), color.opacity(0.02)],
+          startPoint: .top, endPoint: .bottom
         )
-        .foregroundStyle(color)
-        .interpolationMethod(.catmullRom)
-        AreaMark(
-          x: .value("Seconds ago", point.secondsAgo),
-          y: .value(title, point.value)
-        )
-        .foregroundStyle(
-          .linearGradient(
-            colors: [color.opacity(0.25), color.opacity(0.02)],
-            startPoint: .top, endPoint: .bottom
-          )
-        )
-        .interpolationMethod(.catmullRom)
-      }
-      .chartXAxis {
-        AxisMarks(values: [0, 15, 30, 45, 59]) { value in
-          AxisGridLine()
-        }
-      }
-      .chartYAxis {
-        AxisMarks(position: .trailing)
-      }
-      .chartYScale(domain: yRange.map { Double($0.lowerBound)...Double($0.upperBound) } ?? domainForPoints)
-      .chartXScale(domain: 0...59.0)
-      .frame(height: 140)
+      )
+      .interpolationMethod(.catmullRom)
     }
+    .chartXAxis {
+      
+    }
+    .chartYAxis {
+      AxisMarks(position: .trailing)
+    }
+    .chartYScale(domain: yRange.map { Double($0.lowerBound)...Double($0.upperBound) } ?? domainForPoints)
+    .chartXScale(domain: 0...Double(samples.count - 1))
+    .frame(width: CGFloat(samples.count) * 2, height: 140)
+  }
+
+  /// Minute marks across the window plus the final "now" tick.
+  private var xMarkPositions: [Int] {
+    let last = samples.count - 1
+    let step = 60
+    var marks = Array(stride(from: 0, through: last - (last % step), by: step))
+    if marks.last != last { marks.append(last) }
+    return marks
   }
 
   /// Autoscale domain for unbounded metrics (watts): headroom above the

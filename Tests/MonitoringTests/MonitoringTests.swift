@@ -3,8 +3,8 @@ import Foundation
 @testable import Monitoring
 
 /// The stats history ring buffers: one Int per metric per tick, written at
-/// `updatesCount % 600`, with the newest sample readable as the last
-/// minute-window entry.
+/// `updatesCount % 600`, with the newest sample readable as the right edge
+/// of the 600-slot graph window (10 minutes at 1 sample/sec).
 @MainActor
 struct MonitoringTests {
   /// Each record() writes cpu/gpu/watts into the slot updatesCount%600
@@ -41,26 +41,49 @@ struct MonitoringTests {
     #expect(monitor.cpuHistory[9] != 9)
   }
 
-  /// The graph window: the 60 newest written samples, oldest of those
-  /// first. With fewer than 60 recorded, only the written ones appear.
-  @Test func lastMinuteWindowIsNewestSixtyInOrder() {
+  /// The graph window: the FULL 600-slot ring (10 minutes), newest write
+  /// at slot `(updatesCount - 1) % 600`, oldest visible sample first
+  /// after the ring has wrapped. With fewer than 600 recorded, only the
+  /// written samples appear (oldest written first).
+  @Test func fullWindowIsNewestSixHundredInOrder() {
     let monitor = SystemStatsMonitor()
-    let total = 150
+    let total = 750
     for second in 0..<total {
       monitor.record(cpu: second, gpu: second * 2, watts: total - second)
     }
-    let window = (0..<60).map {
-      monitor.cpuHistory[(total - 60 + $0) % 600]
+    let window = (0..<600).map {
+      monitor.cpuHistory[(total - 600 + $0) % 600]
     }
-    #expect(window == Array(90..<150))         // samples 90…149, oldest first
+    #expect(window == Array(150..<750))        // samples 150…749, oldest first
 
     // GPU/watts follow the same window from their buffers.
-    let gpuWindow = (0..<60).map {
-      monitor.gpuHistory[(total - 60 + $0) % 600]
+    let gpuWindow = (0..<600).map {
+      monitor.gpuHistory[(total - 600 + $0) % 600]
     }
-    #expect(gpuWindow == Array((90..<150).map { $0 * 2 }))
+    #expect(gpuWindow == Array((150..<750).map { $0 * 2 }))
     let wattNewest = monitor.wattHistory[(total - 1) % 600]
-    #expect(wattNewest == 1)                   // watts count down: 150-149
+    #expect(wattNewest == 1)                   // watts count down: 750-749
+  }
+
+  /// The newest sample of each metric (`latestCPU`/`latestGPU`/`latestWatts`):
+  /// nil before the first tick, then the newest ring slot, following the
+  /// wrap once updatesCount passes 600.
+  @Test func latestSampleFollowsNewestRingSlot() {
+    let monitor = SystemStatsMonitor()
+    #expect(monitor.latestCPU == nil)
+    #expect(monitor.latestGPU == nil)
+    #expect(monitor.latestWatts == nil)
+
+    monitor.record(cpu: 11, gpu: 22, watts: 33)
+    #expect(monitor.latestCPU == 11)
+    #expect(monitor.latestGPU == 22)
+    #expect(monitor.latestWatts == 33)
+
+    for second in 0..<605 {
+      monitor.record(cpu: second, gpu: 0, watts: 0)
+    }
+    #expect(monitor.updatesCount == 606)
+    #expect(monitor.latestCPU == 604)          // 604 % 600 → slot 4, wrapped
   }
 
   /// A brand-new monitor has an all-zero history and an empty window

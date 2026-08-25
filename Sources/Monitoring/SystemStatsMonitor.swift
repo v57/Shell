@@ -26,8 +26,9 @@ public final class SystemStatsMonitor {
 
   // MARK: - History (ring buffers for the stats graphs)
 
-  /// Ring size: one slot per second for the visible minute, padded so a
-  /// slow reader can never race a writer into an inconsistent window.
+  /// Ring size: one slot per second, holding the full 10 minutes of
+  /// history the graphs render (600 samples at 1/sec), padded so a slow
+  /// reader can never race a writer into an inconsistent window.
   static let historyCapacity = 600
   /// CPU% samples, most recent write at `(updatesCount - 1) % capacity`.
   public private(set) var cpuHistory: [Int] = Array(repeating: 0, count: historyCapacity)
@@ -39,6 +40,18 @@ public final class SystemStatsMonitor {
   /// next slot to overwrite; the newest sample sits at index
   /// `(updatesCount - 1) % capacity` once at least one tick has landed.
   public private(set) var updatesCount = 0
+
+  /// The most recent CPU% sample, nil before the first tick.
+  public var latestCPU: Int? { latest(in: cpuHistory) }
+  /// The most recent GPU% sample, nil before the first tick.
+  public var latestGPU: Int? { latest(in: gpuHistory) }
+  /// The most recent wattage sample, nil before the first tick.
+  public var latestWatts: Int? { latest(in: wattHistory) }
+
+  private func latest(in history: [Int]) -> Int? {
+    guard updatesCount > 0 else { return nil }
+    return history[(updatesCount - 1) % Self.historyCapacity]
+  }
 
   private var timer: Timer?
   private let sampler = SystemStatsSampler()
