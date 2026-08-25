@@ -203,6 +203,13 @@ public struct TerminalScreenView: View {
           scrollOffset: $scrollOffset,
           viewportHeight: $viewportHeight
         ))
+        // Floating "scroll to bottom" affordance pinned to the viewport's
+        // bottom-trailing corner while the user is scrolled up; tapping it
+        // snaps back to the live grid. Exists above the selection drag, so
+        // clicks on it never start a selection.
+        .overlay(alignment: .bottomTrailing) {
+          scrollToBottomButton()
+        }
       }
     }
   }
@@ -254,6 +261,39 @@ public struct TerminalScreenView: View {
     // Scrolling behavior (anchor tracking, content-offset reporting,
     // bottom-tailing) lives in ScrollModifier.
     .modifier(ScrollModifier(session: session, anchorLine: $anchorLine, scrollOffset: $scrollOffset, topInset: topInset))
+  }
+
+  // MARK: - Scroll-to-bottom affordance
+
+  /// Whether the viewport is pinned to the bottom of the current content
+  /// (the live grid). The floating button is shown only when this is false,
+  /// i.e. the user has scrolled up into the scrollback.
+  /// Reads `anchorLine` (@State) and `snapshot` (@Observable) so the
+  /// button's visibility tracks the scroll position live.
+  private var isAtBottom: Bool {
+    let snapshot = session.snapshot
+    return (anchorLine ?? 0) + snapshot.rows >= snapshot.totalLines
+  }
+
+  /// The floating bottom-trailing button: `chevron.down.circle.fill` at
+  /// 32pt (medium) with the hierarchical rendering style. Hidden when the
+  /// viewport is already at the bottom. Tapping re-pins to the live grid
+  /// via `ScrollModifier.snapToBottom`.
+  @ViewBuilder
+  private func scrollToBottomButton() -> some View {
+    if !isAtBottom {
+      Button {
+        ScrollModifier.snapToBottom(session: session, anchorLine: $anchorLine)
+      } label: {
+        Image(systemName: "chevron.down.circle.fill")
+          .font(.system(size: 32, weight: .medium))
+          .symbolRenderingMode(.hierarchical)
+      }
+      .buttonStyle(.plain)
+      .padding(12)
+      .help("Scroll to bottom")
+      .transition(.opacity.combined(with: .scale))
+    }
   }
 
   // MARK: - Per-glyph advance normalization
