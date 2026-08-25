@@ -290,7 +290,7 @@ final class AppModel {
     }
     switch kind(of: session) {
     case .local:
-      return "Local"
+      return defaultLocalName(for: session)
     case .screen(let info):
       return info.name
     case .action(let spec):
@@ -299,6 +299,19 @@ final class AppModel {
       let number = (sessions(for: config).firstIndex { $0.id == session.id } ?? 0) + 1
       return "\(config.displayName) #\(number)"
     }
+  }
+
+  /// Default name for a local terminal: the basename of the directory the
+  /// shell currently sits in (follows `cd`, like the window subtitle),
+  /// so a terminal opened in a project reads as its folder. Falls back
+  /// to "Local" while no child/cwd is available (starting, closed,
+  /// unmounted root) — the pre-existing label.
+  private func defaultLocalName(for session: TerminalSession) -> String {
+    guard
+      let directory = session.currentDirectory,
+      directory.path != "/"
+    else { return "Local" }
+    return directory.lastPathComponent
   }
   
   // MARK: - Insert into terminal (⌘E)
@@ -320,12 +333,14 @@ final class AppModel {
   
   #if os(macOS)
   @discardableResult
-  func addLocalTerminal() -> TerminalSession {
+  func addLocalTerminal(in directory: String? = nil) -> TerminalSession {
     if historyMode {
       historyMode = false
       selectionBeforeHistory = nil
     }
-    let session = TerminalSession(session: .zsh)
+    // `directory` (⌘T) starts the shell there instead of in the home
+    // directory; nil keeps the default home-dir launch.
+    let session = TerminalSession(session: directory.map { .zsh(in: $0) } ?? .zsh)
     sessionKinds[session.id] = .local
     registerCapture(for: session, archiveLocally: true)
     sessions.append(session)
@@ -333,7 +348,24 @@ final class AppModel {
     return session
   }
   #endif
-  
+
+  #if os(macOS)
+  /// ⌘T: opens a new local terminal whose shell starts in the SAME
+  /// directory as the selected session's current working directory.
+  /// Falls back to a plain local terminal (home dir) when the selected
+  /// session has no local cwd (SSH/action/screen, or still starting).
+  @discardableResult
+  func openTerminalInSameDirectoryAsSelected() -> TerminalSession {
+    guard
+      let session = selectedSession,
+      let directory = session.currentDirectory?.path
+    else {
+      return addLocalTerminal()
+    }
+    return addLocalTerminal(in: directory)
+  }
+  #endif
+
   @discardableResult
   func connect(to config: SSHConfig) -> TerminalSession {
     connectionStore.save(config)

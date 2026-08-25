@@ -110,6 +110,10 @@ public final class LocalPTYTransport: TerminalTransport {
 
   private let executable: String
   private let argv: [String]
+  /// Directory the child starts in (nil = the home directory). Set by the
+  /// ⌘T "open terminal in same directory" path so a new tab inherits the
+  /// current shell's cwd instead of always starting in home.
+  private let workingDirectory: String?
   private let queue = DispatchQueue(label: "Terminal.LocalPTYTransport")
   private let queueIdentity = DispatchSpecificKey<UInt8>()
   private var masterFD: Int32 = -1
@@ -120,9 +124,10 @@ public final class LocalPTYTransport: TerminalTransport {
   /// Internal regression-test probe; not part of the public transport API.
   var onReadEventForTesting: (() -> Void)?
 
-  public init(executable: String, argv: [String]) {
+  public init(executable: String, argv: [String], workingDirectory: String? = nil) {
     self.executable = executable
     self.argv = argv
+    self.workingDirectory = workingDirectory
     queue.setSpecific(key: queueIdentity, value: 1)
   }
 
@@ -133,6 +138,9 @@ public final class LocalPTYTransport: TerminalTransport {
     // Build argv/envp in the parent, BEFORE fork: between fork and exec
     // the child may only run async-signal-safe code (no allocation).
     let homeDirectory = FileManager.default.homeDirectoryForCurrentUser.path
+    // The child starts in the working directory when one is given (⌘T
+    // reopens a terminal in the current directory), else the home directory.
+    let launchDirectory = workingDirectory ?? homeDirectory
     let executableCString = executable.withCString { strdup($0) }
     var argvPointers: [UnsafeMutablePointer<CChar>?] = argv.map {
       $0.withCString { strdup($0) }
@@ -143,7 +151,7 @@ public final class LocalPTYTransport: TerminalTransport {
       .sorted()
       .map { $0.withCString { strdup($0) } }
     envp.append(nil)
-    let homeCString = homeDirectory.withCString { strdup($0) }
+    let launchCString = launchDirectory.withCString { strdup($0) }
 
     // Start WIDE (not 80 cols): zsh's startup blanking writes a fixed
     // 92-space run; at <93 cols it wraps and strands its reverse-video
@@ -156,7 +164,7 @@ public final class LocalPTYTransport: TerminalTransport {
     if pid == 0 {
       // Child — async-signal-safe only from here on.
       Darwin.close(master)
-      if chdir(homeCString) != 0 {
+      if chdir(launchCString) != 0 {
         _exit(127)
       }
       execve(executableCString, argvPointers, envp)
@@ -168,7 +176,7 @@ public final class LocalPTYTransport: TerminalTransport {
       free(executableCString)
       for ptr in argvPointers { ptr.map { free($0) } }
       for ptr in envp { ptr.map { free($0) } }
-      free(homeCString)
+      free(launchCString)
     }
     guard pid > 0 else {
       let message = "Failed to start \(argv[0]): \(String(cString: strerror(errno)))"
@@ -344,6 +352,13 @@ public extension LocalPTYTransport {
   /// Use via the short form: `TerminalSession(session: .zsh)`.
   static var zsh: LocalPTYTransport {
     LocalPTYTransport(executable: "/bin/zsh", argv: ["zsh", "-l", "-i"])
+  }
+
+  /// Interactive zsh login shell that starts in `directory` — used by
+  /// ⌘T to open a new terminal tab in the current directory. The default
+  /// `.zsh` starts in the home directory.
+  static func zsh(in directory: String) -> LocalPTYTransport {
+    LocalPTYTransport(executable: "/bin/zsh", argv: ["zsh", "-l", "-i"], workingDirectory: directory)
   }
 
   /// Attach to a named GNU screen session (`screen -x`, multi-attaches).

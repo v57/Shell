@@ -58,6 +58,16 @@ struct ShellCommands: Commands {
         }
       }
       .keyboardShortcut("n", modifiers: .command)
+
+      // ⌘T opens a new terminal tab whose shell starts in the same
+      // directory as the current session's cwd (falls back to a plain new
+      // local terminal when there's no local cwd). Menu key equivalents
+      // are processed before terminal keyDown, so it works while a
+      // terminal has focus.
+      Button("New Terminal in Same Directory") {
+        AppModel.shared.openTerminalInSameDirectoryAsSelected()
+      }
+      .keyboardShortcut("t", modifiers: .command)
       
       Button("New SSH Connection…") {
         AppModel.shared.showingNewConnection = true
