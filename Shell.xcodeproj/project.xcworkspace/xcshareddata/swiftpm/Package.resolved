@@ -1,6 +1,15 @@
 {
-  "originHash" : "7a211da0c6181d97ca7aa061914b8da17ef02b0d6ff58eaa4e7a6a8dcec323bf",
+  "originHash" : "24541e43433b9bb465772d7d7ef1b2e2a594e22bb2fb685a84e803a1dd37a1bf",
   "pins" : [
+    {
+      "identity" : "markdown",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/v57/markdown",
+      "state" : {
+        "branch" : "main",
+        "revision" : "e27420cd90343c1c583cb646ea7ea1715fa0592d"
+      }
+    },
     {
       "identity" : "swift-asn1",
       "kind" : "remoteSourceControl",
@@ -20,6 +29,15 @@
       }
     },
     {
+      "identity" : "swift-cmark",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/swiftlang/swift-cmark.git",
+      "state" : {
+        "revision" : "924936d0427cb25a61169739a7660230bffa6ea6",
+        "version" : "0.8.0"
+      }
+    },
+    {
       "identity" : "swift-collections",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-collections.git",
@@ -35,6 +53,15 @@
       "state" : {
         "revision" : "47d3869a7291f085c1fb9fb1e6d3b97a793f45c6",
         "version" : "4.5.1"
+      }
+    },
+    {
+      "identity" : "swift-markdown",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/swiftlang/swift-markdown",
+      "state" : {
+        "revision" : "3c6f9523da3a1ec2fd829673e472d95b8097a3b8",
+        "version" : "0.8.0"
       }
     },
     {
