@@ -777,6 +777,19 @@ extension TerminalScreenView {
           // Focus must be granted after the view is in the hierarchy.
           DispatchQueue.main.async { focused.wrappedValue = true }
         }
+        #if os(iOS)
+        .background {
+          // iOS never raises the on-screen keyboard for a bare `.focusable()`
+          // view: it is not a text-input responder, so SwiftUI focus alone can
+          // never summon the software keyboard (and `.onKeyPress` only delivers
+          // HARDWARE keystrokes). An invisible UIKeyInput proxy becomes first
+          // responder when the terminal holds focus — raising the keyboard —
+          // and forwards the typed characters/backspace to the session.
+          TerminalKeyboardBridge(session: session, focused: focused)
+            .frame(width: 0, height: 0)
+            .allowsHitTesting(false)
+        }
+        #endif
     }
 
     private func handleKeyPress(_ press: KeyPress) -> KeyPress.Result {
@@ -1059,3 +1072,91 @@ extension TerminalScreenView {
     }
   }
 }
+
+#if os(iOS)
+import UIKit
+
+// MARK: - iOS software-keyboard proxy
+//
+// On iOS the on-screen keyboard is ONLY raised for a live text-input responder
+// (a UIView conforming to UIKeyInput, e.g. UITextField/UITextView). A bare
+// SwiftUI `.focusable()` view that holds @FocusState is not such a responder,
+// so the terminal session opened with no visible on-screen keyboard and no way
+// to type. These two types give the terminal a real text-input responder that
+// follows SwiftUI focus and forwards the keystrokes through the SAME
+// TerminalSession.handleKey(...) path the macOS keyboard uses.
+
+/// The terminal's invisible software-keyboard proxy.
+private final class TerminalKeyInput: UIView, UIKeyInput {
+  /// The session the typed characters are forwarded to (weak: the session is
+  /// owned by the app model, not by this input view).
+  weak var session: TerminalSession?
+
+  override var canBecomeFirstResponder: Bool { true }
+
+  func insertText(_ text: String) {
+    guard let session else { return }
+    // The software keyboard may deliver several characters in one call, and the
+    // return key delivers "\n". Route each so newline -> CR (keyCode .return)
+    // as the macOS onKeyPress path does, and everything else goes down the
+    // printable-character path (keyCode 0).
+    for char in text {
+      if char == "\n" || char == "\r" {
+        session.handleKey(
+          characters: "\n",
+          charactersIgnoringModifiers: "\n",
+          keyCode: 36,
+          modifierFlags: []
+        )
+      } else {
+        let value = String(char)
+        session.handleKey(
+          characters: value,
+          charactersIgnoringModifiers: value,
+          keyCode: 0,
+          modifierFlags: []
+        )
+      }
+    }
+  }
+
+  func deleteBackward() {
+    session?.handleKey(
+      characters: "\u{7f}",
+      charactersIgnoringModifiers: nil,
+      keyCode: 51,
+      modifierFlags: []
+    )
+  }
+
+  var hasText: Bool { true }
+}
+
+/// SwiftUI host for `TerminalKeyInput`. Synchronizes SwiftUI focus with the
+/// UIKit first responder so the on-screen keyboard follows the terminal's
+/// focus: appear / tap -> become first responder (keyboard up), focus lost ->
+/// resign (keyboard down).
+private struct TerminalKeyboardBridge: UIViewRepresentable {
+  let session: TerminalSession
+  let focused: FocusState<Bool>.Binding
+
+  func makeUIView(context: Context) -> TerminalKeyInput {
+    let view = TerminalKeyInput()
+    view.session = session
+    return view
+  }
+
+  func updateUIView(_ uiView: TerminalKeyInput, context: Context) {
+    uiView.session = session
+    // becomeFirstResponder()/resignFirstResponder() can't be called from inside
+    // a layout pass, so defer to the next runloop tick.
+    DispatchQueue.main.async {
+      if focused.wrappedValue {
+        if !uiView.isFirstResponder { uiView.becomeFirstResponder() }
+      } else {
+        if uiView.isFirstResponder { uiView.resignFirstResponder() }
+      }
+    }
+  }
+}
+#endif
