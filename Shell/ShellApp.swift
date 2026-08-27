@@ -112,6 +112,26 @@ struct ShellCommands: Commands {
       }
       .keyboardShortcut("h", modifiers: [.command, .shift])
 
+      // ⌘⇧F toggles the Files panel. Disabled without a selected terminal
+      // session (the Files panel only shows alongside a live session). Menu
+      // key equivalents dispatch before terminal keyDown, so it works while a
+      // terminal has focus.
+      Button("Toggle Files Panel") {
+        AppModel.shared.directoryBrowser.visible.toggle()
+      }
+      .keyboardShortcut("f", modifiers: [.command, .shift])
+      .disabled(AppModel.shared.selectedSession == nil)
+
+      // ⌘⇧U navigates the Files panel up one directory. Disabled without a
+      // selected session or once the browser is already at the directory root.
+      Button("Navigate Up") {
+        AppModel.shared.directoryBrowser.navigateUp()
+      }
+      .keyboardShortcut("u", modifiers: [.command, .shift])
+      .disabled(
+        AppModel.shared.selectedSession == nil
+          || !AppModel.shared.directoryBrowser.canNavigateUp)
+
       Divider()
       
       // ⌘W closes the selected terminal and focuses its section neighbor

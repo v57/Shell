@@ -36,11 +36,45 @@ struct ContentView: View {
           .navigationSplitViewColumnWidth(min: 190, ideal: 230)
       } detail: {
         if let session = model.selectedSession {
-          TerminalView(session: session)
-            .id(session.id)
-            .navigationTitle(model.displayName(for: session))
-            .navigationDirectorySubtitle(localDirectoryText)
-            .toolbar {
+          VStack(spacing: 0) {
+            // Terminal | Files selector, sitting directly above the content.
+            // We are inside the `if let session` branch, so this is only shown
+            // while a terminal session is selected — the Files panel never
+            // appears for a note/history/none selection.
+            HStack {
+              Picker("View", selection: Binding(
+                get: { model.directoryBrowser.visible },
+                set: { model.directoryBrowser.visible = $0 }
+              )) {
+                Text("Terminal").tag(false)
+                Text("Files").tag(true)
+              }
+              .pickerStyle(.segmented)
+              .labelsHidden()
+              .frame(width: 220)
+              Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(.bar)
+
+            ZStack {
+              // The terminal stays mounted so its scrollback/focus state is
+              // preserved while the Files panel is shown on top of it.
+              TerminalView(session: session)
+                .id(session.id)
+                .allowsHitTesting(!model.directoryBrowser.visible)
+
+              if model.directoryBrowser.visible {
+                FilesPanelView(model: model.directoryBrowser)
+                  .transition(.opacity)
+                  .background(.background)
+              }
+            }
+          }
+          .navigationTitle(model.displayName(for: session))
+          .navigationDirectorySubtitle(localDirectoryText)
+          .toolbar {
 #if os(macOS)
               // Smart actions for the active local directory: a Run button per
               // action, a Stop button (disabled unless something is running), and a
@@ -183,14 +217,29 @@ struct ContentView: View {
     .animation(.easeOut(duration: 0.15), value: model.showingActions)
     .preferredColorScheme(model.appearanceMode.colorScheme)
     .environment(\.terminalBackgroundsDisabled, model.disableTerminalBackgrounds)
+    .onAppear {
+      // Set the browser up for the initially-selected session (onChange does
+      // not fire for the initial value).
+      syncFileBrowser()
+    }
     .onReceive(directoryTimer) { _ in
       refreshLocalDirectory()
+      // Keep the Files panel's directory in sync with the live session.
+      model.directoryBrowser.syncTick()
     }
     // Kick the directory refresh the moment the selected session changes
     // (the timer alone adds up to a second of lag before the toolbar
     // actions refresh when switching sessions in the sidebar).
     .onChange(of: model.selectedSession?.id) { _, _ in
       refreshLocalDirectory()
+      syncFileBrowser()
+    }
+    .onChange(of: model.directoryBrowser.visible) { _, nowVisible in
+      if nowVisible {
+        // Opening the panel fetches a fresh listing. SSH pwd polling is gated
+        // on visibility, so a remote panel is stale until it appears.
+        Task { await model.directoryBrowser.refresh() }
+      }
     }
     .onChange(of: model.showingActions) { _, showing in
       #if os(macOS)
@@ -237,6 +286,17 @@ struct ContentView: View {
       activeDirectoryURL = url
       smartActionsTarget = nil   // don't carry a stale target across projects
       model.refreshSmartActions(for: url)
+    }
+  }
+
+  /// Points the shared File browser model at the currently-selected session
+  /// (or clears it when nothing terminal-ish is selected), so the Files panel
+  /// rebuilds its context and lists the right directory for the right runner.
+  private func syncFileBrowser() {
+    if let session = model.selectedSession {
+      model.directoryBrowser.setSession(session, kind: model.kind(of: session))
+    } else {
+      model.directoryBrowser.setSession(nil, kind: .local)
     }
   }
 

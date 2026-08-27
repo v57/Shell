@@ -20,6 +20,9 @@ final class AppModel {
   
   var sessions: [TerminalSession] = []
   var selection: UUID?
+  /// The directory browser (Files panel) model, driven by the selected
+  /// session. Shared so both ContentView and ShellCommands can drive it.
+  let directoryBrowser = DirectoryBrowserModel()
   var showingNewConnection = false
   var publicKeyError: String?
   
