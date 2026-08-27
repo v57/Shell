@@ -73,6 +73,30 @@ struct SidebarView: View {
               }
             }
           }
+          ForEach(model.screenMonitor.sessions) { info in
+            ScreenSessionRow(
+              info: info,
+              isRenaming: renamingScreenName == info.name,
+              onCommitRename: { commitScreenRename(info, $0) },
+              onCancelRename: { renamingScreenName = nil }
+            )
+            // Tag with the open session's id when attached (so the row shows
+            // selected while its terminal is open), else the stable tagID.
+            .tag(model.attachedSession(toScreen: info)?.id ?? info.tagID)
+            .contextMenu {
+              Button("Rename…") { renamingScreenName = info.name }
+              Divider()
+              if model.attachedSession(toScreen: info) == nil {
+                Button("Attach") { model.attach(toScreen: info) }
+              }
+              // Kills the session itself (screen -S <name> -X quit); the
+              // row disappears from the list. Works for detached sessions
+              // too, which the toolbar's Close button can't reach.
+              Button("Close Session", role: .destructive) {
+                model.closeScreenSession(info)
+              }
+            }
+          }
         }
       } header: {
         HStack {
@@ -113,38 +137,6 @@ struct SidebarView: View {
           } label: {
             Image(systemName: "plus")
           }.buttonStyle(.borderless).help("New local terminal")
-        }.padding(.trailing, 4)
-      }
-      
-      Section {
-        ForEach(model.screenMonitor.sessions) { info in
-          ScreenSessionRow(
-            info: info,
-            isRenaming: renamingScreenName == info.name,
-            onCommitRename: { commitScreenRename(info, $0) },
-            onCancelRename: { renamingScreenName = nil }
-          )
-          // Tag with the open session's id when attached (so the row shows
-          // selected while its terminal is open), else the stable tagID.
-          .tag(model.attachedSession(toScreen: info)?.id ?? info.tagID)
-          .contextMenu {
-            Button("Rename…") { renamingScreenName = info.name }
-            Divider()
-            if model.attachedSession(toScreen: info) == nil {
-              Button("Attach") { model.attach(toScreen: info) }
-            }
-            // Kills the session itself (screen -S <name> -X quit); the
-            // row disappears from the list. Works for detached sessions
-            // too, which the toolbar's Close button can't reach.
-            Button("Close Session", role: .destructive) {
-              model.closeScreenSession(info)
-            }
-          }
-        }
-      } header: {
-        HStack {
-          Text("Persistent")
-          Spacer()
           Button {
             model.screenMonitor.refresh()
           } label: {
@@ -157,7 +149,8 @@ struct SidebarView: View {
           }.buttonStyle(.borderless).help("New persistent zsh session")
         }.padding(.trailing, 4)
       }
-      #endif // os(macOS) — Local + Persistent sections (no local terminals on iOS)
+      
+      #endif // os(macOS) — Local section (no local terminals on iOS)
 
       Section {
         ForEach(model.connections) { config in
@@ -520,7 +513,7 @@ private struct ScreenSessionRow: View {
   }
   
   private var icon: String {
-    info.kind == .tmux ? "square.split.2x2" : "apple.terminal.on.rectangle"
+    "shield.fill"
   }
   
   private var kindLabel: String {
