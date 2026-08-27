@@ -24,7 +24,11 @@ struct ThemesView: View {
       .labelsHidden()
 
       Toggle("Disable Background Colors", isOn: $model.disableTerminalBackgrounds)
+#if os(macOS)
         .toggleStyle(.checkbox)
+#else
+        .toggleStyle(.switch)
+#endif
 
       Text("When enabled, terminals stop drawing character backgrounds and low-contrast text colors are replaced with the default text color.")
         .font(.caption)

@@ -56,7 +56,11 @@ struct CommandInsertView: View {
 
       if isMultiline {
         Toggle("Send as separate commands", isOn: $sendAsSeparateCommands)
+#if os(macOS)
           .toggleStyle(.checkbox)
+#else
+          .toggleStyle(.switch)
+#endif
           .font(.caption)
         Text(sendAsSeparateCommands
           ? "Each line is sent as Enter, so multi-line text runs line-by-line in the shell."

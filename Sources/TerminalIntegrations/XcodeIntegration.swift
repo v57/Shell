@@ -97,27 +97,31 @@ public final class XcodeIntegration: TerminalIntegration {
   }
 
   public static func liveBuildList(_ projectURL: URL) -> String? {
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
-    var arguments = ["xcodebuild", "-list"]
-    if projectURL.pathExtension == "xcworkspace" {
-      arguments += ["-workspace", projectURL.path]
-    } else {
-      arguments += ["-project", projectURL.path]
-    }
-    arguments += ["-json"]
-    process.arguments = arguments
-    let pipe = Pipe()
-    process.standardOutput = pipe
-    process.standardError = Pipe()
-    do {
-      try process.run()
-      process.waitUntilExit()
-    } catch {
+    #if os(macOS)
+      let process = Process()
+      process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
+      var arguments = ["xcodebuild", "-list"]
+      if projectURL.pathExtension == "xcworkspace" {
+        arguments += ["-workspace", projectURL.path]
+      } else {
+        arguments += ["-project", projectURL.path]
+      }
+      arguments += ["-json"]
+      process.arguments = arguments
+      let pipe = Pipe()
+      process.standardOutput = pipe
+      process.standardError = Pipe()
+      do {
+        try process.run()
+        process.waitUntilExit()
+      } catch {
+        return nil
+      }
+      guard process.terminationStatus == 0 else { return nil }
+      let data = pipe.fileHandleForReading.readDataToEndOfFile()
+      return String(data: data, encoding: .utf8)
+    #else
       return nil
-    }
-    guard process.terminationStatus == 0 else { return nil }
-    let data = pipe.fileHandleForReading.readDataToEndOfFile()
-    return String(data: data, encoding: .utf8)
+    #endif
   }
 }

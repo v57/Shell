@@ -1,3 +1,4 @@
+#if os(macOS)
 import SwiftUI
 import Charts
 import Monitoring
@@ -143,3 +144,4 @@ private struct StatChart: View {
     return 0...max(peak * 1.2, 10)
   }
 }
+#endif

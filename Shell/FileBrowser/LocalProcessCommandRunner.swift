@@ -11,6 +11,11 @@ import TerminalIntegrations
 /// kernel pipe buffer (~64KB) does not deadlock the subprocess while we wait
 /// for it to exit. Execution is off the main thread: the `actor`'s method runs
 /// on its own executor, and the pipe reads run concurrently in child tasks.
+///
+/// The type exists on every platform so `DirectoryContext` can build a runner
+/// uniformly, but the actual execution is macOS-only (it uses `Process`/`Pipe`);
+/// on iOS, where the app ships SSH + notes only and there is no local shell,
+/// `run` throws instead of referencing those macOS-only APIs.
 public actor LocalProcessCommandRunner: FileCommandExecutor {
 
   /// Seconds a command may run before it is terminated. `0` disables the timer.
@@ -21,68 +26,85 @@ public actor LocalProcessCommandRunner: FileCommandExecutor {
   }
 
   public func run(inDirectory dir: String, _ command: String) async throws -> CommandResult {
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-    process.arguments = ["-lc", command]
-    process.currentDirectoryURL = URL(fileURLWithPath: dir)
-    process.environment = ProcessInfo.processInfo.environment
+    #if os(macOS)
+      let process = Process()
+      process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+      process.arguments = ["-lc", command]
+      process.currentDirectoryURL = URL(fileURLWithPath: dir)
+      process.environment = ProcessInfo.processInfo.environment
 
-    let stdoutPipe = Pipe()
-    let stderrPipe = Pipe()
-    process.standardOutput = stdoutPipe
-    process.standardError = stderrPipe
+      let stdoutPipe = Pipe()
+      let stderrPipe = Pipe()
+      process.standardOutput = stdoutPipe
+      process.standardError = stderrPipe
 
-    try process.run()
+      try process.run()
 
-    // Drain both pipes concurrently so neither fills its buffer and blocks the
-    // subprocess while we wait for it to exit.
-    async let stdoutData = drain(stdoutPipe.fileHandleForReading)
-    async let stderrData = drain(stderrPipe.fileHandleForReading)
+      // Drain both pipes concurrently so neither fills its buffer and blocks the
+      // subprocess while we wait for it to exit.
+      async let stdoutData = drain(stdoutPipe.fileHandleForReading)
+      async let stderrData = drain(stderrPipe.fileHandleForReading)
 
-    let exitCode = await waitForExit(process, timeout: timeout)
+      let exitCode = await waitForExit(process, timeout: timeout)
 
-    var combined = await stdoutData
-    let stderr = await stderrData
-    if !stderr.isEmpty {
-      combined.append(stderr)
-    }
-    return CommandResult(output: String(decoding: combined, as: UTF8.self), exitCode: exitCode)
+      var combined = await stdoutData
+      let stderr = await stderrData
+      if !stderr.isEmpty {
+        combined.append(stderr)
+      }
+      return CommandResult(output: String(decoding: combined, as: UTF8.self), exitCode: exitCode)
+    #else
+      // iOS ships SSH + notes only (no local shell), so a local runner is never
+      // actually exercised here; fail clearly rather than referencing the
+      // macOS-only Process/Pipe types.
+      throw LocalProcessCommandRunnerError.localUnsupported
+    #endif
   }
 
-  /// Reads a pipe to EOF. Marked `nonisolated` so the two pipe drains run on the
-  /// cooperative pool instead of serializing on this actor's executor.
-  private nonisolated func drain(_ handle: FileHandle) -> Data {
-    var data = Data()
-    while true {
-      do {
-        guard let chunk = try handle.read(upToCount: 64 * 1024), !chunk.isEmpty else {
+  #if os(macOS)
+    /// Reads a pipe to EOF. Marked `nonisolated` so the two pipe drains run on the
+    /// cooperative pool instead of serializing on this actor's executor.
+    private nonisolated func drain(_ handle: FileHandle) -> Data {
+      var data = Data()
+      while true {
+        do {
+          guard let chunk = try handle.read(upToCount: 64 * 1024), !chunk.isEmpty else {
+            break
+          }
+          data.append(chunk)
+        } catch {
           break
         }
-        data.append(chunk)
-      } catch {
-        break
       }
+      return data
     }
-    return data
-  }
 
-  /// Waits for `process` to exit, terminating it after `timeout` seconds.
-  private func waitForExit(_ process: Process, timeout: TimeInterval) async -> Int32 {
-    await withCheckedContinuation { continuation in
-      guard process.isRunning else {
-        continuation.resume(returning: process.terminationStatus)
-        return
+    /// Waits for `process` to exit, terminating it after `timeout` seconds.
+    private func waitForExit(_ process: Process, timeout: TimeInterval) async -> Int32 {
+      await withCheckedContinuation { continuation in
+        guard process.isRunning else {
+          continuation.resume(returning: process.terminationStatus)
+          return
+        }
+        process.terminationHandler = { proc in
+          continuation.resume(returning: proc.terminationStatus)
+        }
+        guard timeout > 0 else { return }
+        let watchdog = Task { [weak process] in
+          try? await Task.sleep(for: .seconds(timeout))
+          guard let process, process.isRunning else { return }
+          process.terminate()
+        }
+        _ = watchdog
       }
-      process.terminationHandler = { proc in
-        continuation.resume(returning: proc.terminationStatus)
-      }
-      guard timeout > 0 else { return }
-      let watchdog = Task { [weak process] in
-        try? await Task.sleep(for: .seconds(timeout))
-        guard let process, process.isRunning else { return }
-        process.terminate()
-      }
-      _ = watchdog
     }
-  }
+  #endif
 }
+
+#if !os(macOS)
+/// Shown when a local command run is requested on a platform that has no local
+/// shell (iOS). iOS is SSH + notes only, so this path is never taken at runtime.
+enum LocalProcessCommandRunnerError: Error {
+  case localUnsupported
+}
+#endif
