@@ -11,6 +11,10 @@ struct FilesPanelView: View {
 
   /// Whether the delete confirmation dialog is showing.
   @State private var showsDeleteConfirm = false
+  /// The names the delete confirmation dialog is showing for. Snapshotted when
+  /// the context-menu Delete is tapped so the dialog acts on exactly those rows
+  /// rather than re-reading the (possibly changed) selection.
+  @State private var deleteCandidates: Set<String> = []
   /// Whether the move/copy destination sheet is showing.
   @State private var showsDestinationSheet = false
   /// The names being moved/copied (snapshotted when the sheet is opened).
@@ -21,38 +25,32 @@ struct FilesPanelView: View {
   @State private var destinationText = ""
 
   var body: some View {
-    VStack(spacing: 0) {
-      SelectionToolbar(
-        hasSelection: !model.selection.isEmpty,
-        onOpen: {
-          for name in model.selection {
-            if let row = model.rows.first(where: { $0.name == name }) { model.open(row) }
-          }
-        }, onDelete: { showsDeleteConfirm = true },
-        onMove: { beginMutate(names: model.selection, mode: .move) },
-        onCopy: { beginMutate(names: model.selection, mode: .copy) })
-      Divider()
-      DirectoryBrowserView(
-        rows: model.rows, path: model.path, selection: $model.selection,
-        sortOrder: $model.sortOrder, isLoading: model.busy, errorMessage: model.lastError,
-        onNavigate: { model.navigate(into: $0) }, onOpen: { model.open($0) },
-        onNavigateUp: { model.navigateUp() }, onRetry: { Task { await model.refresh() } },
-        onDelete: { names in model.delete(names) },
-        onMove: { names, _ in beginMutate(names: names, mode: .move) })
-    }.confirmationDialog(
-      "Delete \(model.selection.count) item\(model.selection.count == 1 ? "" : "s")?",
-      isPresented: $showsDeleteConfirm, titleVisibility: .visible
-    ) {
-      Button("Delete", role: .destructive) { model.delete(model.selection) }
-      Button("Cancel", role: .cancel) {}
-    } message: {
-      Text("This cannot be undone.")
-    }.sheet(isPresented: $showsDestinationSheet) {
-      DestinationSheet(
-        defaultPath: model.path.isEmpty ? "/" : model.path, text: $destinationText,
-        initialMode: mutatingMode
-      ) { destination, mode in model.moveCopy(mutatingNames, to: destination, mode: mode) }
-    }
+    DirectoryBrowserView(
+      rows: model.rows, path: model.path, selection: $model.selection,
+      sortOrder: $model.sortOrder, isLoading: model.busy, errorMessage: model.lastError,
+      onNavigate: { model.navigate(into: $0) }, onOpen: { model.open($0) },
+      onNavigateUp: { model.navigateUp() }, onRetry: { Task { await model.refresh() } },
+      onDelete: { names in
+        deleteCandidates = names
+        showsDeleteConfirm = true
+      }, onMove: { names, _ in beginMutate(names: names, mode: .move) },
+      onCopy: { names in beginMutate(names: names, mode: .copy) },
+      onDrop: { urls in model.copyIn(urls: urls) })
+      .confirmationDialog(
+        "Delete \(deleteCandidates.count) item\(deleteCandidates.count == 1 ? "" : "s")?",
+        isPresented: $showsDeleteConfirm, titleVisibility: .visible
+      ) {
+        Button("Delete", role: .destructive) { model.delete(deleteCandidates) }
+        Button("Cancel", role: .cancel) {}
+      } message: {
+        Text("This cannot be undone.")
+      }
+      .sheet(isPresented: $showsDestinationSheet) {
+        DestinationSheet(
+          defaultPath: model.path.isEmpty ? "/" : model.path, text: $destinationText,
+          initialMode: mutatingMode
+        ) { destination, mode in model.moveCopy(mutatingNames, to: destination, mode: mode) }
+      }
   }
 
   /// Snapshot the selection + mode and open the destination sheet, pre-filling
@@ -63,27 +61,6 @@ struct FilesPanelView: View {
     mutatingMode = mode
     destinationText = model.path.isEmpty ? "/" : model.path
     showsDestinationSheet = true
-  }
-}
-
-/// A small selection-aware toolbar: the file-operation entry points surfaced on
-/// top of the browser. Buttons are disabled until there is a selection.
-private struct SelectionToolbar: View {
-  let hasSelection: Bool
-  let onOpen: () -> Void
-  let onDelete: () -> Void
-  let onMove: () -> Void
-  let onCopy: () -> Void
-
-  var body: some View {
-    HStack(spacing: 10) {
-      Button(action: onOpen) { Label("Open", systemImage: "arrow.up.forward.app") }.disabled(
-        !hasSelection)
-      Spacer(minLength: 10)
-      Button(action: onCopy) { Label("Copy", systemImage: "doc.on.doc") }.disabled(!hasSelection)
-      Button(action: onMove) { Label("Move", systemImage: "folder") }.disabled(!hasSelection)
-      Button(action: onDelete) { Label("Delete", systemImage: "trash") }.disabled(!hasSelection)
-    }.labelStyle(.titleAndIcon).padding(.horizontal, 12).padding(.vertical, 6).background(.bar)
   }
 }
 

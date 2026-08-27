@@ -1,6 +1,26 @@
 import Foundation
 import SwiftUI
 import TerminalIntegrations
+import UniformTypeIdentifiers
+
+#if os(macOS)
+/// A row dragged out of the browser. Carries the absolute file URL so a LOCAL
+/// file can be dropped into Finder (which copies/moves the actual file); for a
+/// remote listing the URL is best-effort and simply won't resolve there.
+private struct RowDragPayload: Transferable {
+  let url: URL
+
+  // The app target compiles MainActor-default; the transfer representation is
+  // read by the framework on a background thread, so it must be nonisolated.
+  nonisolated static var transferRepresentation: some TransferRepresentation {
+    FileRepresentation(contentType: .fileURL) { item in
+      SentTransferredFile(item.url)
+    } importing: { received in
+      RowDragPayload(url: received.file)
+    }
+  }
+}
+#endif
 
 /// The directory browser's main content area: a breadcrumb path bar plus the
 /// listing of the current directory's entries.
@@ -45,10 +65,14 @@ struct DirectoryBrowserView: View {
   var onNavigateUp: () -> Void
   /// The error state's Retry button.
   var onRetry: () -> Void
-  /// Delete the selected entries (toolbar op).
+  /// Delete the selected entries (context-menu op).
   var onDelete: (Set<String>) -> Void
-  /// Move the selected entries to a destination (toolbar op).
+  /// Move the selected entries to a destination (context-menu op).
   var onMove: (Set<String>, String) -> Void
+  /// Copy the selected entries to a destination (context-menu op).
+  var onCopy: (Set<String>) -> Void
+  /// Copy files dropped onto the table (from Finder) into the current directory.
+  var onDrop: ([URL]) -> Void
 
   init(
     rows: [FileRow], path: String, selection: Binding<Set<String>>,
@@ -56,7 +80,9 @@ struct DirectoryBrowserView: View {
     errorMessage: String? = nil, onNavigate: @escaping (FileRow) -> Void = { _ in },
     onOpen: @escaping (FileRow) -> Void = { _ in }, onNavigateUp: @escaping () -> Void = {},
     onRetry: @escaping () -> Void = {}, onDelete: @escaping (Set<String>) -> Void = { _ in },
-    onMove: @escaping (Set<String>, String) -> Void = { _, _ in }
+    onMove: @escaping (Set<String>, String) -> Void = { _, _ in },
+    onCopy: @escaping (Set<String>) -> Void = { _ in },
+    onDrop: @escaping ([URL]) -> Void = { _ in }
   ) {
     self.rows = rows
     self.path = path
@@ -70,6 +96,8 @@ struct DirectoryBrowserView: View {
     self.onRetry = onRetry
     self.onDelete = onDelete
     self.onMove = onMove
+    self.onCopy = onCopy
+    self.onDrop = onDrop
   }
 
   var body: some View {
@@ -109,29 +137,42 @@ struct DirectoryBrowserView: View {
 
   #if os(macOS)
     private var fileTable: some View {
-      Table(sortedRows, selection: $selection, sortOrder: $sortOrder) {
+      Table(of: FileRow.self, selection: $selection, sortOrder: $sortOrder) {
         TableColumn("Name", sortUsing: KeyPathComparator(\FileRow.name)) { row in
-          interactiveCell(for: row) { iconAndName(row) }.frame(
-            maxWidth: .infinity, alignment: .leading)
+          iconAndName(row).frame(maxWidth: .infinity, alignment: .leading)
         }
         TableColumn("Type", sortUsing: KeyPathComparator(\FileRow.sortableType)) { row in
-          interactiveCell(for: row) { Text(row.sortableType) }
+          Text(row.sortableType)
         }
         TableColumn("Size", sortUsing: KeyPathComparator(\FileRow.sortableSize)) { row in
-          interactiveCell(for: row) { Text(Self.formattedSize(row.size)).monospacedDigit() }
+          Text(Self.formattedSize(row.size)).monospacedDigit()
         }
         TableColumn("Modified", sortUsing: KeyPathComparator(\FileRow.sortableModified)) { row in
-          interactiveCell(for: row) { Text(Self.formattedDate(row.modified)) }
+          Text(Self.formattedDate(row.modified))
+        }
+      } rows: {
+        ForEach(sortedRows) { row in
+          TableRow(row).draggable(RowDragPayload(url: URL(fileURLWithPath: absolutePath(for: row))))
         }
       }
+      // Right-click → context-menu actions; double-click (or Return) → primary
+      // action. Both are driven by the row selection, so a right-click on an
+      // unselected row selects it first (matching the toolbar semantics that
+      // used to live above the table).
+      .contextMenu(forSelectionType: String.self) { names in
+        rowContextMenu(names: names)
+      } primaryAction: { names in
+        for name in names {
+          guard let row = rows.first(where: { $0.name == name }) else { continue }
+          activate(row)
+        }
+      }
+      // Accept files dragged in from Finder and copy them into the current dir.
+      .dropDestination(for: URL.self) { urls, _ in
+        onDrop(urls)
+        return true
+      }
     }
-
-    /// A cell that surfaces the whole cell as the double-click target, so a
-    /// double-click anywhere on the row activates it (a count-2 tap gesture does
-    /// not consume the single-click that drives `Table` selection).
-    @ViewBuilder private func interactiveCell<Content: View>(
-      for row: FileRow, @ViewBuilder content: () -> Content
-    ) -> some View { content().contentShape(Rectangle()).onTapGesture(count: 2) { activate(row) } }
 
     private func iconAndName(_ row: FileRow) -> some View {
       HStack(spacing: 8) {
@@ -155,6 +196,9 @@ struct DirectoryBrowserView: View {
             Text(Self.formattedSize(row.size)).foregroundStyle(.secondary).font(.callout)
             Text(Self.formattedDate(row.modified)).foregroundStyle(.secondary).font(.callout)
           }.contentShape(Rectangle()).onTapGesture(count: 2) { activate(row) }.tag(row.name)
+            .contextMenu {
+              rowContextMenu(names: [row.name])
+            }
         }
       }
     }
@@ -166,6 +210,30 @@ struct DirectoryBrowserView: View {
   /// Double-click behavior: a directory navigates into it, anything else opens.
   private func activate(_ row: FileRow) {
     if row.isDirectory { onNavigate(row) } else { onOpen(row) }
+  }
+
+  /// The file-operation context menu, replacing the old selection toolbar.
+  /// Shared by the macOS table (`.contextMenu(forSelectionType:)`) and the iOS
+  /// list (per-row `.contextMenu`).
+  @ViewBuilder private func rowContextMenu(names: Set<String>) -> some View {
+    if names.count == 1, let name = names.first,
+      let row = rows.first(where: { $0.name == name })
+    {
+      Button(row.isDirectory ? "Open Folder" : "Open in Default App", systemImage: "arrow.up.forward.app") {
+        activate(row)
+      }
+    }
+    Button("Move…", systemImage: "folder") { onMove(names, "") }
+    Button("Copy…", systemImage: "doc.on.doc") { onCopy(names) }
+    Divider()
+    Button("Delete", systemImage: "trash", role: .destructive) { onDelete(names) }
+  }
+
+  /// The absolute path for a row, joined onto the current directory.
+  private func absolutePath(for row: FileRow) -> String {
+    if path.isEmpty { return row.name }
+    if path == "/" { return "/" + row.name }
+    return path + "/" + row.name
   }
 
   /// The SF Symbol for a row: folders, symlinks, then plain files.

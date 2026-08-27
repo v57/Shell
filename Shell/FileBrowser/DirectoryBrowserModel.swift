@@ -182,6 +182,24 @@ import TerminalIntegrations
     }
   }
 
+  /// Copies files dropped onto the browser (from Finder) into the current
+  /// directory, via the shared rsync move/copy path. This is the drop side of
+  /// the browser's drag-and-drop: `DirectoryBrowserView` calls it with the
+  /// external file URLs the user drops onto the table. Each source path is used
+  /// as-is (an absolute local path); only the destination is the current dir.
+  func copyIn(urls: [URL]) {
+    guard let ctx = context, !urls.isEmpty else { return }
+    let destination = path.isEmpty ? "/" : path
+    let actions = FileBrowserActions(model: self)
+    Task {
+      for url in urls {
+        await actions.moveCopy(
+          source: url.path, destination: destination, mode: .copy,
+          isDirectory: Self.isDirectoryFile(url))
+      }
+    }
+  }
+
   // MARK: - Displayed state
 
   /// The absolute directory being shown, for the breadcrumb path bar.
@@ -244,5 +262,14 @@ extension DirectoryBrowserModel {
     if base.isEmpty { return name }
     if base == "/" { return "/" + name }
     return base + "/" + name
+  }
+
+  /// Whether the (local) file at `url` is a directory on this host. Dropped
+  /// files always come from Finder on the host, so checking the local
+  /// filesystem is correct even when the current directory being browsed is
+  /// remote (SSH) — the source file is still local.
+  fileprivate static func isDirectoryFile(_ url: URL) -> Bool {
+    var isDir: ObjCBool = false
+    return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) && isDir.boolValue
   }
 }

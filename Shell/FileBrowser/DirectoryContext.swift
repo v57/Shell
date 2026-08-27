@@ -44,6 +44,12 @@ final class DirectoryContext: Identifiable {
   /// once it has re-listed against the new path.
   var listingIsStale = false
 
+  /// The terminal session's live cwd as of the most recent `refresh()` poll.
+  /// Lets `refresh()` tell a real shell `cd` (live changed) from a browser
+  /// navigation (the browser path differs but the shell cwd didn't move), so a
+  /// double-click drill-down is never yanked back to the shell's cwd.
+  @ObservationIgnored private var lastLiveCWD: String?
+
   /// Creates a context, seeding `path` from the session's live cwd where that
   /// is possible synchronously (local). Remote kinds start with an empty
   /// sentinel and are populated by `refresh()`/`seed()`, since `pwd` is a
@@ -120,6 +126,11 @@ final class DirectoryContext: Identifiable {
   /// navigate or newer refresh bumped the counter) so an old path's `pwd`
   /// cannot overwrite newer state.
   ///
+  /// The browser only re-anchors to `live` when the shell's cwd actually
+  /// CHANGED since the last poll (a real `cd`). When the live cwd is unchanged
+  /// but the browser path differs, that difference is a navigation the user
+  /// initiated (a double-click drill-down), which must not be reverted.
+  ///
   /// - Returns: `true` if the path changed and the listing must be refreshed.
   @discardableResult
   func refresh() async -> Bool {
@@ -127,6 +138,9 @@ final class DirectoryContext: Identifiable {
     let gen = generation
     guard let live = await liveCWD() else { return false }
     guard generation == gen else { return false }  // superseded while awaiting
+    defer { lastLiveCWD = live }
+    // A real shell `cd` moves the live cwd; only then re-anchor the browser.
+    guard lastLiveCWD == nil || live != lastLiveCWD else { return false }
     guard live != path else { return false }
     path = live
     listingIsStale = true

@@ -36,45 +36,36 @@ struct ContentView: View {
           .navigationSplitViewColumnWidth(min: 190, ideal: 230)
       } detail: {
         if let session = model.selectedSession {
-          VStack(spacing: 0) {
-            // Terminal | Files selector, sitting directly above the content.
-            // We are inside the `if let session` branch, so this is only shown
-            // while a terminal session is selected — the Files panel never
-            // appears for a note/history/none selection.
-            HStack {
-              Picker("View", selection: Binding(
-                get: { model.directoryBrowser.visible },
-                set: { model.directoryBrowser.visible = $0 }
-              )) {
-                Text("Terminal").tag(false)
-                Text("Files").tag(true)
-              }
-              .pickerStyle(.segmented)
-              .labelsHidden()
-              .frame(width: 220)
-              Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(.bar)
+          ZStack {
+            // The terminal stays mounted so its scrollback/focus state is
+            // preserved while the Files panel is shown on top of it.
+            TerminalView(session: session)
+              .id(session.id)
+              .allowsHitTesting(!model.directoryBrowser.visible)
 
-            ZStack {
-              // The terminal stays mounted so its scrollback/focus state is
-              // preserved while the Files panel is shown on top of it.
-              TerminalView(session: session)
-                .id(session.id)
-                .allowsHitTesting(!model.directoryBrowser.visible)
-
-              if model.directoryBrowser.visible {
-                FilesPanelView(model: model.directoryBrowser)
-                  .transition(.opacity)
-                  .background(.background)
-              }
+            if model.directoryBrowser.visible {
+              FilesPanelView(model: model.directoryBrowser)
+                .transition(.opacity)
+                .background(.background)
             }
           }
           .navigationTitle(model.displayName(for: session))
           .navigationDirectorySubtitle(localDirectoryText)
           .toolbar {
+              // Terminal | Files view toggle: a single button whose icon flips
+              // between the two. Shows `folder.fill` (open Files) while in the
+              // terminal and `terminal.fill` (back to the terminal) while Files
+              // is shown.
+              ToolbarItem(placement: .primaryAction) {
+                Button {
+                  model.directoryBrowser.visible.toggle()
+                } label: {
+                  Label(
+                    "Files & Terminal",
+                    systemImage: model.directoryBrowser.visible ? "terminal.fill" : "folder.fill")
+                }
+                .help(model.directoryBrowser.visible ? "Show Terminal" : "Show Files")
+              }
 #if os(macOS)
               // Smart actions for the active local directory: a Run button per
               // action, a Stop button (disabled unless something is running), and a
@@ -269,7 +260,9 @@ struct ContentView: View {
       localDirectoryText = ""
       if activeDirectoryURL != nil {
         activeDirectoryURL = nil
-        model.refreshSmartActions(for: nil)
+        #if os(macOS)
+          model.refreshSmartActions(for: nil)
+        #endif
       }
       return
     }
@@ -285,7 +278,9 @@ struct ContentView: View {
     if activeDirectoryURL != url {
       activeDirectoryURL = url
       smartActionsTarget = nil   // don't carry a stale target across projects
-      model.refreshSmartActions(for: url)
+      #if os(macOS)
+        model.refreshSmartActions(for: url)
+      #endif
     }
   }
 
@@ -300,6 +295,7 @@ struct ContentView: View {
     }
   }
 
+  #if os(macOS)
   /// Non-nil smart-action targets (schemes/executables) sorted for the picker.
   private var smartActionsTargets: [String] {
     Array(Set(model.smartActionActions.compactMap(\.target))).sorted()
@@ -324,8 +320,10 @@ struct ContentView: View {
     }
     return order.map { SmartActionGroup(kind: $0, actions: map[$0] ?? []) }
   }
+#endif
 }
 
+#if os(macOS)
 /// A group of smart actions sharing the same kind (icon). Used by the toolbar
 /// to render several same-icon actions as a menu instead of many buttons.
 private struct SmartActionGroup: Identifiable {
@@ -388,6 +386,7 @@ private struct SmartActionMenu: View {
     }
   }
 }
+#endif
 
 /// Shows a navigation subtitle only when `text` is non-empty (empty text
 /// would otherwise render an empty subtitle slot).
@@ -396,8 +395,10 @@ private extension View {
   func navigationDirectorySubtitle(_ text: String) -> some View {
     if text.isEmpty {
       self
-    } else {
+    } else if #available(iOS 26.0, macOS 26.0, *) {
       self.navigationSubtitle(Text(text))
+    } else {
+      self
     }
   }
 }
