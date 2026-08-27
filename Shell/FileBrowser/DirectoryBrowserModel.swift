@@ -140,10 +140,47 @@ import TerminalIntegrations
     if ctx.navigateUp() { Task { await refresh() } }
   }
 
-  /// Double-clicking a file. File operations (open/delete/move) are a separate
-  /// card, so a file double-click is a no-op here — directories already route
-  /// through `navigate(into:)`.
-  func open(_ row: FileRow) { _ = row }
+  /// Double-clicking a file/directory. Directories navigate into; files open
+  /// through `FileBrowserActions` (the host's default opener, local or SSH).
+  func open(_ row: FileRow) {
+    guard let ctx = context else { return }
+    Task {
+      await FileBrowserActions(model: self).open(row.name, isDirectory: row.isDirectory, in: ctx)
+    }
+  }
+
+  /// Deletes the selected entries. The view shows a confirmation dialog before
+  /// calling this; the destructive command only runs after that confirm step
+  /// (`confirmed: true` inside `FileBrowserActions.delete`).
+  func delete(_ names: Set<String>) {
+    guard let ctx = context, !names.isEmpty else { return }
+    let ordered = names.sorted()
+    let actions = FileBrowserActions(model: self)
+    Task {
+      for name in ordered {
+        guard let row = rows.first(where: { $0.name == name }) else { continue }
+        await actions.delete(
+          path: Self.absolutePath(name, in: ctx), isDirectory: row.isDirectory, confirmed: true)
+      }
+    }
+  }
+
+  /// Moves or copies the selected entries to `destination`. A relative
+  /// destination is anchored to the current directory inside `FileBrowserActions`.
+  func moveCopy(_ names: Set<String>, to destination: String, mode: FileCommandBuilder.MoveCopyMode)
+  {
+    guard let ctx = context, !names.isEmpty else { return }
+    let ordered = names.sorted()
+    let actions = FileBrowserActions(model: self)
+    Task {
+      for name in ordered {
+        guard let row = rows.first(where: { $0.name == name }) else { continue }
+        await actions.moveCopy(
+          source: Self.absolutePath(name, in: ctx), destination: destination, mode: mode,
+          isDirectory: row.isDirectory)
+      }
+    }
+  }
 
   // MARK: - Displayed state
 
@@ -187,5 +224,25 @@ extension DirectoryBrowserModel {
   fileprivate func seedAndList(_ ctx: DirectoryContext) async {
     await ctx.seed()
     await refresh()
+  }
+
+  // MARK: - File-operation state hooks
+
+  /// Internal setter so `FileBrowserActions` (same module) can drive the busy
+  /// flag the view observes around a file operation. Kept internal — the raw
+  /// setter is not part of the model's surface.
+  func setBusy(_ value: Bool) { busy = value }
+
+  /// Internal setter so `FileBrowserActions` can surface a command failure
+  /// (non-zero exit + stderr) through the same `lastError` the listing uses.
+  func setLastError(_ message: String?) { lastError = message }
+
+  /// Joins a child entry `name` onto the context's current directory, forming
+  /// the absolute path a file operation runs against.
+  fileprivate static func absolutePath(_ name: String, in ctx: DirectoryContext) -> String {
+    let base = ctx.path
+    if base.isEmpty { return name }
+    if base == "/" { return "/" + name }
+    return base + "/" + name
   }
 }
