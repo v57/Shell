@@ -26,6 +26,10 @@ final class AppModel {
   #if os(macOS)
   /// Polls `screen -ls` for the sidebar's Screen section.
   var screenMonitor = ScreenSessionsMonitor()
+  /// Scans GNU screen/tmux sessions on the currently-connected SSH hosts and
+  /// publishes them (tagged with their remote origin) so the sidebar can show
+  /// remote persistent rows alongside the local ones.
+  var remoteScreenScanner = RemoteScreenSessionsScanner()
   #endif
 
   /// The sidebar's encrypted Notes list (SwiftData-backed, lazy decryption).
@@ -377,9 +381,43 @@ final class AppModel {
     registerCapture(for: session, archiveLocally: false)
     sessions.append(session)
     selection = session.id
+    #if os(macOS)
+    // Kick a remote scan on connect. The just-created session isn't
+    // `.connected` yet, so it's skipped this pass; every already-connected
+    // host is scanned, and the next refresh (or the connected-state refresh
+    // the sidebar triggers) picks the new host up.
+    refreshRemoteScreenSessions()
+    #endif
     return session
   }
-  
+
+  #if os(macOS)
+  /// The SSH sessions that are currently open (kind `.ssh` AND
+  /// `connectionState == .connected`). This is the ONLY set the remote
+  /// persistent-session scanner iterates — it never dials a connection from a
+  /// saved (possibly disconnected) config (confirmed scope decision 3).
+  var connectedSSHSessions: [TerminalSession] {
+    sessions.filter { session in
+      guard case .ssh = kind(of: session) else { return false }
+      return session.connectionState == .connected
+    }
+  }
+
+  /// The remote persistent session rows scanned from currently-connected SSH
+  /// connections (empty until a scan). The sidebar renders these in the
+  /// merged Local section.
+  var remoteScreenSessions: [ScreenSessionInfo] {
+    remoteScreenScanner.sessions
+  }
+
+  /// Re-scans the connected SSH hosts for screen/tmux sessions. Called when a
+  /// connection opens and by the sidebar's remote-refresh control. Safe on the
+  /// main thread — each remote exec is scheduled on its connection's NIO
+  /// event loop, so the main thread is never blocked.
+  func refreshRemoteScreenSessions() {
+    remoteScreenScanner.scan(using: self)
+  }
+  #endif
   #if os(macOS)
   /// Opens a local terminal attached to an existing persistent session
   /// (`screen -x` for screen, `tmux attach` for tmux).

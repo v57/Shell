@@ -9,10 +9,21 @@ enum PersistentSessionKind: Hashable {
   case tmux
 }
 
-/// A persistent terminal session found on the local machine: either a GNU
-/// screen session (`screen -ls`) or a tmux session (`tmux ls`). `name` is
-/// the full reattach spec — "26040.hermes-test" for screen, "hermes-test"
-/// for tmux (tmux has no pid prefix).
+/// The remote SSH origin of a persistent session: which saved SSH
+/// connection it lives on (its config id) and that connection's display
+/// label. `nil` on a `ScreenSessionInfo` means the session is local — the
+/// pre-existing case.
+struct ScreenRemoteOrigin: Hashable {
+  let sshConfigID: UUID
+  let displayName: String
+}
+
+/// A persistent terminal session found on a machine: either a GNU screen
+/// session (`screen -ls`) or a tmux session (`tmux ls`). `name` is the full
+/// reattach spec — "26040.hermes-test" for screen, "hermes-test" for tmux
+/// (tmux has no pid prefix). Local sessions have a nil `remoteOrigin`;
+/// sessions found on a connected SSH host carry one so rows can be grouped
+/// and identified by their connection.
 struct ScreenSessionInfo: Identifiable, Hashable {
   let name: String
   let pid: Int
@@ -20,8 +31,21 @@ struct ScreenSessionInfo: Identifiable, Hashable {
   /// or tmux's session_attached flag (0/1).
   let state: String
   let kind: PersistentSessionKind
-  
-  var id: String { "\(kind):\(name)" }
+  /// The SSH host this session lives on, nil for local. Defaults to nil so
+  /// the existing local parsing (which produces local rows) is unchanged.
+  var remoteOrigin: ScreenRemoteOrigin? = nil
+
+  var isRemote: Bool { remoteOrigin != nil }
+
+  /// "kind:name" for local sessions; for remote ones the ssh config id is
+  /// added so two hosts that each have a session named the same don't
+  /// collide (a List row identity must be globally unique).
+  var id: String {
+    if let origin = remoteOrigin {
+      return "\(kind):\(name)@\(origin.sshConfigID.uuidString)"
+    }
+    return "\(kind):\(name)"
+  }
   
   /// The session name without the "pid." prefix, e.g. "swiftui-optimization".
   /// For screen this is what `screen -X sessionname` operates on; for
@@ -40,10 +64,17 @@ struct ScreenSessionInfo: Identifiable, Hashable {
     return state.localizedCaseInsensitiveContains("attached")
   }
   
-  /// Deterministic UUID derived from the name so List selection tags stay
-  /// stable across monitor refreshes (screen sessions have no UUIDs).
+  /// Deterministic UUID derived from the name (plus the ssh config id for
+  /// remote sessions) so List selection tags stay stable across monitor
+  /// refreshes (screen sessions have no UUIDs). Local rows keep the exact
+  /// same UUID as before — the seed is unchanged when `remoteOrigin` is nil.
   var tagID: UUID {
-    let data = Array(name.utf8)
+    let data: [UInt8]
+    if let origin = remoteOrigin {
+      data = Array(name.utf8) + Array(origin.sshConfigID.uuidString.utf8)
+    } else {
+      data = Array(name.utf8)
+    }
     var bytes = [UInt8](repeating: 0, count: 16)
     for (i, byte) in data.enumerated() {
       bytes[i % 16] ^= byte
@@ -408,7 +439,7 @@ final class ScreenSessionsMonitor {
       let message = rawMessage.isEmpty ? "tmux ls failed" : rawMessage
       return ([], message)
     }
-    return (parseTmux(text), nil)
+    return (parseTmuxOutput(text), nil)
   }
 
   static func isTmuxEmptyState(_ message: String) -> Bool {
@@ -426,8 +457,9 @@ final class ScreenSessionsMonitor {
   }
   
   /// Parses `tmux ls -F` output ("name 0"/"name 1" per line) into
-  /// session infos with a zero pid.
-  private static func parseTmux(_ text: String) -> [ScreenSessionInfo] {
+  /// session infos with a zero pid. Internal so the remote scan
+  /// (`RemoteScreenSessionsScanner`) and tests can reuse the same parser.
+  static func parseTmuxOutput(_ text: String) -> [ScreenSessionInfo] {
     var result: [ScreenSessionInfo] = []
     for line in text.components(separatedBy: .newlines) {
       let parts = line.split(separator: " ", maxSplits: 1)
@@ -506,7 +538,7 @@ final class ScreenSessionsMonitor {
       return ([], message)
     }
     let text = String(data: outData, encoding: .utf8) ?? ""
-    return (parse(text), nil)
+    return (parseScreenOutput(text), nil)
   }
   
   /// Parses `screen -ls` output:
@@ -515,8 +547,10 @@ final class ScreenSessionsMonitor {
   private static let lineRegex = try! NSRegularExpression(
     pattern: #"^\s*(\d+)\.(\S+)\s+\(([^)]+)\)\s*$"#
   )
-  
-  private static func parse(_ text: String) -> [ScreenSessionInfo] {
+
+  /// Parses `screen -ls` output. Internal so the remote scan and tests can
+  /// reuse the same parser as the local poller.
+  static func parseScreenOutput(_ text: String) -> [ScreenSessionInfo] {
     var result: [ScreenSessionInfo] = []
     for line in text.components(separatedBy: .newlines) {
       let nsLine = line as NSString
@@ -529,6 +563,90 @@ final class ScreenSessionsMonitor {
       result.append(ScreenSessionInfo(name: "\(pid).\(rest)", pid: pid, state: state, kind: .screen))
     }
     return result
+  }
+}
+
+// MARK: - Remote persistent session scanner
+
+/// Scans GNU screen/tmux sessions on the currently-connected SSH connections
+/// and publishes them as `ScreenSessionInfo` rows tagged with each session's
+/// remote origin (its SSH config id + display label).
+///
+/// The scan only touches hosts that already have a connected SSH terminal
+/// (kind `.ssh` AND `connectionState == .connected`) and reuses that session's
+/// live exec channel — it never dials a throwaway SSH connection just to list
+/// a host (confirmed scope decision 3). A host without tmux or screen simply
+/// contributes nothing; a per-host failure is swallowed to an empty list
+/// rather than folded into an error that blanks the whole remote section.
+///
+/// tmux/screen are macOS-only concern (the iOS app ships SSH + notes only).
+@MainActor
+@Observable
+final class RemoteScreenSessionsScanner {
+  /// The latest remote persistent session list. The UI (SidebarView) renders
+  /// these rows in the merged Local section; empty until the first scan.
+  private(set) var sessions: [ScreenSessionInfo] = []
+
+  /// The remote list commands, run via the existing SSH exec path. The tmux
+  /// format matches the local poller so both reuse `parseTmuxOutput`.
+  static let tmuxListCommand = "tmux ls -F '#{session_name} #{session_attached}'"
+  static let screenListCommand = "screen -ls"
+
+  /// Lists screen/tmux sessions on every currently-connected SSH connection.
+  /// Safe to call on the main thread: each remote exec is scheduled on the
+  /// connection's NIO event loop (a background queue), so the main thread is
+  /// never blocked waiting on a host. The @Sendable completions only stash
+  /// raw stdout; all ScreenSessionInfo construction happens back on the main
+  /// actor, which is the only safe place to touch these MainActor-default
+  /// types.
+  func scan(using model: AppModel) {
+    let hostEntries: [(transport: SSHSession, origin: ScreenRemoteOrigin)] =
+      model.connectedSSHSessions.compactMap { session in
+        // Only kind .ssh, and only sessions that are connected.
+        guard case .ssh(let config) = model.kind(of: session),
+              let transport = session.sshTransport
+        else { return nil }
+        return (transport, ScreenRemoteOrigin(sshConfigID: config.id, displayName: config.displayName))
+      }
+
+    let commands = Self.listCommands
+    Task { @MainActor [weak self] in
+      guard let self else { return }
+      var collected: [ScreenSessionInfo] = []
+      var seen = Set<String>()
+      for (transport, origin) in hostEntries {
+        for command in commands {
+          let output = await withCheckedContinuation { (cont: CheckedContinuation<String?, Never>) in
+            transport.runCommand(command) { result in
+              if case .success(let text) = result { cont.resume(returning: text) }
+              else { cont.resume(returning: nil) }
+            }
+          }
+          guard let output else { continue }
+          for info in Self.parse(command: command, text: output, origin: origin)
+          where seen.insert(info.id).inserted {
+            collected.append(info)
+          }
+        }
+      }
+      self.sessions = collected
+    }
+  }
+
+  static var listCommands: [String] { [tmuxListCommand, screenListCommand] }
+
+  /// Reuses the same parsers as the local poller, tagging every parsed row
+  /// with the SSH origin the command was run against.
+  static func parse(command: String, text: String, origin: ScreenRemoteOrigin) -> [ScreenSessionInfo] {
+    let base: [ScreenSessionInfo]
+    if command == tmuxListCommand {
+      base = ScreenSessionsMonitor.parseTmuxOutput(text)
+    } else {
+      base = ScreenSessionsMonitor.parseScreenOutput(text)
+    }
+    return base.map { info in
+      ScreenSessionInfo(name: info.name, pid: info.pid, state: info.state, kind: info.kind, remoteOrigin: origin)
+    }
   }
 }
 #endif // os(macOS)

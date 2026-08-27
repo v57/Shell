@@ -31,7 +31,13 @@ nonisolated final class SSHConnectionEngine: @unchecked Sendable {
     case hostKeyRejected
     case authenticationCancelled
     case noAvailableAuthenticationMethods
-    
+    /// The connection is not open (no live parent channel to multiplex on).
+    case notConnected
+    /// A one-shot remote exec (persistent-session scan) failed at the
+    /// connection/channel level. The remote command's own non-zero exit is
+    /// NOT folded into this — callers interpret the captured stdout.
+    case remoteCommandFailed(String)
+
     var errorDescription: String? {
       switch self {
       case .connectTimedOut:
@@ -42,6 +48,10 @@ nonisolated final class SSHConnectionEngine: @unchecked Sendable {
         return "Authentication was cancelled."
       case .noAvailableAuthenticationMethods:
         return "No supported authentication methods were available."
+      case .notConnected:
+        return "The connection is not open."
+      case .remoteCommandFailed(let message):
+        return "Remote command failed: \(message)"
       }
     }
   }
@@ -189,7 +199,87 @@ nonisolated final class SSHConnectionEngine: @unchecked Sendable {
     parent?.close(promise: nil)
     group.shutdownGracefully { _ in }
   }
-  
+
+  // MARK: One-shot remote exec (persistent-session scan)
+
+  /// Runs a one-shot `command` on the ALREADY-OPEN connection by opening a
+  /// second session channel (SSH channels multiplex over one TCP/SSH
+  /// connection), leaving the interactive session's channel untouched. This
+  /// is the remote persistent-session scanner path: it reuses the live
+  /// connection so no throwaway SSH dial is made just to list a host's
+  /// screen/tmux sessions.
+  ///
+  /// `completion` is invoked exactly once, on the main thread. A non-zero
+  /// REMOTE exec status is not surfaced as a `.failure`: listing commands
+  /// like `tmux ls` exit 1 on the normal "no server running" case, and
+  /// `command not found` (exit 127) is the absence case — callers interpret
+  /// the captured stdout. `.failure` is reserved for connection/channel-level
+  /// problems (e.g. the connection closed under us, or no live channel).
+  func runRemoteCommand(_ command: String, completion: @escaping @Sendable (Result<String, Error>) -> Void) {
+    guard let parent = channelBox.withLockedValue({ $0 }) else {
+      DispatchQueue.main.async { completion(.failure(EngineError.notConnected)) }
+      return
+    }
+    parent.eventLoop.execute {
+      guard let sshHandler = try? parent.pipeline.syncOperations.handler(type: NIOSSHHandler.self) else {
+        DispatchQueue.main.async { completion(.failure(EngineError.remoteCommandFailed("SSH handler not found on channel."))) }
+        return
+      }
+      let promise = parent.eventLoop.makePromise(of: Channel.self)
+      let finished = NIOLockedValueBox(false)
+      let collected = NIOLockedValueBox(Data())
+      // Deliver exactly once, on the main thread. Both the exit-status and
+      // the close paths race (the channel sends exit status then closes);
+      // whichever fires first wins, and it has the full stdout by then
+      // (channel data is ordered ahead of the exit-status event).
+      let deliverOnce: @Sendable (Result<String, Error>) -> Void = { result in
+        var shouldDeliver = false
+        finished.withLockedValue { flag in
+          if !flag { flag = true; shouldDeliver = true }
+        }
+        if shouldDeliver {
+          DispatchQueue.main.async { completion(result) }
+        }
+      }
+      sshHandler.createChannel(promise, channelType: .session) { childChannel, _ in
+        childChannel.eventLoop.makeCompletedFuture {
+          let handler = ShellDataHandler(
+            onData: { data in
+              collected.withLockedValue { $0.append(data) }
+            },
+            onClose: {
+              deliverOnce(.success(String(data: collected.withLockedValue { $0 }, encoding: .utf8) ?? ""))
+            },
+            onError: { message in
+              deliverOnce(.failure(EngineError.remoteCommandFailed(message)))
+            },
+            onExitStatus: { _ in
+              deliverOnce(.success(String(data: collected.withLockedValue { $0 }, encoding: .utf8) ?? ""))
+            }
+          )
+          try childChannel.pipeline.syncOperations.addHandler(handler)
+          let pty = SSHChannelRequestEvent.PseudoTerminalRequest(
+            wantReply: true,
+            term: "xterm-256color",
+            terminalCharacterWidth: 80,
+            terminalRowHeight: 24,
+            terminalPixelWidth: 0,
+            terminalPixelHeight: 0,
+            terminalModes: SSHTerminalModes([:])
+          )
+          childChannel.triggerUserOutboundEvent(pty, promise: nil)
+          childChannel.triggerUserOutboundEvent(
+            SSHChannelRequestEvent.ExecRequest(command: command, wantReply: true),
+            promise: nil
+          )
+        }
+      }
+      promise.futureResult.whenFailure { error in
+        deliverOnce(.failure(error))
+      }
+    }
+  }
+
   // MARK: Channel setup
   
   /// Opens the session's single channel: PTY + shell for normal sessions,

@@ -239,6 +239,13 @@ public final class TerminalSession: Identifiable {
     transport.close()
   }
 
+  /// The SSH transport backing this session, when it is SSH-backed. Lets the
+  /// remote persistent-session scanner run a one-shot command over the
+  /// ALREADY-CONNECTED connection (currentConnectionState says connected, so
+  /// the transport's engine is live) rather than dialing a throwaway SSH
+  /// connection. Nil for local, action, and test-double transports.
+  public var sshTransport: SSHSession? { transport as? SSHSession }
+
   public func send(_ string: String) {
     send(Data(string.utf8))
   }

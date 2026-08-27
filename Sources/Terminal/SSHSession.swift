@@ -88,4 +88,20 @@ public final class SSHSession: TerminalTransport {
     engine?.close()
     engine = nil
   }
+
+  /// Runs a one-shot `command` on the ALREADY-CONNECTED connection — no new
+  /// SSH dial is made (the remote persistent-session scanner's whole point).
+  /// The captured stdout is delivered to `completion` on the main thread; a
+  /// non-zero remote exec status is carried back as the stdout the command
+  /// produced (list commands like `tmux ls` exit non-zero on the normal "no
+  /// server" case), so callers interpret the text rather than treat non-zero
+  /// as a failure. Only meaningful after `start()` has connected — the
+  /// scanner gates on `connectionState == .connected` before calling.
+  public func runCommand(_ command: String, completion: @escaping @Sendable (Result<String, Error>) -> Void) {
+    guard let engine else {
+      completion(.failure(SSHConnectionEngine.EngineError.notConnected))
+      return
+    }
+    engine.runRemoteCommand(command, completion: completion)
+  }
 }
