@@ -69,8 +69,11 @@ struct ShellCommands: Commands {
       }
       .keyboardShortcut("t", modifiers: .command)
       
-      Button("New SSH Connection…") {
-        AppModel.shared.showingNewConnection = true
+      // ⌘⇧N opens a new persistent session and auto-attaches a terminal
+      // (screen/tmux). Menu key equivalents are processed before terminal
+      // keyDown, so it works while a terminal has focus.
+      Button("New Persistent Session") {
+        AppModel.shared.createScreenSession()
       }
       .keyboardShortcut("n", modifiers: [.command, .shift])
 
