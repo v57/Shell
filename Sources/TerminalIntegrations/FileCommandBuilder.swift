@@ -22,7 +22,10 @@ public enum FileCommandBuilder {
 
   /// Wraps `value` in single quotes and escapes any embedded apostrophe as
   /// `'\\''`, so the value is safe to embed in a shell command.
-  private static func shellQuote(_ value: String) -> String {
+  ///
+  /// Public because the SSH runner builds its `cd '<dir>' && <command>`
+  /// prefix from the same quote rule used by the static command builders.
+  public static func shellQuote(_ value: String) -> String {
     "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
   }
 
