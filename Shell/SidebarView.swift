@@ -97,6 +97,33 @@ struct SidebarView: View {
               }
             }
           }
+          ForEach(model.remoteScreenSessions) { info in
+            ScreenSessionRow(
+              info: info,
+              isRenaming: false,
+              onCommitRename: { _ in },
+              onCancelRename: {}
+            )
+            // Tag with the open session's id when attached (so the row shows
+            // selected while its terminal is open), else the stable tagID.
+            .tag(model.attachedSession(toScreen: info)?.id ?? info.tagID)
+            .contextMenu {
+              // Remote persistent sessions are identified by their SSH origin;
+              // renaming runs on the host, which is out of scope here.
+              if model.attachedSession(toScreen: info) == nil {
+                Button("Attach") {
+                  if let config = model.connections.first(where: { $0.id == info.remoteOrigin?.sshConfigID }) {
+                    model.attach(toRemoteScreen: info, on: config)
+                  }
+                }
+              }
+              // Kills the session on the host itself (screen -S <name> -X
+              // quit / tmux kill-session); the row disappears from the list.
+              Button("Close Session", role: .destructive) {
+                model.closeRemoteScreenSession(info)
+              }
+            }
+          }
         }
       } header: {
         HStack {
@@ -223,6 +250,14 @@ struct SidebarView: View {
           model.selection = existing.id
         } else {
           model.attach(toScreen: info)
+        }
+      } else if let info = model.remoteScreenSessions.first(where: { $0.tagID == id }) {
+        // Remote persistent row: attach a local terminal to it over SSH.
+        if let existing = model.attachedSession(toScreen: info) {
+          // Already attached: focus the open terminal (see above).
+          model.selection = existing.id
+        } else if let config = model.connections.first(where: { $0.id == info.remoteOrigin?.sshConfigID }) {
+          model.attach(toRemoteScreen: info, on: config)
         }
       }
       #endif
@@ -546,6 +581,16 @@ private struct ScreenSessionRow: View {
           .help(info.kind == .tmux
             ? "tmux session"
             : "GNU screen session")
+      }
+      // Remote rows carry their SSH origin so they're distinguishable from
+      // local rows in the same merged section (e.g. "swiftui-optimization"
+      // with a "build-server" subtitle).
+      if let origin = info.remoteOrigin, !origin.displayName.isEmpty {
+        Text(origin.displayName)
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+          .truncationMode(.middle)
       }
       if let session = attachedSession, !session.statusAttributedString(disableBackgrounds: disableBackgrounds, scheme: colorScheme).characters.isEmpty {
         Text(session.statusAttributedString(disableBackgrounds: disableBackgrounds, scheme: colorScheme))

@@ -446,6 +446,41 @@ final class AppModel {
     screenMonitor.refresh()  // the session just flipped to Attached
     return session
   }
+
+  /// Opens a terminal attached to a persistent screen/tmux session running on
+  /// a connected SSH host. The transport is a NEW `SSHSession` whose exec
+  /// command is the remote attach (`screen -x <name>` / `tmux attach -t
+  /// <name>`), exactly like a remote action session — PTY + exec over the
+  /// authenticated connection. Mirrors local `attach(toScreen:)`: the kind is
+  /// `.screen` (carrying the remote origin) and the exit handler reconciles by
+  /// removing the app-side client and re-scanning the remote persistent list.
+  @discardableResult
+  func attach(toRemoteScreen info: ScreenSessionInfo, on config: SSHConfig) -> TerminalSession {
+    let exec: String
+    if info.kind == .tmux {
+      exec = "tmux attach -t \(info.name)"
+    } else {
+      exec = "screen -x \(info.name)"
+    }
+    let session = TerminalSession(
+      transport: SSHSession(config: config, execCommand: exec),
+      startupMessage: "Attaching to \(config.displayName)…"
+    )
+    session.exitHandler = { [weak self, weak session] _ in
+      guard let id = session?.id else { return }
+      // The client detached or its shell ended; the app-side attachment is
+      // finished. The remote scan decides whether the persistent backend row
+      // remains (it does — the session keeps running on the host).
+      self?.removeSession(id)
+      self?.refreshRemoteScreenSessions()
+    }
+    sessionKinds[session.id] = .screen(info)
+    registerCapture(for: session, archiveLocally: false)
+    sessions.append(session)
+    selection = session.id
+    refreshRemoteScreenSessions()  // the session just flipped to Attached
+    return session
+  }
   #endif
   
   /// All running sessions for a connection, in creation order.
@@ -484,7 +519,11 @@ final class AppModel {
       return sessions.filter { kind(of: $0) == .local }
     case .screen:
       #if os(macOS)
-      return screenMonitor.sessions.compactMap { attachedSession(toScreen: $0) }
+      // Local persistent attachments plus remote (SSH) persistent
+      // attachments, in sidebar order — Cmd+W/Cmd+N navigate all of them.
+      let local = screenMonitor.sessions.compactMap { attachedSession(toScreen: $0) }
+      let remote = remoteScreenSessions.compactMap { attachedSession(toScreen: $0) }
+      return local + remote
       #else
       return []
       #endif
@@ -566,7 +605,13 @@ final class AppModel {
     
     if case .screen(let info) = kind(of: session) {
       #if os(macOS)
-      closeScreenSession(info)
+      if info.isRemote {
+        // Remote sessions live on the SSH host; closing the attached terminal
+        // detaches our client (and closes the session on the host via SSH).
+        closeRemoteScreenSession(info)
+      } else {
+        closeScreenSession(info)
+      }
       #else
       removeSession(session.id)
       #endif
@@ -590,13 +635,23 @@ final class AppModel {
   }
   
   /// The open terminal attached to a screen session, if any. Screen
-  /// sessions are identified by their "pid.name" spec.
+  /// sessions are identified by name AND origin: local sessions match on
+  /// "pid.name"; remote sessions additionally match on the SSH config id,
+  /// so two hosts that each run a session named the same don't collide.
   func attachedSession(toScreen info: ScreenSessionInfo) -> TerminalSession? {
     sessions.first { session in
-      if case .screen(let attached) = kind(of: session) {
-        return attached.name == info.name
+      guard case .screen(let attached) = kind(of: session) else { return false }
+      guard attached.name == info.name else { return false }
+      // Local rows match local attachments; remote rows match attachments on
+      // the same host (same origin config id).
+      switch (attached.remoteOrigin, info.remoteOrigin) {
+      case (nil, nil):
+        return true
+      case let (a?, b?):
+        return a.sshConfigID == b.sshConfigID
+      default:
+        return false
       }
-      return false
     }
   }
   
@@ -625,6 +680,38 @@ final class AppModel {
     for session in attached {
       removeSession(session.id)
     }
+  }
+
+  /// Closes a persistent session running on a connected SSH host: quits it on
+  /// the host via the connection's live SSH exec channel (`screen -S <name> -X
+  /// quit` / `tmux kill-session -t <name>`), then removes the app-side
+  /// terminals attached to it. If the connection dropped or the session is
+  /// already gone, the exec is a no-op and we only remove our own attachment.
+  func closeRemoteScreenSession(_ info: ScreenSessionInfo) {
+    if let origin = info.remoteOrigin,
+       let transport = connectedSSHSessions
+         .first(where: { $0.sshTransport?.config.id == origin.sshConfigID })?
+         .sshTransport {
+      let command: String
+      if info.kind == .tmux {
+        command = "tmux kill-session -t \(info.name)"
+      } else {
+        command = "screen -S \(info.name) -X quit"
+      }
+      // One-shot exec on the already-connected channel; the result is not
+      // surfaced (a missing session is the normal outcome here).
+      transport.runCommand(command) { _ in }
+    }
+    let attached = sessions.filter { session in
+      if case .screen(let attached) = kind(of: session) {
+        return attached.id == info.id
+      }
+      return false
+    }
+    for session in attached {
+      removeSession(session.id)
+    }
+    refreshRemoteScreenSessions()
   }
   #endif
   
