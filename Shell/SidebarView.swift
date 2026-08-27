@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import Terminal
+import TerminalIntegrations
 import Monitoring
 
 /// Sidebar: lists local terminals and saved SSH connections.

@@ -1,90 +1,6 @@
 import Foundation
 import Terminal
-
-/// Which multiplexer a persistent session belongs to. The app prefers
-/// tmux when installed (see `PersistentSessionTool`); screen sessions
-/// created by the older backend keep working.
-enum PersistentSessionKind: Hashable {
-  case screen
-  case tmux
-}
-
-/// The remote SSH origin of a persistent session: which saved SSH
-/// connection it lives on (its config id) and that connection's display
-/// label. `nil` on a `ScreenSessionInfo` means the session is local — the
-/// pre-existing case.
-struct ScreenRemoteOrigin: Hashable {
-  let sshConfigID: UUID
-  let displayName: String
-}
-
-/// A persistent terminal session found on a machine: either a GNU screen
-/// session (`screen -ls`) or a tmux session (`tmux ls`). `name` is the full
-/// reattach spec — "26040.hermes-test" for screen, "hermes-test" for tmux
-/// (tmux has no pid prefix). Local sessions have a nil `remoteOrigin`;
-/// sessions found on a connected SSH host carry one so rows can be grouped
-/// and identified by their connection.
-struct ScreenSessionInfo: Identifiable, Hashable {
-  let name: String
-  let pid: Int
-  /// Raw state column: screen's "Detached"/"Attached"/"Multi, detached",
-  /// or tmux's session_attached flag (0/1).
-  let state: String
-  let kind: PersistentSessionKind
-  /// The SSH host this session lives on, nil for local. Defaults to nil so
-  /// the existing local parsing (which produces local rows) is unchanged.
-  var remoteOrigin: ScreenRemoteOrigin? = nil
-
-  var isRemote: Bool { remoteOrigin != nil }
-
-  /// "kind:name" for local sessions; for remote ones the ssh config id is
-  /// added so two hosts that each have a session named the same don't
-  /// collide (a List row identity must be globally unique).
-  var id: String {
-    if let origin = remoteOrigin {
-      return "\(kind):\(name)@\(origin.sshConfigID.uuidString)"
-    }
-    return "\(kind):\(name)"
-  }
-  
-  /// The session name without the "pid." prefix, e.g. "swiftui-optimization".
-  /// For screen this is what `screen -X sessionname` operates on; for
-  /// tmux `name` already is the plain session name.
-  var shortName: String {
-    if let dot = name.firstIndex(of: ".") {
-      return String(name[name.index(after: dot)...])
-    }
-    return name
-  }
-  
-  var isAttached: Bool {
-    if kind == .tmux {
-      return state == "1"
-    }
-    return state.localizedCaseInsensitiveContains("attached")
-  }
-  
-  /// Deterministic UUID derived from the name (plus the ssh config id for
-  /// remote sessions) so List selection tags stay stable across monitor
-  /// refreshes (screen sessions have no UUIDs). Local rows keep the exact
-  /// same UUID as before — the seed is unchanged when `remoteOrigin` is nil.
-  var tagID: UUID {
-    let data: [UInt8]
-    if let origin = remoteOrigin {
-      data = Array(name.utf8) + Array(origin.sshConfigID.uuidString.utf8)
-    } else {
-      data = Array(name.utf8)
-    }
-    var bytes = [UInt8](repeating: 0, count: 16)
-    for (i, byte) in data.enumerated() {
-      bytes[i % 16] ^= byte
-    }
-    bytes[6] = (bytes[6] & 0x0F) | 0x40  // version 4
-    bytes[8] = (bytes[8] & 0x3F) | 0x80  // RFC 4122 variant
-    return UUID(uuid: (bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-                       bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]))
-  }
-}
+import TerminalIntegrations
 
 /// Error surfaced for create/rename actions, shown as an alert.
 struct ScreenActionError: Identifiable, Equatable {
@@ -184,7 +100,7 @@ final class ScreenSessionsMonitor {
   /// attached to it.
   func createSession(onCreated: ((ScreenSessionInfo) -> Void)? = nil) {
     let kind = Self.preferredKind
-    let name = nextSessionName()
+    let name = ScreenSessionsParser.nextSessionName(existing: Set(sessions.map(\.shortName)))
     queue.async { [weak self] in
       let message: String?
       if kind == .tmux, let tmux = Self.tmuxPath() {
@@ -256,17 +172,6 @@ final class ScreenSessionsMonitor {
         self.refresh()
       }
     }
-  }
-  
-  /// A unique session name for createSession: "zsh", "zsh-1", "zsh-2", …
-  /// screen does NOT uniquify `-dm` names itself (two sessions can share a
-  /// name, which would break sidebar row identity), so we must.
-  private func nextSessionName() -> String {
-    let existing = Set(sessions.map(\.shortName))
-    if !existing.contains("zsh") { return "zsh" }
-    var n = 1
-    while existing.contains("zsh-\(n)") { n += 1 }
-    return "zsh-\(n)"
   }
   
   // MARK: - screen -dmS
@@ -439,7 +344,7 @@ final class ScreenSessionsMonitor {
       let message = rawMessage.isEmpty ? "tmux ls failed" : rawMessage
       return ([], message)
     }
-    return (parseTmuxOutput(text), nil)
+    return (ScreenSessionsParser.parseTmuxOutput(text), nil)
   }
 
   static func isTmuxEmptyState(_ message: String) -> Bool {
@@ -456,19 +361,6 @@ final class ScreenSessionsMonitor {
       || normalized.contains("session not found")
   }
   
-  /// Parses `tmux ls -F` output ("name 0"/"name 1" per line) into
-  /// session infos with a zero pid. Internal so the remote scan
-  /// (`RemoteScreenSessionsScanner`) and tests can reuse the same parser.
-  static func parseTmuxOutput(_ text: String) -> [ScreenSessionInfo] {
-    var result: [ScreenSessionInfo] = []
-    for line in text.components(separatedBy: .newlines) {
-      let parts = line.split(separator: " ", maxSplits: 1)
-      guard parts.count == 2, let name = parts.first, let attached = parts.last else { continue }
-      result.append(ScreenSessionInfo(name: String(name), pid: 0, state: String(attached), kind: .tmux))
-    }
-    return result
-  }
-
   // MARK: - screen -X sessionname
   
   private static func runRename(oldName: String, newName: String) -> String? {
@@ -538,31 +430,7 @@ final class ScreenSessionsMonitor {
       return ([], message)
     }
     let text = String(data: outData, encoding: .utf8) ?? ""
-    return (parseScreenOutput(text), nil)
-  }
-  
-  /// Parses `screen -ls` output:
-  ///   \t26040.hermes-test\t(Detached)
-  ///   \t23539.swiftui-optimization\t(Attached)
-  private static let lineRegex = try! NSRegularExpression(
-    pattern: #"^\s*(\d+)\.(\S+)\s+\(([^)]+)\)\s*$"#
-  )
-
-  /// Parses `screen -ls` output. Internal so the remote scan and tests can
-  /// reuse the same parser as the local poller.
-  static func parseScreenOutput(_ text: String) -> [ScreenSessionInfo] {
-    var result: [ScreenSessionInfo] = []
-    for line in text.components(separatedBy: .newlines) {
-      let nsLine = line as NSString
-      guard let match = lineRegex.firstMatch(in: line, options: [], range: NSRange(location: 0, length: nsLine.length)) else {
-        continue
-      }
-      let pid = Int(nsLine.substring(with: match.range(at: 1))) ?? 0
-      let rest = nsLine.substring(with: match.range(at: 2))  // e.g. "pts-0.host"
-      let state = nsLine.substring(with: match.range(at: 3))
-      result.append(ScreenSessionInfo(name: "\(pid).\(rest)", pid: pid, state: state, kind: .screen))
-    }
-    return result
+    return (ScreenSessionsParser.parseScreenOutput(text), nil)
   }
 }
 
@@ -587,10 +455,8 @@ final class RemoteScreenSessionsScanner {
   /// these rows in the merged Local section; empty until the first scan.
   private(set) var sessions: [ScreenSessionInfo] = []
 
-  /// The remote list commands, run via the existing SSH exec path. The tmux
-  /// format matches the local poller so both reuse `parseTmuxOutput`.
-  static let tmuxListCommand = "tmux ls -F '#{session_name} #{session_attached}'"
-  static let screenListCommand = "screen -ls"
+  /// The remote list commands are the package's canonical strings (the tmux
+  /// format matches the local poller, so both reuse `ScreenSessionsParser`).
 
   /// Lists screen/tmux sessions on every currently-connected SSH connection.
   /// Safe to call on the main thread: each remote exec is scheduled on the
@@ -623,7 +489,7 @@ final class RemoteScreenSessionsScanner {
             }
           }
           guard let output else { continue }
-          for info in Self.parse(command: command, text: output, origin: origin)
+          for info in ScreenSessionsParser.parse(command: command, text: output, origin: origin)
           where seen.insert(info.id).inserted {
             collected.append(info)
           }
@@ -633,20 +499,6 @@ final class RemoteScreenSessionsScanner {
     }
   }
 
-  static var listCommands: [String] { [tmuxListCommand, screenListCommand] }
-
-  /// Reuses the same parsers as the local poller, tagging every parsed row
-  /// with the SSH origin the command was run against.
-  static func parse(command: String, text: String, origin: ScreenRemoteOrigin) -> [ScreenSessionInfo] {
-    let base: [ScreenSessionInfo]
-    if command == tmuxListCommand {
-      base = ScreenSessionsMonitor.parseTmuxOutput(text)
-    } else {
-      base = ScreenSessionsMonitor.parseScreenOutput(text)
-    }
-    return base.map { info in
-      ScreenSessionInfo(name: info.name, pid: info.pid, state: info.state, kind: info.kind, remoteOrigin: origin)
-    }
-  }
+  static var listCommands: [String] { [ScreenSessionsParser.tmuxListCommand, ScreenSessionsParser.screenListCommand] }
 }
 #endif // os(macOS)

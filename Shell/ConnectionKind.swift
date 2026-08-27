@@ -1,5 +1,6 @@
 import Foundation
 import Terminal
+import TerminalIntegrations
 
 
 /// What an action session runs: the action plus the remote target config
