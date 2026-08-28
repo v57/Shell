@@ -20,6 +20,11 @@ struct SidebarView: View {
   /// The stats graphs sheet, opened by clicking the Local section header.
   @State private var showingStatsGraphs = false
   #endif
+  #if os(iOS)
+  /// Presents the Settings sheet (iOS reaches Settings via a sidebar gear;
+  /// macOS uses the ⌘, Settings scene).
+  @State private var showSettings = false
+  #endif
 
   /// Collapse state for each sidebar section, persisted across launches.
   @AppStorage("sidebar.running.collapsed") private var runningCollapsed = false
@@ -317,6 +322,21 @@ struct SidebarView: View {
       StatsGraphView(monitor: statsMonitor)
     }
     #endif
+#if os(iOS)
+    .toolbar {
+      ToolbarItem(placement: .navigationBarTrailing) {
+        Button {
+          showSettings = true
+        } label: {
+          Label("Settings", systemImage: "gearshape")
+        }
+      }
+    }
+    .sheet(isPresented: $showSettings) {
+      SettingsView()
+        .environment(model)
+    }
+#endif
   }
 
   #if os(macOS)

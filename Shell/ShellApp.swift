@@ -17,6 +17,16 @@ struct ShellApp: App {
       ShellCommands()
     }
     #endif
+
+    // macOS Settings scene: ⌘, / Shell > Settings… opens SettingsView. The
+    // platform supplies the window and the keyboard shortcut (iOS has no scene
+    // of this kind — it opens Settings via the sidebar gear button instead).
+    #if os(macOS)
+    Settings {
+      SettingsView()
+        .environment(AppModel.shared)
+    }
+    #endif
   }
 }
 
