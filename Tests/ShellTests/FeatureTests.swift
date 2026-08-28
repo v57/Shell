@@ -359,6 +359,54 @@ struct FeatureTests {
     store.archive(newer)
     #expect(store.sessions.map(\.id) == [newer.id, older.id])
   }
+
+  /// The registry must cover every toggleable feature, including the reserved
+  /// `web` and `database` lanes, and never silently drop one.
+  @Test func featureIDRegistryCoversEveryToggleableFeature() {
+    #expect(FeatureID.allCases.map(\.rawValue) == [
+      "sessions", "screen", "ssh", "notes", "history", "actions",
+      "smartActions", "monitoring", "files", "themes", "authorizedKeys",
+      "settings", "web", "database"
+    ])
+    #expect(FeatureID.allCases.count == 14)
+    // Reserved lanes exist and round-trip through their rawValue.
+    #expect(FeatureID.web.rawValue == "web")
+    #expect(FeatureID.database.rawValue == "database")
+    #expect(FeatureID.allCases.map(\.id) == FeatureID.allCases.map(\.rawValue))
+  }
+
+  /// Defaults are ON; disabling writes only a flag; a reload of the same
+  /// defaults preserves the opt-out; re-enabling restores the prior state
+  /// without any feature data being touched.
+  @Test @MainActor func featureFlagsDefaultOnAndOptOutsPersist() throws {
+    let suite = "ShellFeatureFlagsTests-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+
+    let store = FeatureFlagsStore(defaults: defaults)
+
+    // Everything starts enabled.
+    for feature in FeatureID.allCases {
+      #expect(store.isEnabled(feature))
+    }
+
+    // Disabling flips only that flag; siblings stay on.
+    store.setEnabled(false, for: .notes)
+    #expect(!store.isEnabled(.notes))
+    #expect(store.isEnabled(.sessions))
+    #expect(store.isEnabled(.web))
+
+    // A fresh store over the same defaults sees the persisted opt-out.
+    let reloaded = FeatureFlagsStore(defaults: defaults)
+    #expect(!reloaded.isEnabled(.notes))
+    #expect(reloaded.isEnabled(.sessions))
+
+    // Re-enabling restores the exact prior state (data was never deleted).
+    store.setEnabled(true, for: .notes)
+    #expect(store.isEnabled(.notes))
+    let reloadedAgain = FeatureFlagsStore(defaults: defaults)
+    #expect(reloadedAgain.isEnabled(.notes))
+  }
 }
 
 /// Opt-in because unsigned command-line test hosts cannot reliably access the
