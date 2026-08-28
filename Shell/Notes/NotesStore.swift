@@ -316,18 +316,52 @@ final class NotesStore {
   }
 
   // MARK: - Title/subtitle derivation (also used at save time by NoteCrypto)
+  // Display-only derivation: a leading markdown prefix on the physical line is
+  // stripped so sidebar labels read cleanly, but the stored note text is never
+  // mutated. Supported prefixes (each including the single following space):
+  // ATX heading '#{1,6} ', list bullet '- ' / '* ' / '+ ', blockquote '> '.
 
   static func title(for text: String) -> String {
     let firstLine = physicalLines(in: text).first ?? ""
-    let trimmed = firstLine.trimmingCharacters(in: .whitespaces)
-    return trimmed.isEmpty ? "Untitled" : String(trimmed.prefix(60))
+    let derived = stripMarkdownPrefix(firstLine).trimmingCharacters(in: .whitespaces)
+    return derived.isEmpty ? "Untitled" : String(derived.prefix(60))
   }
 
   static func subtitle(for text: String) -> String? {
     let lines = physicalLines(in: text)
     guard lines.count > 1 else { return nil }
-    let subtitle = lines[1].trimmingCharacters(in: .whitespaces)
-    return subtitle.isEmpty ? nil : subtitle
+    let derived = stripMarkdownPrefix(lines[1]).trimmingCharacters(in: .whitespaces)
+    return derived.isEmpty ? nil : derived
+  }
+
+  /// Strips exactly one leading markdown prefix from a physical line: an ATX
+  /// heading `#` (one to six hashes) or a list-bullet / blockquote marker
+  /// (`- `, `* `, `+ `, `> `), each including the single space that follows the
+  /// marker. No text beyond the prefix is touched.
+  private static func stripMarkdownPrefix(_ line: String) -> String {
+    guard !line.isEmpty else { return line }
+    if line.first == "#" {
+      var hashCount = 0
+      for ch in line {
+        guard ch == "#" else { break }
+        hashCount += 1
+      }
+      let spaceIndex = line.index(line.startIndex, offsetBy: hashCount)
+      if (1...6).contains(hashCount),
+         spaceIndex < line.endIndex,
+         line[spaceIndex] == " " {
+        return String(line[line.index(after: spaceIndex)...])
+      }
+      return line
+    }
+    if line.count >= 2 {
+      let marker = line[line.startIndex]
+      let next = line[line.index(line.startIndex, offsetBy: 1)]
+      if next == " ", "-*+>".contains(marker) {
+        return String(line.dropFirst(2))
+      }
+    }
+    return line
   }
 
   private static func physicalLines(in text: String) -> [String] {
