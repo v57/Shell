@@ -18,6 +18,7 @@ struct NewActionView: View {
   @State private var sshConnectionIDs = Set<UUID>()
   @State private var appliesToFutureSSHConnections = false
   @State private var commands = ""
+  @State private var dependencies = Set<UUID>()
   @State private var focusWindow = false
   @State private var keepAfterCompletion = false
   @State private var seededImplicitConnections = false
@@ -30,6 +31,7 @@ struct NewActionView: View {
     _sshConnectionIDs = State(initialValue: Set(action?.sshConnectionIDs ?? targetSSHConnectionID.map { [$0] } ?? []))
     _appliesToFutureSSHConnections = State(initialValue: action?.appliesToFutureSSHConnections ?? false)
     _commands = State(initialValue: action?.commands ?? commands)
+    _dependencies = State(initialValue: Set(action?.dependencies ?? []))
     _focusWindow = State(initialValue: action?.focusWindow ?? false)
     _keepAfterCompletion = State(initialValue: action?.keepAfterCompletion ?? false)
   }
@@ -38,6 +40,52 @@ struct NewActionView: View {
     !name.trimmingCharacters(in: .whitespaces).isEmpty
     && !commands.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     && (appliesToLocal || !sshConnectionIDs.isEmpty || appliesToFutureSSHConnections)
+  }
+
+  /// Actions currently selected as dependencies, in store order.
+  private var selectedDependencyActions: [Action] {
+    model.actions.all.filter { dependencies.contains($0.id) }
+  }
+
+  /// The picker's candidate list: every action except this one, minus the
+  /// whole transitive closure (its dependencies AND its dependents) of each
+  /// already-selected dependency — so a cycle is impossible.
+  private var availableDependencies: [Action] {
+    var excluded = Set<UUID>()
+    if let selfID = editing?.id { excluded.insert(selfID) }
+    for depID in dependencies {
+      excluded.formUnion(dependencyClosure(of: depID))
+    }
+    return model.actions.all.filter { !excluded.contains($0.id) }
+  }
+
+  /// The transitive closure of `id` including itself: every action reachable
+  /// by following dependencies downward, or dependents upward. Down and up
+  /// use SEPARATE traversed-sets so both directions scan from the root (a
+  /// shared set would make the second direction bail on the root and miss
+  /// the other side, breaking the cycle guard).
+  private func dependencyClosure(of id: UUID) -> Set<UUID> {
+    var result = Set<UUID>()
+    var downSeen = Set<UUID>()
+    var upSeen = Set<UUID>()
+    func down(_ a: Action) {
+      guard downSeen.insert(a.id).inserted else { return }
+      result.insert(a.id)
+      for depID in a.dependencies {
+        if let dep = model.actions.all.first(where: { $0.id == depID }) { down(dep) }
+      }
+    }
+    func up(_ a: Action) {
+      guard upSeen.insert(a.id).inserted else { return }
+      result.insert(a.id)
+      for depend in model.actions.all where depend.dependencies.contains(a.id) {
+        up(depend)
+      }
+    }
+    if let a = model.actions.all.first(where: { $0.id == id }) {
+      down(a); up(a)
+    }
+    return result
   }
 
   var body: some View {
@@ -83,6 +131,58 @@ struct NewActionView: View {
         } footer: {
           Text("Runs in a new terminal with zsh locally, or your shell on the remote host.")
         }
+
+        Section {
+          if !selectedDependencyActions.isEmpty {
+            ForEach(selectedDependencyActions) { dep in
+              HStack {
+                Image(systemName: "checkmark.circle.fill")
+                  .foregroundStyle(.blue)
+                Text(dep.name)
+                Spacer()
+                Button {
+                  dependencies.remove(dep.id)
+                } label: {
+                  Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Remove dependency")
+              }
+            }
+          }
+          if availableDependencies.isEmpty {
+            Text(selectedDependencyActions.isEmpty
+                 ? "No other actions yet — create one first."
+                 : "No more actions can be added (all remaining would recurse).")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          } else {
+            ForEach(availableDependencies) { dep in
+              HStack {
+                Button {
+                  dependencies.insert(dep.id)
+                } label: {
+                  Image(systemName: "plus.circle")
+                    .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Add as a dependency")
+                Text(dep.name)
+                Spacer()
+                if !dep.dependencies.isEmpty {
+                  Text("\(dep.dependencies.count) dep.\(dep.dependencies.count == 1 ? "" : "s")")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                }
+              }
+            }
+          }
+        } header: {
+          Text("Dependencies")
+        } footer: {
+          Text("Each dependency (and its own dependencies) starts ~1 second before this action, so it is running — not necessarily finished.")
+        }
       }
       .formStyle(.grouped)
 
@@ -126,6 +226,9 @@ struct NewActionView: View {
     let excludedConnections = appliesToFutureSSHConnections
       ? model.connections.map(\.id).filter { !sshConnectionIDs.contains($0) }
       : []
+    // Prune any dependency ids that no longer resolve (action deleted) so the
+    // saved action never references a missing action.
+    let dependencyIDs = model.actions.all.filter { dependencies.contains($0.id) }.map(\.id)
     let action = Action(
       id: editing?.id ?? UUID(),
       name: name.trimmingCharacters(in: .whitespaces),
@@ -135,6 +238,7 @@ struct NewActionView: View {
       appliesToFutureSSHConnections: appliesToFutureSSHConnections,
       excludedSSHConnectionIDs: excludedConnections,
       commands: commands,
+      dependencies: dependencyIDs,
       focusWindow: focusWindow,
       keepAfterCompletion: keepAfterCompletion,
       lastUsed: editing?.lastUsed

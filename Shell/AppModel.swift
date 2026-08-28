@@ -946,36 +946,77 @@ final class AppModel {
   }
   
   // MARK: - Actions
-  
+
+  /// Where an action runs: locally (a local pty) or over an SSH exec
+  /// channel. `sshConfig` is nil for local.
+  private enum ActionEnvironment {
+    case local
+    case ssh(SSHConfig)
+
+    var sshConfig: SSHConfig? {
+      if case .ssh(let config) = self { return config }
+      return nil
+    }
+  }
+
   /// Runs `action` by opening a separate terminal session in the selected
   /// session's environment (the local machine, or the same SSH host). With
   /// NO session selected (e.g. nothing is open), defaults to the local
   /// machine so ⌘R stays usable from a fresh start.
+  ///
+  /// Dependencies: when `action` lists dependencies, each unresolved
+  /// dependency — recursively following its OWN dependencies — is started
+  /// FIRST, ~1 second before its dependent. A dependency is guaranteed to be
+  /// *running* (never waited on to completion) when the depending action
+  /// launches. Everything starts in the same target environment; a
+  /// dependency is never focused and never MRU-touched.
   func runAction(_ action: Action) {
     actions.touch(action.id)
-    let spec: ActionSpec
+    guard let environment = currentActionEnvironment else { return }
+    let order = dependencyStartupOrder(for: action)
+    Task { @MainActor [weak self] in
+      guard let self else { return }
+      for (index, a) in order.enumerated() {
+        // Only the action the user actually triggered may retake focus.
+        let isTopLevel = a.id == action.id
+        self.spawnActionSession(a, in: environment, focus: isTopLevel && a.focusWindow)
+        if index != order.count - 1 {
+          try? await Task.sleep(for: .seconds(1))
+        }
+      }
+    }
+  }
+
+  /// The environment an action runs in, resolved once at trigger time from
+  /// the currently selected session. `nil` when there is nothing runnable
+  /// (iOS with no terminal selected — there is no local pty).
+  private var currentActionEnvironment: ActionEnvironment? {
     if let session = selectedSession {
       switch kind(of: session) {
-      case .local, .screen:
-        spec = ActionSpec(action: action, config: nil)
+      case .local, .screen, .action:
+        // Action sessions run in the environment of their target; without
+        // one they fall back to the local machine.
+        return .local
       case .ssh(let config):
-        spec = ActionSpec(action: action, config: config)
-      case .action:
-        // Running an action from an action session falls back to local.
-        spec = ActionSpec(action: action, config: nil)
+        return .ssh(config)
       }
     } else {
       #if os(macOS)
       // Nothing selected (fresh start / nothing open): run locally.
-      spec = ActionSpec(action: action, config: nil)
+      return .local
       #else
       // Local actions need a local pty, which iOS doesn't have; the
       // overlay's applicability filter never offers one there anyway.
-      return
+      return nil
       #endif
     }
-    // The transport picks the environment: a fresh SSH exec channel for
-    // remote actions, a local zsh -lc pty for local ones.
+  }
+
+  /// Launches one action session (local zsh or an SSH exec channel) and
+  /// wires it to archive to history on completion. `focus` is honored only
+  /// for the action the user actually triggered, never for a dependency.
+  private func spawnActionSession(_ action: Action, in environment: ActionEnvironment, focus: Bool) {
+    let spec = ActionSpec(action: action, config: environment.sshConfig)
     let transport: any TerminalTransport
     let startupMessage: String?
     if let config = spec.config {
@@ -999,11 +1040,46 @@ final class AppModel {
       self?.actionSessionCompleted(newSession)
     }
     sessions.append(newSession)
-    if action.focusWindow {
+    if focus {
       selection = newSession.id
       showingActions = false   // you're looking at the run now
     }
     // focusWindow == false: the overlay stays open for queuing more runs.
+  }
+
+  /// Post-order startup sequence for `action` and its transitive
+  /// dependencies: every leaf dependency first, `action` itself last. The
+  /// visited set bounds the recursion so a malformed dependency cycle can't
+  /// loop forever (the picker already prevents cycles).
+  private func dependencyStartupOrder(for action: Action) -> [Action] {
+    var visited = Set<UUID>()
+    var order: [Action] = []
+    func visit(_ a: Action) {
+      guard visited.insert(a.id).inserted else { return }
+      // If a dependency is already running, its prerequisites are satisfied —
+      // don't start it (or its subtree) again; just proceed to the dependent.
+      if a.id != action.id && isActionRunning(a.id) { return }
+      for depID in a.dependencies {
+        if let dep = actions.all.first(where: { $0.id == depID }) {
+          visit(dep)
+        }
+      }
+      order.append(a)
+    }
+    visit(action)
+    return order
+  }
+
+  /// Whether a live action session for `id` is currently running (starting,
+  /// connecting, or connected). Failed/closed sessions don't count.
+  private func isActionRunning(_ id: UUID) -> Bool {
+    sessions.contains { session in
+      guard case .action(let spec) = kind(of: session), spec.action.id == id else { return false }
+      switch session.connectionState {
+      case .starting, .connecting, .connected: return true
+      case .failed, .closed: return false
+      }
+    }
   }
 
   /// Clean exit (0): let the ✓ read for ~2s, then close + remove the row

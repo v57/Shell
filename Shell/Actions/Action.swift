@@ -15,6 +15,12 @@ struct Action: Identifiable, Codable, Hashable {
   /// while future targeting was enabled. Newly created ids are absent.
   var excludedSSHConnectionIDs: [UUID]
   var commands: String           // multi-line shell script
+  /// Actions that must be *running* before this one starts (not awaited to
+  /// completion). Each dependency, and its own dependencies, is started
+  /// first — recursively, ~1 second apart — before this action launches.
+  /// The dependency picker prevents cycles (a selected dependency's closure
+  /// is removed from the candidate list).
+  var dependencies: [UUID]
   /// Bring the new action session to focus when run (else run in
   /// background; the run still shows in the sidebar's Running section).
   var focusWindow: Bool
@@ -33,6 +39,7 @@ struct Action: Identifiable, Codable, Hashable {
     appliesToFutureSSHConnections: Bool = false,
     excludedSSHConnectionIDs: [UUID] = [],
     commands: String = "",
+    dependencies: [UUID] = [],
     focusWindow: Bool = false,
     keepAfterCompletion: Bool = false,
     lastUsed: Date? = nil
@@ -45,6 +52,7 @@ struct Action: Identifiable, Codable, Hashable {
     self.appliesToFutureSSHConnections = appliesToFutureSSHConnections
     self.excludedSSHConnectionIDs = excludedSSHConnectionIDs
     self.commands = commands
+    self.dependencies = dependencies
     self.focusWindow = focusWindow
     self.keepAfterCompletion = keepAfterCompletion
     self.lastUsed = lastUsed
@@ -52,6 +60,7 @@ struct Action: Identifiable, Codable, Hashable {
 
   private enum CodingKeys: String, CodingKey {
     case id, name, category, appliesToLocal, sshConnectionIDs, commands
+    case dependencies
     case appliesToFutureSSHConnections, excludedSSHConnectionIDs
     case focusWindow, keepAfterCompletion, lastUsed
     case appliesToAll // legacy global scope
@@ -76,6 +85,7 @@ struct Action: Identifiable, Codable, Hashable {
       [UUID].self, forKey: .excludedSSHConnectionIDs
     ) ?? []
     commands = try c.decodeIfPresent(String.self, forKey: .commands) ?? ""
+    dependencies = try c.decodeIfPresent([UUID].self, forKey: .dependencies) ?? []
     focusWindow = try c.decodeIfPresent(Bool.self, forKey: .focusWindow) ?? false
     keepAfterCompletion = try c.decodeIfPresent(Bool.self, forKey: .keepAfterCompletion) ?? false
     lastUsed = try c.decodeIfPresent(Date.self, forKey: .lastUsed)
@@ -91,6 +101,7 @@ struct Action: Identifiable, Codable, Hashable {
     try c.encode(appliesToFutureSSHConnections, forKey: .appliesToFutureSSHConnections)
     try c.encode(excludedSSHConnectionIDs, forKey: .excludedSSHConnectionIDs)
     try c.encode(commands, forKey: .commands)
+    try c.encode(dependencies, forKey: .dependencies)
     try c.encode(focusWindow, forKey: .focusWindow)
     try c.encode(keepAfterCompletion, forKey: .keepAfterCompletion)
     try c.encodeIfPresent(lastUsed, forKey: .lastUsed)
