@@ -162,6 +162,13 @@ public struct TerminalScreenView: View {
   @State private var viewportHeight: CGFloat = 0
 
   @FocusState private var focused: Bool
+  /// Whether the iOS on-screen keyboard should be up for this terminal. Driven
+  /// by view LIFECYCLE (onAppear/onDisappear) + focus change, NOT only by the
+  /// `@FocusState` value — a bare `.focusable()` view's FocusState does not
+  /// reliably propagate through a body re-read into a `.background` representable
+  /// on iOS, so the keyboard stayed down on session open. onAppear/onDisappear
+  /// are the robust triggers.
+  @State private var showKeyboard = false
   /// First visible logical line of the scroll view (nil = top).
   @State private var anchorLine: Int?
   @State private var lastGridSize = TerminalGridSize.zero
@@ -178,6 +185,12 @@ public struct TerminalScreenView: View {
     let snapshot = session.snapshot
     let selectionStart = session.selectionStart
     let selectionEnd = session.selectionEnd
+    // The on-screen keyboard (iOS only) is driven by the `showKeyboard` @State
+    // (set in onAppear / onDisappear / tap). SwiftUI @FocusState is NOT used on
+    // iOS at all — it fights the UIKeyInput proxy: the instant the proxy becomes
+    // first responder, SwiftUI resigns it and collapses the keyboard. On macOS
+    // the terminal uses the conventional `focused` SwiftUI focus for its
+    // keyboard-input model (see InputModifier).
 
     if let message = snapshot.message {
       messageView(message)
@@ -195,8 +208,18 @@ public struct TerminalScreenView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
         .onAppear {
+          #if os(iOS)
+          // Raise the on-screen keyboard as soon as the live grid is on screen
+          // (session open) — independent of any SwiftUI focus involvement.
+          showKeyboard = true
+          #endif
           resizeIfNeeded(to: geo.size, safeArea: geo.safeAreaInsets)
         }
+        #if os(iOS)
+        .onDisappear { showKeyboard = false }
+        // The keyboard follows the terminal's on-screen presence and taps, NOT
+        // SwiftUI focus (#FocusState is not used on iOS — it fights the proxy).
+        #endif
         .onChange(of: geo.size) { _, newSize in
           resizeIfNeeded(to: newSize, safeArea: geo.safeAreaInsets)
         }
@@ -205,10 +228,11 @@ public struct TerminalScreenView: View {
           // changing the size; the grid must reflow.
           resizeIfNeeded(to: geo.size, safeArea: newInsets)
         }
-        .modifier(InputModifier(session: session, focused: $focused, anchorLine: $anchorLine))
+        .modifier(InputModifier(session: session, focused: $focused, keyboardOn: showKeyboard, anchorLine: $anchorLine))
         .modifier(SelectionModifier(
           session: session,
           focused: $focused,
+          keyboardOn: $showKeyboard,
           anchorLine: $anchorLine,
           scrollOffset: $scrollOffset,
           viewportHeight: $viewportHeight
@@ -636,7 +660,6 @@ public struct TerminalScreenView: View {
     viewportHeight = size.height - safeArea.bottom
     let columns = max(1, Int(floor((contentWidth - Self.gridPadding * 2) / Self.metrics.cellWidth)))
     let rows = max(1, Int(floor((contentHeight - Self.gridPadding * 2) / Self.metrics.lineHeight)))
-    print(columns, rows)
     let grid = TerminalGridSize(rows: rows, columns: columns)
     guard grid != lastGridSize else { return }
     lastGridSize = grid
@@ -764,15 +787,29 @@ extension TerminalScreenView {
     /// every input channel can reach it (the drag gesture's mouse-down also
     /// grants focus).
     let focused: FocusState<Bool>.Binding
+    /// The focus value as read by the parent body. Passing it as a plain value
+    /// (not just the binding) means a focus change re-evaluates this subtree,
+    /// which is what re-invokes the iOS keyboard bridge's updateUIView and lets
+    /// the hidden UIKeyInput proxy become first responder.
+    let keyboardOn: Bool
     /// Anchor binding: Cmd+K / typing snap back to the bottom after the
     /// content height changes (see ScrollModifier.snapToBottom).
     @Binding var anchorLine: Int?
 
     func body(content: Content) -> some View {
+      // macOS: the terminal holds SwiftUI focus (needed for .onKeyPress and the
+      // Edit menu focus model), so it's `.focusable()` + `.focused()`.
+      // iOS: DO NOT use `.focusable()/.focused()`/@FocusState. SwiftUI's focus
+      // coordinator fights the UIKit first responder: the instant the hidden
+      // UITextView proxy becomes first responder, SwiftUI resigns it and the
+      // keyboard collapses (oscillating WillShow→DidHide→DidShow→…). The
+      // software keyboard is owned by the proxy alone, driven by `keyboardOn`
+      // (set from onAppear/onDisappear/tap), so iOS must not participate in
+      // SwiftUI focus at all.
       content
+        #if os(macOS)
         .focusable()
         .focused(focused)
-        #if os(macOS)
         .focusEffectDisabled()
         #endif
         .onKeyPress { press in
@@ -782,21 +819,21 @@ extension TerminalScreenView {
         .onPasteCommand(of: [UTType.plainText, UTType.utf8PlainText]) { _ in
           pasteFromPasteboard()
         }
-        #endif
         .onAppear {
           // Focus must be granted after the view is in the hierarchy.
           DispatchQueue.main.async { focused.wrappedValue = true }
         }
+        #endif
         #if os(iOS)
         .background {
           // iOS never raises the on-screen keyboard for a bare `.focusable()`
           // view: it is not a text-input responder, so SwiftUI focus alone can
           // never summon the software keyboard (and `.onKeyPress` only delivers
-          // HARDWARE keystrokes). An invisible UIKeyInput proxy becomes first
-          // responder when the terminal holds focus — raising the keyboard —
-          // and forwards the typed characters/backspace to the session.
-          TerminalKeyboardBridge(session: session, focused: focused)
-            .frame(width: 0, height: 0)
+          // HARDWARE keystrokes). An invisible UITextView proxy becomes first
+          // responder (raising the keyboard) and forwards the typed characters/
+          // backspace to the session.
+          TerminalKeyboardBridge(session: session, isFocused: keyboardOn)
+            .frame(width: 1, height: 1)
             .allowsHitTesting(false)
         }
         #endif
@@ -895,8 +932,13 @@ extension TerminalScreenView {
   struct SelectionModifier: ViewModifier {
     @Bindable var session: TerminalSession
     /// Granted on mouse-down so the first click also routes the keyboard to
-    /// the terminal (owned by the parent view, see InputModifier).
+    /// the terminal (owned by the parent view, see InputModifier). macOS only —
+    /// on iOS SwiftUI focus is NOT used (it fights the UIKeyInput proxy), so a
+    /// tap instead raises the software keyboard via `keyboardOn`.
     let focused: FocusState<Bool>.Binding
+    /// On iOS, a tap on the grid raises the on-screen keyboard (the proxy is the
+    /// sole first responder; there is no @FocusState). macOS uses `focused`.
+    @Binding var keyboardOn: Bool
     /// Shared with ScrollModifier: auto-scroll during a drag moves the anchor.
     @Binding var anchorLine: Int?
     /// Shared with ScrollModifier: hit-testing maps clicks through the
@@ -922,7 +964,13 @@ extension TerminalScreenView {
     private var dragGesture: some Gesture {
       DragGesture(minimumDistance: 0, coordinateSpace: .local)
         .onChanged { value in
+          #if os(iOS)
+          // Tap the grid -> raise the software keyboard (proxy is the only
+          // UIKit first responder; @FocusState is avoided on iOS).
+          keyboardOn = true
+          #else
           focused.wrappedValue = true
+          #endif
           let location = value.location
           let padding = TerminalScreenView.gridPadding
           handleDragChanged(at: CGPoint(x: location.x - padding, y: location.y - padding))
@@ -1096,20 +1144,79 @@ import UIKit
 // follows SwiftUI focus and forwards the keystrokes through the SAME
 // TerminalSession.handleKey(...) path the macOS keyboard uses.
 
-/// The terminal's invisible software-keyboard proxy.
-private final class TerminalKeyInput: UIView, UIKeyInput {
+/// The terminal's invisible software-keyboard proxy. A real UITextView (rather
+/// than a bare UIView conforming to UIKeyInput) because UIKit reliably summons
+/// the on-screen keyboard for a UITextView first responder; a plain UIKeyInput
+/// UIView does not always raise it from inside a SwiftUI hosting view. Typed
+/// characters are forwarded straight to the session and never stored in the
+/// view's own text buffer (super is never called in the input overrides).
+private final class TerminalKeyInput: UITextView {
   /// The session the typed characters are forwarded to (weak: the session is
   /// owned by the app model, not by this input view).
   weak var session: TerminalSession?
 
+  override init(frame: CGRect, textContainer: NSTextContainer?) {
+    super.init(frame: frame, textContainer: textContainer)
+    configureForTerminal()
+  }
+
+  required init?(coder: NSCoder) {
+    super.init(coder: coder)
+    configureForTerminal()
+  }
+
   override var canBecomeFirstResponder: Bool { true }
 
-  func insertText(_ text: String) {
-    guard let session else { return }
+  /// Re-sync first responder as soon as the proxy lands in a window. The first
+  /// updateUIView can fire BEFORE the view is installed in a real key window
+  /// (session opening / split-view detail transition), so becomeFirstResponder()
+  /// silently fails; a window-change is the reliable signal to retry against the
+  /// LATEST intent (applyFocus keeps wantsFirstResponder current).
+  override func didMoveToWindow() {
+    super.didMoveToWindow()
+    if window != nil { syncFirstResponder() }
+  }
+
+  /// The view's own text buffer is always empty (we never call super in the
+  /// input overrides), so `hasText` would normally be false — which makes the
+  /// keyboard's backspace key grey out. The terminal buffer is the real content,
+  /// so report true so every key (incl. backspace/return) stays enabled.
+  override var hasText: Bool { true }
+
+  /// The keyboard must show, so the view stays editable; every other affordance
+  /// is stripped so it acts as a dumb keystroke conduit with no text UI of its
+  /// own (no autocorrect/autocapitalize/caret/selection).
+  private func configureForTerminal() {
+    isEditable = true
+    // NOT false: an editable-but-not-selectable UITextView is not reliably
+    // granted the on-screen keyboard — UIKit requires the responder to be a
+    // live text-input (editable AND selectable) before it raises the keyboard
+    // for it. Nothing is visible/selectable in practice because text & tint are
+    // .clear, the frame is 1x1, and hit-testing is off, so selectable adds no
+    // UI while guaranteeing the keyboard rises.
+    isSelectable = true
+    isScrollEnabled = false
+    backgroundColor = .clear
+    textColor = .clear
+    tintColor = .clear
+    autocorrectionType = .no
+    autocapitalizationType = .none
+    spellCheckingType = .no
+    smartInsertDeleteType = .no
+    smartQuotesType = .no
+    smartDashesType = .no
+    keyboardType = .asciiCapable
+    inputAssistantItem.leadingBarButtonGroups = []
+    inputAssistantItem.trailingBarButtonGroups = []
+  }
+
+  override func insertText(_ text: String) {
     // The software keyboard may deliver several characters in one call, and the
     // return key delivers "\n". Route each so newline -> CR (keyCode .return)
     // as the macOS onKeyPress path does, and everything else goes down the
-    // printable-character path (keyCode 0).
+    // printable-character path (keyCode 0). Never call super: the terminal
+    // buffer is owned by the session, not by this text view.
+    guard let session else { return }
     for char in text {
       if char == "\n" || char == "\r" {
         session.handleKey(
@@ -1130,7 +1237,7 @@ private final class TerminalKeyInput: UIView, UIKeyInput {
     }
   }
 
-  func deleteBackward() {
+  override func deleteBackward() {
     session?.handleKey(
       characters: "\u{7f}",
       charactersIgnoringModifiers: nil,
@@ -1139,19 +1246,78 @@ private final class TerminalKeyInput: UIView, UIKeyInput {
     )
   }
 
-  var hasText: Bool { true }
+  /// The latest desired first-responder state. A becomeFirstResponder() retry
+  /// re-checks THIS (not a captured stale `true`), so a keyboard dismissed by
+  /// the user while a retry is pending resigns instead of fighting to re-raise.
+  private(set) var wantsFirstResponder = false
+  /// The in-flight continuous retry dispatcher, so a new intent cancels it and
+  /// a satisfied/detached view stops polling.
+  private var focusRetryWork: DispatchWorkItem?
+
+  /// Align the UIKit first responder with SwiftUI focus. Called from the
+  /// bridge whenever the focus value changes.
+  func applyFocus(wantFirstResponder: Bool) {
+    wantsFirstResponder = wantFirstResponder
+    focusRetryWork?.cancel()
+    syncFirstResponder()
+  }
+
+  /// Become first responder (raising the keyboard) while the terminal wants it,
+  /// retrying CONTINUOUSLY until it sticks, the intent changes, or the view is
+  /// not in a window. A bounded few-tick retry is not enough for a two-column
+  /// `NavigationSplitView` (iPhone landscape / iPad with visible sidebar): the
+  /// detail's window can take a beat to become KEY after the sidebar selection,
+  /// so `becomeFirstResponder()` silently fails every bounded attempt and, once
+  /// they're exhausted, a later tap doesn't re-trigger (SwiftUI sees no value
+  /// change). Using a key-window guard + continuous retry covers that transition.
+  private func syncFirstResponder() {
+    guard wantsFirstResponder else {
+      if isFirstResponder { _ = resignFirstResponder() }
+      return
+    }
+    guard !isFirstResponder else { return }
+    // Only become first responder in a KEY window; otherwise wait. Keep polling
+    // only while we're actually installed in a window (a detached view re-arms
+    // via didMoveToWindow instead of spinning).
+    guard window?.isKeyWindow == true else {
+      if window != nil { scheduleFocusRetry() }
+      return
+    }
+    if becomeFirstResponder() { return }
+    scheduleFocusRetry()
+  }
+
+  private func scheduleFocusRetry() {
+    focusRetryWork?.cancel()
+    let item = DispatchWorkItem { [weak self] in self?.syncFirstResponder() }
+    focusRetryWork = item
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: item)
+  }
+
+  /// If the system dismisses the keyboard (interactive swipe / hardware) while
+  /// we still want first responder, stop the retry loop — don't fight the user.
+  override func resignFirstResponder() -> Bool {
+    let ok = super.resignFirstResponder()
+    if ok, wantsFirstResponder {
+      wantsFirstResponder = false
+      focusRetryWork?.cancel()
+    }
+    return ok
+  }
 }
 
 /// SwiftUI host for `TerminalKeyInput`. Synchronizes SwiftUI focus with the
 /// UIKit first responder so the on-screen keyboard follows the terminal's
 /// focus: appear / tap -> become first responder (keyboard up), focus lost ->
-/// resign (keyboard down).
+/// resign (keyboard down). `isFocused` is a PLAIN bool captured by the parent
+/// body, so a focus change produces a new representable value and SwiftUI
+/// re-invokes updateUIView with it.
 private struct TerminalKeyboardBridge: UIViewRepresentable {
   let session: TerminalSession
-  let focused: FocusState<Bool>.Binding
+  let isFocused: Bool
 
   func makeUIView(context: Context) -> TerminalKeyInput {
-    let view = TerminalKeyInput()
+    let view = TerminalKeyInput(frame: .zero)
     view.session = session
     return view
   }
@@ -1160,13 +1326,7 @@ private struct TerminalKeyboardBridge: UIViewRepresentable {
     uiView.session = session
     // becomeFirstResponder()/resignFirstResponder() can't be called from inside
     // a layout pass, so defer to the next runloop tick.
-    DispatchQueue.main.async {
-      if focused.wrappedValue {
-        if !uiView.isFirstResponder { uiView.becomeFirstResponder() }
-      } else {
-        if uiView.isFirstResponder { uiView.resignFirstResponder() }
-      }
-    }
+    DispatchQueue.main.async { uiView.applyFocus(wantFirstResponder: isFocused) }
   }
 }
 #endif
