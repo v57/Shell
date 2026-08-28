@@ -29,7 +29,9 @@ public actor LocalProcessCommandRunner: FileCommandExecutor {
     #if os(macOS)
       let process = Process()
       process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-      process.arguments = ["-lc", command]
+      // -lic sources ~/.zshrc so the user's interactive PATH (e.g. bun) is
+      // available, not just login-level env. -c keeps it one-shot/headless.
+      process.arguments = ["-lic", command]
       process.currentDirectoryURL = URL(fileURLWithPath: dir)
       process.environment = ProcessInfo.processInfo.environment
 

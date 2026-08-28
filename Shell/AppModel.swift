@@ -1024,12 +1024,15 @@ final class AppModel {
       startupMessage = "Connecting to \(config.host)…"
     } else {
       #if os(macOS)
-      transport = LocalPTYTransport(executable: "/bin/zsh", argv: ["zsh", "-lc", spec.action.commands])
+      // -lic (login + interactive + command) sources ~/.zshrc so the
+      // user's environment (e.g. bun's PATH in ~/.zshrc) is present when
+      // the action runs. Plain -lc is non-interactive and skips .zshrc.
+      transport = LocalPTYTransport(executable: "/bin/zsh", argv: ["zsh", "-lic", spec.action.commands])
       startupMessage = nil
       #else
       // Local actions need a local pty, which iOS doesn't have. This
-      // branch is unreachable on iOS: the actions overlay's applicability
-      // filter never offers a local action (no local/screen sessions).
+      // branch is unreachable on iOS: dependencies resolve to .local only
+      // where a pty exists.
       preconditionFailure("Local actions require a local pty (macOS only)")
       #endif
     }
@@ -1189,7 +1192,9 @@ final class AppModel {
       ),
       config: nil
     )
-    let transport = LocalPTYTransport(executable: "/bin/zsh", argv: ["zsh", "-lc", command])
+    // -lic sources ~/.zshrc (same reasoning as runAction): a bun or other
+    // tool added to PATH in .zshrc must be visible for the smart action.
+    let transport = LocalPTYTransport(executable: "/bin/zsh", argv: ["zsh", "-lic", command])
     let newSession = TerminalSession(transport: transport)
     sessionKinds[newSession.id] = .action(spec)
     registerActionCapture(for: newSession, seedCommand: command)
