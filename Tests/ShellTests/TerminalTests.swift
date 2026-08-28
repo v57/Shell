@@ -454,6 +454,74 @@ struct SelectionHitTestingTests {
   }
 }
 
+/// Which cells the drag selection highlights, given the anchor (`start`) and
+/// the live drag endpoint (`end`). Regression coverage for the down-left /
+/// up-right bug: the highlight was anchored by min/max of the two columns,
+/// so dragging down-left jumped the top row's left edge to the drag column
+/// and pinned the bottom row's right edge to the anchor's column — moving
+/// the "start" left and the "end" to the initial x. The highlight must anchor
+/// by the endpoint sitting on each row, matching plainText(logicalFrom:to:).
+struct CellSelectionTests {
+  // anchor on an upper row at col 20, drag down-left to col 5 on a lower row.
+  @Test func downLeftDragAnchorsByRow() {
+    let start = TerminalCursor(row: 5, column: 20)
+    let end = TerminalCursor(row: 8, column: 5)
+    // Top row: highlight starts at the anchor column, NOT the drag column.
+    #expect(isCellSelected(line: 5, column: 19, start: start, end: end) == false)
+    #expect(isCellSelected(line: 5, column: 20, start: start, end: end) == true)
+    #expect(isCellSelected(line: 5, column: 79, start: start, end: end) == true)
+    // Middle rows are fully selected.
+    #expect(isCellSelected(line: 6, column: 0, start: start, end: end) == true)
+    #expect(isCellSelected(line: 7, column: 79, start: start, end: end) == true)
+    // Bottom row: highlight ends at the drag column, NOT the anchor column.
+    #expect(isCellSelected(line: 8, column: 5, start: start, end: end) == true)
+    #expect(isCellSelected(line: 8, column: 6, start: start, end: end) == false)
+    // Rows outside the span are not selected.
+    #expect(isCellSelected(line: 4, column: 20, start: start, end: end) == false)
+    #expect(isCellSelected(line: 9, column: 5, start: start, end: end) == false)
+  }
+
+  // mirror case: anchor on a lower row at col 5, drag up-right to col 20.
+  @Test func upRightDragAnchorsByRow() {
+    let start = TerminalCursor(row: 8, column: 5)
+    let end = TerminalCursor(row: 5, column: 20)
+    #expect(isCellSelected(line: 5, column: 19, start: start, end: end) == false)
+    #expect(isCellSelected(line: 5, column: 20, start: start, end: end) == true)
+    #expect(isCellSelected(line: 6, column: 0, start: start, end: end) == true)
+    #expect(isCellSelected(line: 8, column: 5, start: start, end: end) == true)
+    #expect(isCellSelected(line: 8, column: 6, start: start, end: end) == false)
+  }
+
+  // end on the same row as start: a plain column range of the two columns.
+  @Test func sameRowSelectsColumnRange() {
+    let start = TerminalCursor(row: 3, column: 5)
+    let end = TerminalCursor(row: 3, column: 9)
+    #expect(isCellSelected(line: 3, column: 4, start: start, end: end) == false)
+    #expect(isCellSelected(line: 3, column: 5, start: start, end: end) == true)
+    #expect(isCellSelected(line: 3, column: 9, start: start, end: end) == true)
+    #expect(isCellSelected(line: 3, column: 10, start: start, end: end) == false)
+  }
+
+  // dragging straight down at the same column: the top row starts at the
+  // anchor column (nothing left of it), and the bottom row ends at the drag
+  // column. Bottom row's left side (0..drag column) is selected.
+  @Test func straightDownTopRowStartsAtAnchorColumn() {
+    let start = TerminalCursor(row: 0, column: 7)
+    let end = TerminalCursor(row: 2, column: 7)
+    #expect(isCellSelected(line: 0, column: 7, start: start, end: end) == true)
+    #expect(isCellSelected(line: 0, column: 8, start: start, end: end) == true) // extends right of anchor on top row
+    #expect(isCellSelected(line: 0, column: 6, start: start, end: end) == false) // nothing left of the anchor on top row
+    #expect(isCellSelected(line: 2, column: 7, start: start, end: end) == true) // ends at drag column
+    #expect(isCellSelected(line: 2, column: 6, start: start, end: end) == true) // left of drag column is selected
+    #expect(isCellSelected(line: 2, column: 8, start: start, end: end) == false) // past drag column not selected
+  }
+
+  // No selection (nil endpoints) selects nothing.
+  @Test func nilEndpointsSelectNothing() {
+    #expect(isCellSelected(line: 3, column: 0, start: nil, end: nil) == false)
+  }
+}
+
 /// The sidebar-status pin: clicking a character shows the line FROM that
 /// character (offset mode) or the whole line (full-line mode). The mode is
 /// sticky across line changes; you only switch it on the currently observed

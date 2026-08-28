@@ -26,14 +26,24 @@ public func isCellSelected(line: Int, column: Int, start: TerminalCursor?, end: 
   let top = min(start.row, end.row)
   let bottom = max(start.row, end.row)
   guard line >= top && line <= bottom else { return false }
+  // The endpoint sitting on the TOP row sets the left edge of the highlight
+  // there; the endpoint on the BOTTOM row sets the right edge there. This
+  // mirrors plainText(logicalFrom:to:) so the highlight and the copied text
+  // always agree. Anchoring by min/max of the two columns alone is wrong:
+  // dragging down-left (anchor col 20 on an upper row, drag col 5 on a lower
+  // row) would highlight the top row from col 5 — the start jumps left — and
+  // the bottom row to col 20 — the end snaps to the initial x — instead of
+  // top-row-from-20 and bottom-row-to-5.
+  let topColumn = start.row <= end.row ? start.column : end.column
+  let bottomColumn = start.row <= end.row ? end.column : start.column
   if top == bottom {
-    return column >= min(start.column, end.column) && column <= max(start.column, end.column)
+    return column >= min(topColumn, bottomColumn) && column <= max(topColumn, bottomColumn)
   }
   if line == top {
-    return column >= min(start.column, end.column)
+    return column >= topColumn
   }
   if line == bottom {
-    return column <= max(start.column, end.column)
+    return column <= bottomColumn
   }
   return true
 }
