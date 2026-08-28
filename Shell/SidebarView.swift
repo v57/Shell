@@ -20,7 +20,13 @@ struct SidebarView: View {
   /// The stats graphs sheet, opened by clicking the Local section header.
   @State private var showingStatsGraphs = false
   #endif
-  
+
+  /// Collapse state for each sidebar section, persisted across launches.
+  @AppStorage("sidebar.running.collapsed") private var runningCollapsed = false
+  @AppStorage("sidebar.local.collapsed") private var localCollapsed = false
+  @AppStorage("sidebar.remote.collapsed") private var remoteCollapsed = false
+  @AppStorage("sidebar.notes.collapsed") private var notesCollapsed = false
+
   private var localSessions: [TerminalSession] {
     model.sessions.filter { model.kind(of: $0) == .local }
   }
@@ -29,8 +35,8 @@ struct SidebarView: View {
     @Bindable var model = model
     List(selection: $model.selection) {
       if !model.actionSessions.isEmpty {
-        Section("Running") {
-          ForEach(model.actionSessions) { session in
+        Section {
+          ForEach(runningCollapsed ? [] : model.actionSessions) { session in
             ActionRunRow(session: session, spec: model.actionSpec(for: session))
               .tag(session.id)   // mandatory: untagged rows write nil into selection
               .contextMenu {
@@ -42,18 +48,23 @@ struct SidebarView: View {
                 }
               }
           }
+        } header: {
+          HStack(spacing: 4) {
+            sidebarCollapseChevron(collapsed: $runningCollapsed)
+            Text("Running")
+          }
         }
       }
 
       #if os(macOS)
       Section {
         if model.historyMode {
-          ForEach(model.history.sessions) { record in
+          ForEach(localCollapsed ? [] : model.history.sessions) { record in
             HistorySessionRow(session: record)
               .tag(record.id)
           }
         } else {
-          ForEach(localSessions) { session in
+          ForEach(localCollapsed ? [] : localSessions) { session in
             SessionRow(
               session: session,
               defaultLabel: model.displayName(for: session),
@@ -74,7 +85,7 @@ struct SidebarView: View {
               }
             }
           }
-          ForEach(model.screenMonitor.sessions) { info in
+          ForEach(localCollapsed ? [] : model.screenMonitor.sessions) { info in
             ScreenSessionRow(
               info: info,
               isRenaming: renamingScreenName == info.name,
@@ -98,7 +109,7 @@ struct SidebarView: View {
               }
             }
           }
-          ForEach(model.remoteScreenSessions) { info in
+          ForEach(localCollapsed ? [] : model.remoteScreenSessions) { info in
             ScreenSessionRow(
               info: info,
               isRenaming: false,
@@ -128,6 +139,7 @@ struct SidebarView: View {
         }
       } header: {
         HStack {
+          sidebarCollapseChevron(collapsed: $localCollapsed)
           #if os(macOS)
           if model.historyMode {
             Text("Local History")
@@ -181,7 +193,7 @@ struct SidebarView: View {
       #endif // os(macOS) — Local section (no local terminals on iOS)
 
       Section {
-        ForEach(model.connections) { config in
+        ForEach(remoteCollapsed ? [] : model.connections) { config in
           SSHConfigGroup(
             config: config,
             renamingSessionID: renamingSessionID,
@@ -196,6 +208,7 @@ struct SidebarView: View {
         }
       } header: {
         HStack {
+          sidebarCollapseChevron(collapsed: $remoteCollapsed)
           Text("Remote")
           Spacer()
           Button {
@@ -207,7 +220,7 @@ struct SidebarView: View {
       }
 
       Section {
-        ForEach(model.notes.notes) { note in
+        ForEach(notesCollapsed ? [] : model.notes.notes) { note in
           NoteRow(note: note)
             .tag(note.id)
             .contextMenu {
@@ -218,6 +231,7 @@ struct SidebarView: View {
         }
       } header: {
         HStack {
+          sidebarCollapseChevron(collapsed: $notesCollapsed)
           Text("Notes")
           Spacer()
           Button {
@@ -346,6 +360,23 @@ struct SidebarView: View {
   private func commitRename(_ id: UUID, _ name: String) {
     model.renameSession(id, to: name)
     renamingSessionID = nil
+  }
+
+  /// A leading disclosure triangle that collapses/expands a sidebar section.
+  /// Collapsing hides the section's rows; the header (and its action buttons)
+  /// stays visible so the controls remain reachable. chevron.down = expanded,
+  /// chevron.right = collapsed.
+  private func sidebarCollapseChevron(collapsed: Binding<Bool>) -> some View {
+    Button {
+      collapsed.wrappedValue.toggle()
+    } label: {
+      Image(systemName: collapsed.wrappedValue ? "chevron.right" : "chevron.down")
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+        .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .help(collapsed.wrappedValue ? "Expand section" : "Collapse section")
   }
   
   #if os(macOS)
