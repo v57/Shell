@@ -47,6 +47,27 @@ enum FeatureID: String, CaseIterable, Identifiable {
     case .database: return "Database"
     }
   }
+
+  /// A short, human-readable explanation of what the feature does, surfaceable
+  /// alongside `label` on a settings toggle row.
+  var description: String {
+    switch self {
+    case .sessions: return "Local terminal sessions"
+    case .screen: return "GNU screen / tmux persistent sessions"
+    case .ssh: return "SSH connections and remote terminals"
+    case .notes: return "Encrypted notes"
+    case .history: return "Local command history"
+    case .actions: return "Saved commands and actions"
+    case .smartActions: return "Per-directory project actions"
+    case .monitoring: return "Live CPU / GPU / wattage stats"
+    case .files: return "Files panel and file browsing"
+    case .themes: return "Color themes and terminal backgrounds"
+    case .authorizedKeys: return "SSH authorized keys"
+    case .settings: return "Shell settings"
+    case .web: return "In-app web sessions"
+    case .database: return "Database connections"
+    }
+  }
 }
 
 /// Persists which features are disabled, backed by `UserDefaults`.
@@ -97,6 +118,23 @@ final class FeatureFlagsStore {
     guard next != disabledRaw else { return }
     disabledRaw = next
     persist()
+  }
+
+  /// True on a fresh install, until the user has made a first feature
+  /// selection (or dismissed the welcome once). "Unset" means the
+  /// disabled-set key has never been written to `UserDefaults` — distinct
+  /// from "all enabled", which still leaves the key unset until the first
+  /// selection is committed.
+  var needsFirstLaunchSelection: Bool {
+    defaults.object(forKey: Self.disabledKey) == nil
+  }
+
+  /// Records that the user has seen and passed the first-launch "choose your
+  /// features" welcome, so it does not reappear on every launch. Commits the
+  /// CURRENT selection (even when empty) just by writing the disabled-set key;
+  /// this never touches any feature's own persisted data.
+  func markConfigured() {
+    defaults.set(disabledRaw.sorted(), forKey: Self.disabledKey)
   }
 
   private func reload() {

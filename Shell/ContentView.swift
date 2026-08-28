@@ -26,6 +26,9 @@ struct ContentView: View {
   @State private var activeDirectoryURL: URL?
   /// The picker's currently selected smart-action target (nil = all/project).
   @State private var smartActionsTarget: String?
+  /// Presents the first-launch "choose your features" welcome sheet on a fresh
+  /// install, when the feature-flags store has never been configured.
+  @State private var showFirstLaunchWelcome = false
   private let directoryTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
   var body: some View {
@@ -160,6 +163,12 @@ struct ContentView: View {
       .sheet(isPresented: $model.showingThemes) {
         ThemesView()
       }
+      // First-launch "choose your features" welcome (FeatureSelectionView as a
+      // sheet). Present once, when the feature-flags store has never been
+      // configured; Continue records the selection via markConfigured().
+      .sheet(isPresented: $showFirstLaunchWelcome) {
+        FeatureWelcomeView()
+      }
       // Notes: refresh on activation (no-push sync trigger — re-fetch shows
       // changes the CloudKit store pulled while the app ran) and flush
       // pending edits when leaving the active scene (also flushed on quit
@@ -212,6 +221,11 @@ struct ContentView: View {
       // Set the browser up for the initially-selected session (onChange does
       // not fire for the initial value).
       syncFileBrowser()
+      // First-launch welcome: show the "choose your features" sheet once, when
+      // the feature-flags store has never been configured.
+      if FeatureFlagsStore.shared.needsFirstLaunchSelection {
+        showFirstLaunchWelcome = true
+      }
     }
     .onReceive(directoryTimer) { _ in
       refreshLocalDirectory()

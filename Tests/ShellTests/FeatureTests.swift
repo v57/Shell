@@ -407,6 +407,71 @@ struct FeatureTests {
     let reloadedAgain = FeatureFlagsStore(defaults: defaults)
     #expect(reloadedAgain.isEnabled(.notes))
   }
+
+  /// First-launch detection is driven purely by whether the disabled-set key
+  /// has ever been written: absent = welcome due; present = configured. A
+  /// first toggle commits it, and an explicit `markConfigured()` (welcome
+  /// dismissed without changing anything) commits it too — and neither touches
+  /// any feature's own persisted data.
+  @Test @MainActor func featureFlagsFirstLaunchDetection() throws {
+    // Fresh install: key absent -> the welcome sheet is due.
+    let suite = "ShellFeatureFlagsFirstLaunch-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let store = FeatureFlagsStore(defaults: defaults)
+    #expect(store.needsFirstLaunchSelection)
+    #expect(store.disabledRaw.isEmpty)
+
+    // Every toggleable feature has a label and a description for its row.
+    for feature in FeatureID.allCases {
+      #expect(!feature.label.isEmpty, "label for \(feature.rawValue)")
+      #expect(!feature.description.isEmpty, "description for \(feature.rawValue)")
+    }
+
+    // A first toggle commits the disabled-set key -> the welcome is no longer due.
+    store.setEnabled(false, for: .sessions)
+    #expect(!store.needsFirstLaunchSelection)
+    #expect(!store.isEnabled(.sessions))
+
+    // markConfigured() on a separate suite writes the key even when the
+    // selection is left empty (welcome dismissed unchanged) — no data touched.
+    let suite2 = "ShellFeatureFlagsWelcomeDismiss-\(UUID().uuidString)"
+    let defaults2 = try #require(UserDefaults(suiteName: suite2))
+    defer { defaults2.removePersistentDomain(forName: suite2) }
+    let fresh = FeatureFlagsStore(defaults: defaults2)
+    #expect(fresh.needsFirstLaunchSelection)
+    fresh.markConfigured()
+    #expect(!fresh.needsFirstLaunchSelection)
+    #expect(fresh.disabledRaw.isEmpty)   // no feature data touched
+    #expect(fresh.isEnabled(.web))       // all features still default on
+  }
+
+  /// The Screen feature's poller is gated: disabling the feature stops (and
+  /// prevents arming) the 5s poller, so a disabled feature holds no running
+  /// timer and its state stays empty. Uses an injected hermetic store so the
+  /// shared `AppModel`/store are untouched.
+  @Test @MainActor func screenMonitorPollerGatedByFeatureFlag() throws {
+    let suite = "ShellScreenGateTests-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+
+    let features = FeatureFlagsStore(defaults: defaults)
+
+    // Feature ON: start() arms the 5s poller; stop() tears it down.
+    features.setEnabled(true, for: .screen)
+    let monitor = ScreenSessionsMonitor(features: features)
+    monitor.start()
+    #expect(monitor.isPolling)
+    monitor.stop()
+    #expect(!monitor.isPolling)
+
+    // Feature OFF: start() is a no-op — no poller, empty published state.
+    features.setEnabled(false, for: .screen)
+    let off = ScreenSessionsMonitor(features: features)
+    off.start()
+    #expect(!off.isPolling)
+    #expect(off.sessions.isEmpty)
+  }
 }
 
 /// Opt-in because unsigned command-line test hosts cannot reliably access the
