@@ -95,6 +95,10 @@ private struct SettingsActionsCard: View {
 
   var body: some View {
     VStack(spacing: 0) {
+      actionRow("New Connection", systemImage: "plus") {
+        model.showingNewConnection = true
+      }
+      Divider()
       actionRow("Actions…", systemImage: "folder") {
         model.showingActions = true
       }
@@ -125,6 +129,10 @@ private struct SettingsActionsCard: View {
       Divider()
       actionRow("Copy SSH Public Key", systemImage: "key") {
         model.copyPublicKey()
+      }
+      Divider()
+      actionRow("Authorized Keys", systemImage: "key.2.on.ring") {
+        model.openLocalAuthorizedKeys()
       }
     }
   }
