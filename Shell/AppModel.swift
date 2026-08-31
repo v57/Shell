@@ -4,7 +4,7 @@ import AppKit
 import UIKit
 #endif
 import CoreData
-import Crypto
+import CryptoKit
 import Foundation
 import Observation
 import SwiftData

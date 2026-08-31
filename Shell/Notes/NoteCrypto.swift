@@ -1,4 +1,4 @@
-import Crypto
+import CryptoKit
 import Foundation
 
 /// Identifies which key decrypts a note. Stored on every `NoteRecord`

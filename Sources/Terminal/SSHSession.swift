@@ -1,4 +1,4 @@
-import Crypto
+import CryptoKit
 import Foundation
 
 /// Main-actor SSH transport over `Libssh2Connection`. Exposes the

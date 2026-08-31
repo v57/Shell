@@ -8,7 +8,6 @@ let package = Package(
     platforms: [.macOS(.v15), .iOS(.v18)],
     products: [.library(name: "Terminal", targets: ["Terminal"]), .library(name: "TerminalIntegrations", targets: ["TerminalIntegrations"]), .library(name: "Monitoring", targets: ["Monitoring"]), .library(name: "DatabaseEngines", targets: ["DatabaseEngines"])],
     dependencies: [
-        .package(url: "https://github.com/apple/swift-crypto", from: "4.0.0"),
         // Local Database package (MongoDB / PostgreSQL / Redis / SQLite engine
         // libraries). All four engines are cross-platform — the C-driver
         // XCFramework (Cdrivers) ships iOS device + simulator slices, and
@@ -22,7 +21,6 @@ let package = Package(
         .target(
             name: "Terminal",
             dependencies: [
-                .product(name: "Crypto", package: "swift-crypto"),
                 // The libssh2 + mbedTLS static library is merged into the
                 // Database package's Cdrivers XCFramework, surfaced as the
                 // CLibssh2 module (consumed by Libssh2Connection). Depending

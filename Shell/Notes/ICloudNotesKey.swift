@@ -1,4 +1,4 @@
-import Crypto
+import CryptoKit
 import Foundation
 
 /// The AES-256 key that encrypts iCloud-synced notes. See `ICloudSyncKey`

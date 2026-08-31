@@ -1,4 +1,4 @@
-import Crypto
+import CryptoKit
 import Foundation
 
 /// Key mapping for synced SSH config records. Mirrors `NoteKeyID`:
