@@ -24,3 +24,6 @@ graphify-out/
 
 # LLVM code coverage artifacts
 *.profraw
+
+# libssh2 cross-compile scratch (cached sources, per-slice .a, staged headers)
+/Binary/SSH-libssh2/build/

@@ -1,0 +1,4 @@
+module CLibssh2 [system] {
+    header "libssh2.h"
+    export *
+}
