@@ -1,8 +1,7 @@
 import Crypto
 import Foundation
-import NIOSSH
 
-/// Main-actor SSH transport over `SSHConnectionEngine`. Exposes the
+/// Main-actor SSH transport over `Libssh2Connection`. Exposes the
 /// connection lifecycle and UI-facing prompts (host-key verification,
 /// password entry) to the terminal session.
 @MainActor
@@ -24,7 +23,7 @@ public final class SSHSession: TerminalTransport {
   public var onHostKeyPrompt: ((TerminalHostKeyPrompt) -> Void)?
   public var onPasswordPrompt: ((TerminalPasswordPrompt) -> Void)?
 
-  private var engine: SSHConnectionEngine?
+  private var engine: Libssh2Connection?
   private var started = false
 
   public init(config: SSHConfig, execCommand: String? = nil, forwardingOnly: Bool = false) {
@@ -39,7 +38,7 @@ public final class SSHSession: TerminalTransport {
 
     // The identity key lives in the Secure Enclave; it never touches disk.
     let key = try? SSHKeychain.loadOrCreateDefaultKey()
-    let engine = SSHConnectionEngine(
+    let engine = Libssh2Connection(
       config: config,
       privateKey: key,
       execCommand: execCommand,
@@ -108,7 +107,7 @@ public final class SSHSession: TerminalTransport {
   /// scanner gates on `connectionState == .connected` before calling.
   public func runCommand(_ command: String, completion: @escaping @Sendable (Result<String, Error>) -> Void) {
     guard let engine else {
-      completion(.failure(SSHConnectionEngine.EngineError.notConnected))
+      completion(.failure(Libssh2Connection.EngineError.notConnected))
       return
     }
     engine.runRemoteCommand(command, completion: completion)
@@ -128,7 +127,7 @@ public final class SSHSession: TerminalTransport {
     completion: @escaping @Sendable (Result<Int, Error>) -> Void
   ) {
     guard let engine else {
-      completion(.failure(SSHConnectionEngine.EngineError.notConnected))
+      completion(.failure(Libssh2Connection.EngineError.notConnected))
       return
     }
     engine.startLocalPortForward(

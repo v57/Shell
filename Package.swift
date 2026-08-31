@@ -19,6 +19,12 @@ let package = Package(
         .package(path: "../Database"),
     ],
     targets: [
+        // The libssh2 + mbedTLS static library, surfaced as the CLibssh2 module.
+        // Consumed by the SSH connection engine (Libssh2Connection).
+        .binaryTarget(
+            name: "CLibssh2",
+            path: "Binary/SSH-libssh2/Libssh2.xcframework"
+        ),
         // Targets are the basic building blocks of a package, defining a module or a test suite.
         // Targets can depend on other targets in this package and products from dependencies.
         .target(
@@ -29,6 +35,7 @@ let package = Package(
                 .product(name: "NIOConcurrencyHelpers", package: "swift-nio"),
                 .product(name: "NIOPosix", package: "swift-nio"),
                 .product(name: "Crypto", package: "swift-crypto"),
+                "CLibssh2",
             ],
             swiftSettings: [
                 .enableUpcomingFeature("ApproachableConcurrency"),

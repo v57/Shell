@@ -114,6 +114,10 @@ public nonisolated enum SSHKeychain {
   /// SSH wire blob for an ECDSA P-256 public key (RFC 5656):
   /// string("ecdsa-sha2-nistp256") + string("nistp256") + string(Q),
   /// where Q is the X9.63 uncompressed point (0x04 || X || Y).
+  public static func publicKeyBlob(for key: SecureEnclave.P256.Signing.PrivateKey) -> Data {
+    ecdsaBlob(for: key)
+  }
+
   private static func ecdsaBlob(for key: SecureEnclave.P256.Signing.PrivateKey) -> Data {
     // CryptoKit's rawRepresentation is the raw X||Y (64 bytes); the SSH
     // wire format needs the X9.63 uncompressed point (65 bytes).
