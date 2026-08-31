@@ -106,6 +106,12 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
   /// Wakes the poll loop when a write is pending.
   private let wake = DispatchSemaphore(value: 0)
 
+  /// The active local port-forward (web session + remote Database tunnel), if
+  /// any. `forwardLock` guards access because the tunnel's listener starts on
+  /// the main thread while the owner thread's `pump` reads it every tick.
+  private let forwardLock = NSLock()
+  private var portForward: Libssh2PortForward?
+
   // All of the following are only accessed on `queue` (the owning thread).
   private var socketFD: Int32 = -1
   private var session: OpaquePointer?
@@ -182,8 +188,11 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
   // MARK: Local port-forward (web session + remote Database tunnel)
 
   /// Starts a local port-forward over this (already-authenticated) connection.
-  /// The reusable bridge is implemented by the sibling `Libssh2PortForward`
-  /// card; until that helper is wired, surface a clear error rather than crash.
+  /// Binds a local listener on `bindHost:bindPort` (0 = ephemeral) and resolves
+  /// to the actually-bound port via `completion` on the main thread. Each
+  /// accepted local connection is multiplexed as a fresh `direct-tcpip` channel
+  /// over the shared libssh2 session — no new SSH dial or re-authentication.
+  /// Only meaningful after `start()` has authenticated.
   func startLocalPortForward(
     bindHost: String = "127.0.0.1",
     bindPort: Int = 0,
@@ -191,12 +200,37 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
     targetPort: Int,
     completion: @escaping @Sendable (Result<Int, Error>) -> Void
   ) {
-    let message = "Local port-forward is not yet wired on this connection."
-    DispatchQueue.main.async { completion(.failure(EngineError.remoteCommandFailed(message))) }
+    forwardLock.lock()
+    if portForward != nil {
+      forwardLock.unlock()
+      DispatchQueue.main.async { completion(.failure(EngineError.remoteCommandFailed("A port-forward is already active on this connection."))) }
+      return
+    }
+    let config = Libssh2PortForward.Config(
+      bindHost: bindHost,
+      bindPort: bindPort,
+      targetHost: targetHost,
+      targetPort: targetPort
+    )
+    let forward = Libssh2PortForward(config: config) { [weak self] message in
+      DispatchQueue.main.async { [weak self] in
+        guard let self else { return }
+        // Surface a user-facing error (e.g. the remote refused the connect).
+        self.onTerminated?(message)
+      }
+    }
+    portForward = forward
+    forwardLock.unlock()
+
+    forward.start(completion: completion)
   }
 
   func stopLocalPortForward() {
-    // No-op until the Libssh2PortForward helper is wired by the sibling card.
+    forwardLock.lock()
+    let forward = portForward
+    portForward = nil
+    forwardLock.unlock()
+    forward?.stop()
   }
 
   // MARK: One-shot remote exec (persistent-session scan)
@@ -572,11 +606,12 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
   // MARK: Byte-output pump
 
   /// For a forwarding-only connection (no session channel), watch the socket so
-  /// a remote close / hangup surfaces as `onTerminated`. Also drains any
-  /// session-level packets so the connection stays responsive. There is no
-  /// shell/exec channel to read.
+  /// a remote close / hangup surfaces as `onTerminated`. Also drives the local
+  /// port-forward's tunnel I/O every tick (on this owner thread, since libssh2
+  /// requires a single owning thread). There is no shell/exec channel to read.
   private func watchSocket() {
     while running {
+      pumpPortForward()
       let ready = waitForSocket(socketFD, events: Int16(POLLIN | POLLHUP), timeoutMs: 100)
       if ready {
         var pfd = pollfd(fd: socketFD, events: Int16(POLLIN | POLLHUP), revents: 0)
@@ -587,8 +622,21 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
         }
         // Drain any pending session packets so the SSH session stays healthy.
         _ = libssh2_session_block_directions(session!)
+        pumpPortForward()
       }
+      pumpPortForward()
     }
+  }
+
+  /// Drives the active local port-forward on the session's owner thread. This is
+  /// the ONLY place the tunnel channels touch libssh2, satisfying libssh2's
+  /// one-thread-per-session requirement in the forwarding-only path.
+  private func pumpPortForward() {
+    forwardLock.lock()
+    let forward = portForward
+    forwardLock.unlock()
+    guard let forward, let sess = session else { return }
+    forward.pump(session: sess, socketFD: socketFD, eagain: Self.EAGAIN)
   }
 
   /// The non-blocking read/write pump. Runs on `queue`. Waits on the socket for
@@ -599,6 +647,10 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
     guard running, let ch = channel else { return }
 
     while running, !channelGone {
+      // Drive any active local port-forward on this owner thread first, so
+      // tunnel I/O is serviced even when the shell channel stays quiet.
+      pumpPortForward()
+
       let socketReady = waitForSocket(socketFD, events: Int16(POLLIN | POLLHUP), timeoutMs: 100)
       let channelReady = libssh2_poll_channel_read(ch, 0) == 1
 
@@ -617,6 +669,7 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
       }
 
       flushWrites(ch)
+      pumpPortForward()
       if libssh2_channel_eof(ch) != 0 {
         handleChannelEOF(ch)
       } else {
@@ -794,6 +847,15 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
   /// Idempotent full teardown; must be called on `queue`.
   private func teardownSession() {
     guard let sess = session else { return }
+
+    // Tear down any active local port-forward (its channels are multiplexed on
+    // this session, so they MUST be freed before the session is freed).
+    forwardLock.lock()
+    let forward = portForward
+    portForward = nil
+    forwardLock.unlock()
+    forward?.stop()
+
     if let ch = channel {
       _ = libssh2_channel_close(ch)
       _ = libssh2_channel_free(ch)
