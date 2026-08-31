@@ -177,12 +177,27 @@ struct ContentView: View {
             .id(note.id)
             .navigationTitle(model.notes.title(for: note.id))
         } else {
+#if os(macOS)
+          if let file = model.mainSelectedOpenedFile {
+            OpenFilePane(file: file)
+              .id(file.id)
+              .navigationTitle(file.displayName)
+          } else {
+            ContentUnavailableView(
+              "No Terminal Selected",
+              systemImage: "terminal",
+              description: Text("Choose a terminal in the sidebar or create a new one.")
+            )
+            .navigationTitle("Terminals")
+          }
+#else
           ContentUnavailableView(
             "No Terminal Selected",
             systemImage: "terminal",
             description: Text("Choose a terminal in the sidebar or create a new one.")
           )
           .navigationTitle("Terminals")
+#endif
         }
       }
       .sheet(isPresented: $model.showingNewConnection) {

@@ -51,6 +51,21 @@ final class AppModel {
   /// The sidebar's encrypted Notes list (SwiftData-backed, lazy decryption).
   var notes: NotesStore
 
+  #if os(macOS)
+  /// Transient, scratch opened-file documents (the sidebar "Text Files"
+  /// section), edited in the content area. NOT persisted — cleared on app
+  /// restart and when a file is closed via ⌘W. Kept entirely separate from
+  /// `NotesStore` (an opened file is a scratch view, not a Notes item). See
+  /// `OpenFilePane.swift`.
+  private(set) var openedFiles: [OpenedFile] = []
+  /// Monotonic guard so a stale off-main load can never overwrite newer
+  /// content (bumped on every `openFile` call, including clears).
+  private var openFileGeneration = 0
+  /// A dirty file awaiting a Save / Don't-Save decision on close (⌘W). The
+  /// selected dirty `OpenFilePane` surfaces it as a confirmation dialog.
+  var pendingCloseOpenedFile: UUID?
+  #endif
+
   /// The sidebar's saved Actions (UserDefaults-backed).
   var actions = ActionsStore()
   /// The sidebar's saved web sessions (UserDefaults-backed).
@@ -445,6 +460,21 @@ final class AppModel {
     guard let history = selectedHistorySession, !detachedIDs.contains(history.id) else { return nil }
     return history
   }
+
+  #if os(macOS)
+  /// The opened-file document currently focused in the main view, if any.
+  /// Shares the sidebar selection with sessions and notes (file ids are
+  /// distinct UUIDs, so row tags never collide with session/note ids).
+  var selectedOpenedFile: OpenedFile? {
+    openedFiles.first { $0.id == selection }
+  }
+
+  /// The selected opened file as shown in the MAIN window (nil if detached).
+  var mainSelectedOpenedFile: OpenedFile? {
+    guard let file = selectedOpenedFile, !detachedIDs.contains(file.id) else { return nil }
+    return file
+  }
+  #endif
 
   // MARK: - Detached windows (macOS + iPad)
 
@@ -894,7 +924,112 @@ final class AppModel {
     return nil
   }
   #endif
-  
+
+  #if os(macOS)
+  // MARK: - Opened files (sidebar "Text Files")
+
+  /// Opens `url` as a read-write scratch document. If the file is already
+  /// open it is merely selected (existing edits are preserved). The content
+  /// is loaded off the main thread and published back on the main actor, with
+  /// a monotonic generation guard so a stale load can never clobber newer
+  /// content. Non-UTF8 and oversized files are surfaced as a read-only notice.
+  /// This is the entry point for `.textFile(url:)` from
+  /// `application(_:openFiles:)`.
+  func openFile(_ url: URL) {
+    if let existing = openedFiles.first(where: { $0.url == url }) {
+      selection = existing.id
+      return
+    }
+    openFileGeneration += 1
+    let generation = openFileGeneration
+    var opened = OpenedFile(url: url, loadGeneration: generation)
+    openedFiles.append(opened)
+    selection = opened.id
+    Task.detached(priority: .userInitiated) {
+      let content = Self.loadContent(of: url)
+      Task { @MainActor in
+        self.applyLoadedContent(id: opened.id, generation: generation, content: content)
+      }
+    }
+  }
+
+  private nonisolated static func loadContent(of url: URL) -> (text: String?, notice: String?) {
+    let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+    if size > Self.maxEditableFileBytes {
+      return (nil, "This file is too large to edit safely (\(Self.maxEditableFileBytes / 1024 / 1024) MB). Shown read-only.")
+    }
+    guard let data = try? Data(contentsOf: url) else {
+      return (nil, "The file could not be read.")
+    }
+    guard let text = String(data: data, encoding: .utf8) else {
+      return (nil, "The file is not UTF-8 text and can't be edited.")
+    }
+    return (text, nil)
+  }
+
+  private static let maxEditableFileBytes = 2 * 1024 * 1024
+
+  private func applyLoadedContent(
+    id: UUID,
+    generation: Int,
+    content: (text: String?, notice: String?)
+  ) {
+    guard let idx = openedFiles.firstIndex(where: { $0.id == id }),
+          openedFiles[idx].loadGeneration == generation else { return }
+    openedFiles[idx].isLoaded = true
+    if let notice = content.notice {
+      openedFiles[idx].loadNotice = notice
+      openedFiles[idx].text = ""
+    } else if let text = content.text {
+      openedFiles[idx].text = text
+    }
+  }
+
+  func updateOpenedFileText(_ text: String, for id: UUID) {
+    guard let idx = openedFiles.firstIndex(where: { $0.id == id }) else { return }
+    guard openedFiles[idx].text != text else { return }
+    openedFiles[idx].text = text
+    openedFiles[idx].isDirty = true
+  }
+
+  func saveOpenedFile(_ id: UUID) {
+    guard let idx = openedFiles.firstIndex(where: { $0.id == id }) else { return }
+    let file = openedFiles[idx]
+    guard file.canEdit else { return }
+    do {
+      try file.text.write(to: file.url, atomically: true, encoding: .utf8)
+      openedFiles[idx].isDirty = false
+    } catch {
+      openedFiles[idx].loadNotice = "Could not save: \(error.localizedDescription)"
+    }
+  }
+
+  func closeOpenedFile(_ id: UUID) {
+    guard let idx = openedFiles.firstIndex(where: { $0.id == id }) else { return }
+    openedFiles.remove(at: idx)
+    if openedFiles.isEmpty {
+      selection = nil
+    } else {
+      selection = openedFiles.indices.contains(idx) ? openedFiles[idx].id : openedFiles.last?.id
+    }
+  }
+
+  func commitCloseOpenedFile(_ id: UUID) {
+    saveOpenedFile(id)
+    closeOpenedFile(id)
+    pendingCloseOpenedFile = nil
+  }
+
+  func discardCloseOpenedFile(_ id: UUID) {
+    closeOpenedFile(id)
+    pendingCloseOpenedFile = nil
+  }
+
+  func clearPendingClose() {
+    pendingCloseOpenedFile = nil
+  }
+  #endif
+
 /// ⌘W: closes the selected session (quitting persistent sessions like
   /// the toolbar does), then selects the previous session in the same
   /// section — the next one when it was the first, a fresh session in
@@ -905,6 +1040,18 @@ final class AppModel {
       selection = nil
       return
     }
+    #if os(macOS)
+    // ⌘W with an opened file focused closes it. A dirty, editable file asks
+    // (Save / Don't Save / Cancel) instead of silently discarding edits.
+    if let file = selectedOpenedFile {
+      if file.isDirty && file.canEdit {
+        pendingCloseOpenedFile = file.id
+      } else {
+        closeOpenedFile(file.id)
+      }
+      return
+    }
+    #endif
     guard let session = selectedSession else { return }
     let section = sectionSessions(containing: session)
     let index = section.firstIndex { $0.id == session.id } ?? 0

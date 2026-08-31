@@ -37,6 +37,9 @@ struct SidebarView: View {
   @AppStorage("sidebar.local.collapsed") private var localCollapsed = false
   @AppStorage("sidebar.remote.collapsed") private var remoteCollapsed = false
   @AppStorage("sidebar.notes.collapsed") private var notesCollapsed = false
+  #if os(macOS)
+  @AppStorage("sidebar.files.collapsed") private var filesCollapsed = false
+  #endif
 
   /// The feature-flag source of truth. Reads `.isEnabled(_:)` here so a
   /// disabled feature's rows/sections vanish from the sidebar. Accessing it
@@ -338,7 +341,33 @@ struct SidebarView: View {
       }
       } // end if (notes section gate)
 
+#if os(macOS)
+      // Opened text files (transient/scratch) — mirrors the Notes section but
+      // in its own grouping that never persists to NotesStore. Shown only
+      // while a file is open; empty on a fresh launch. Close via ⌘W or the
+      // row's context menu.
+      if !model.openedFiles.isEmpty {
+      Section {
+        ForEach(filesCollapsed ? [] : model.openedFiles) { file in
+          OpenedFileRow(file: file)
+            .tag(file.id)
+            .contextMenu {
+              Button("Close", role: .destructive) {
+                model.closeOpenedFile(file.id)
+              }
+            }
+        }
+      } header: {
+        HStack {
+          sidebarCollapseChevron(collapsed: $filesCollapsed)
+          Text("Text Files")
+        }
+      }
+      } // end if (opened files gate)
+#endif
+
     }
+
     // Clicking an SSH row selects its config id; turn that into an
     // actual connection (select the existing session or create one).
     // Screen rows select a deterministic tagID; attach a local terminal
@@ -1225,6 +1254,33 @@ extension TerminalSession {
     return result
   }
 }
+
+#if os(macOS)
+/// A sidebar row for an opened text file: doc icon, display name, and a dirty
+/// dot when it has unsaved edits. Selecting the row shows the editor in the
+/// content area; close via ⌘W or the row's context menu.
+private struct OpenedFileRow: View {
+  let file: OpenedFile
+
+  var body: some View {
+    HStack(spacing: 8) {
+      Image(systemName: "doc.text")
+        .foregroundStyle(.secondary)
+      Text(file.displayName)
+        .lineLimit(1)
+        .truncationMode(.tail)
+      Spacer()
+      if file.isDirty {
+        Circle()
+          .fill(Color.orange)
+          .frame(width: 8, height: 8)
+          .help("Unsaved changes")
+      }
+    }
+    .contentShape(Rectangle())
+  }
+}
+#endif
 
 /// A trailing return badge shown on a sidebar row whose item is currently
 /// detached: an `arrowshape.turn.up.left.fill` button that re-attaches the
