@@ -1,6 +1,5 @@
 import Crypto
 import Foundation
-import NIOSSH
 import Security
 
 /// Generates and stores the app's SSH identities in the Secure Enclave.
@@ -12,9 +11,9 @@ import Security
 /// and only the public key can be exported.
 ///
 /// Note on per-sign gating: Touch ID gating (userPresence ACL) is NOT
-/// used. Spikes proved the ACL cannot be satisfied by NIOSSH's signing
-/// path on this OS (-1009 regardless of thread/context/signature), so
-/// the app uses a single Secure Enclave identity key instead.
+/// used. The libssh2 external signer path drives the Secure Enclave P-256
+/// key (spike-verified end-to-end), so the app uses a single Secure Enclave
+/// identity key without a per-sign UI prompt.
 ///
 /// Marked `nonisolated`: all operations are stateless Security-framework
 /// calls safe to run off the main actor (e.g. from SSH auth callbacks).
@@ -83,17 +82,7 @@ public nonisolated enum SSHKeychain {
   public static func publicKeyFingerprint(for key: SecureEnclave.P256.Signing.PrivateKey) -> String {
     fingerprint(blob: ecdsaBlob(for: key))
   }
-  
-  /// Computes an OpenSSH-style SHA256 fingerprint for a server host key.
-  public static func fingerprint(of hostKey: NIOSSHPublicKey) -> String {
-    let openSSH = String(openSSHPublicKey: hostKey)
-    let parts = openSSH.split(separator: " ")
-    guard parts.count >= 2, let data = Data(base64Encoded: String(parts[1])) else {
-      return "unknown"
-    }
-    return fingerprint(blob: data)
-  }
-  
+
   // MARK: - Per-connection passwords
   
   public static func savePassword(_ password: String, account: String) throws {

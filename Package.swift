@@ -8,8 +8,6 @@ let package = Package(
     platforms: [.macOS(.v15), .iOS(.v18)],
     products: [.library(name: "Terminal", targets: ["Terminal"]), .library(name: "TerminalIntegrations", targets: ["TerminalIntegrations"]), .library(name: "Monitoring", targets: ["Monitoring"]), .library(name: "DatabaseEngines", targets: ["DatabaseEngines"])],
     dependencies: [
-        .package(url: "https://github.com/apple/swift-nio-ssh", exact: "0.15.0"),
-        .package(url: "https://github.com/apple/swift-nio", from: "2.81.0"),
         .package(url: "https://github.com/apple/swift-crypto", from: "4.0.0"),
         // Local Database package (MongoDB / PostgreSQL / Redis / SQLite engine
         // libraries). All four engines are cross-platform — the C-driver
@@ -30,11 +28,9 @@ let package = Package(
         .target(
             name: "Terminal",
             dependencies: [
-                .product(name: "NIOSSH", package: "swift-nio-ssh"),
-                .product(name: "NIOCore", package: "swift-nio"),
-                .product(name: "NIOConcurrencyHelpers", package: "swift-nio"),
-                .product(name: "NIOPosix", package: "swift-nio"),
                 .product(name: "Crypto", package: "swift-crypto"),
+                // The libssh2 + mbedTLS static library, surfaced as the
+                // CLibssh2 module (consumed by Libssh2Connection).
                 "CLibssh2",
             ],
             swiftSettings: [
