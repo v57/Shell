@@ -551,7 +551,7 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
   private func startPump() {
     guard running, let ch = channel else { return }
 
-    while running {
+    while running, !channelGone {
       let socketReady = waitForSocket(socketFD, events: Int16(POLLIN | POLLHUP), timeoutMs: 100)
       let channelReady = libssh2_poll_channel_read(ch, 0) == 1
 
@@ -593,9 +593,11 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
         break
       }
       if n == 0 {
-        // EOF on the channel.
-        handleChannelEOF(ch)
+        // EOF on the channel. For exec channels, first capture the remote exit
+        // status so the subsequent EOF handling knows the command finished
+        // cleanly and must NOT blank the terminal.
         completedChannelExitIfNeeded(ch)
+        handleChannelEOF(ch)
         break
       }
       // Real error reading.
@@ -639,11 +641,16 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
 
   private func handleChannelEOF(_ ch: OpaquePointer) {
     if channelGone { return }
-    // Exec channels close right after reporting exit status — that close is
-    // expected and must NOT blank the terminal.
-    if execCommand != nil, execExitSeen {
-      channelGone = true
-      return
+    // For exec channels, capture the remote exit status BEFORE deciding whether
+    // to terminate — a command that finished cleanly must NOT blank the
+    // terminal. This is called from both drainOutput (EOF) and the pump loop,
+    // so it must be idempotent and order-independent.
+    if execCommand != nil {
+      completedChannelExitIfNeeded(ch)
+      if execExitSeen {
+        channelGone = true
+        return
+      }
     }
     channelGone = true
     finishOnMain("Connection closed.")
