@@ -161,7 +161,15 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
   func resize(columns: Int, rows: Int) {
     queue.async { [weak self] in
       guard let self, let ch = self.channel else { return }
-      _ = libssh2_channel_request_pty_size_ex(ch, Int32(columns), Int32(rows), 0, 0)
+      // The session is non-blocking, so libssh2_channel_request_pty_size_ex may
+      // return EAGAIN while the window-change packet can't be sent yet. Drive
+      // the request to completion with the same poll() loop as every other
+      // channel op so a resize is never silently dropped (the shell must reflow).
+      var rc = libssh2_channel_request_pty_size_ex(ch, Int32(columns), Int32(rows), 0, 0)
+      rc = self.driveChannel(rc) {
+        libssh2_channel_request_pty_size_ex(ch, Int32(columns), Int32(rows), 0, 0)
+      }
+      _ = rc
     }
   }
 
