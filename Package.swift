@@ -17,21 +17,19 @@ let package = Package(
         .package(path: "../Database"),
     ],
     targets: [
-        // The libssh2 + mbedTLS static library, surfaced as the CLibssh2 module.
-        // Consumed by the SSH connection engine (Libssh2Connection).
-        .binaryTarget(
-            name: "CLibssh2",
-            path: "Binary/SSH-libssh2/Libssh2.xcframework"
-        ),
         // Targets are the basic building blocks of a package, defining a module or a test suite.
         // Targets can depend on other targets in this package and products from dependencies.
         .target(
             name: "Terminal",
             dependencies: [
                 .product(name: "Crypto", package: "swift-crypto"),
-                // The libssh2 + mbedTLS static library, surfaced as the
-                // CLibssh2 module (consumed by Libssh2Connection).
-                "CLibssh2",
+                // The libssh2 + mbedTLS static library is merged into the
+                // Database package's Cdrivers XCFramework, surfaced as the
+                // CLibssh2 module (consumed by Libssh2Connection). Depending
+                // on the Cdrivers product links libssh2 into the Terminal
+                // target without a second C-module binaryTarget (which would
+                // collide under Xcode's ProcessXCFramework).
+                .product(name: "Cdrivers", package: "Database"),
             ],
             swiftSettings: [
                 .enableUpcomingFeature("ApproachableConcurrency"),
