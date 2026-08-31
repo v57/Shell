@@ -13,9 +13,13 @@ import Monitoring
 /// MainActor isolation).
 struct WindowStatsObserver: NSViewRepresentable {
   let monitor: SystemStatsMonitor
+  /// Whether the Monitoring feature is on. Drives start/stop so toggling the
+  /// feature off stops sampling immediately, and a window-key event can never
+  /// restart a disabled monitor.
+  let enabled: Bool
 
   func makeCoordinator() -> Coordinator {
-    Coordinator(monitor: monitor)
+    Coordinator(monitor: monitor, enabled: enabled)
   }
 
   func makeNSView(context: Context) -> NSView {
@@ -33,7 +37,9 @@ struct WindowStatsObserver: NSViewRepresentable {
     return view
   }
 
-  func updateNSView(_ nsView: NSView, context: Context) {}
+  func updateNSView(_ nsView: NSView, context: Context) {
+    context.coordinator.setEnabled(enabled)
+  }
 
   func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
     Task { @MainActor in
@@ -58,14 +64,35 @@ struct WindowStatsObserver: NSViewRepresentable {
   @MainActor
   final class Coordinator {
     private let monitor: SystemStatsMonitor
+    /// The feature-flag snapshot. True while sampling is allowed; toggling it
+    /// off stops sampling immediately and keeps it stopped regardless of the
+    /// window's key state.
+    private var enabled: Bool
     /// Arms when the window resigns key; fires after 10 minutes of
     /// continuous inactivity to stop sampling.
     private var inactivityTimer: Timer?
     private var observers: [NSObjectProtocol] = []
     private weak var window: NSWindow?
 
-    init(monitor: SystemStatsMonitor) {
+    init(monitor: SystemStatsMonitor, enabled: Bool) {
       self.monitor = monitor
+      self.enabled = enabled
+    }
+
+    /// Applies the Monitoring feature flag. Turning the feature off stops
+    /// sampling right away; turning it on resumes. No-ops when the value is
+    /// unchanged, so a re-render that passes the same `enabled` does not fight
+    /// the 10-minute inactivity timer.
+    func setEnabled(_ enabled: Bool) {
+      guard enabled != self.enabled else { return }
+      self.enabled = enabled
+      if enabled {
+        monitor.start()
+      } else {
+        monitor.stop()
+        inactivityTimer?.invalidate()
+        inactivityTimer = nil
+      }
     }
 
     /// Starts sampling and observes the window's key/close lifecycle.
@@ -74,7 +101,7 @@ struct WindowStatsObserver: NSViewRepresentable {
       guard self.window !== window else { return }
       detach()
       self.window = window
-      monitor.start()
+      if enabled { monitor.start() }
       let center = NotificationCenter.default
       let observe: (Notification.Name) -> NSObjectProtocol = { name in
         center.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
@@ -120,7 +147,7 @@ struct WindowStatsObserver: NSViewRepresentable {
     private func windowBecameKey() {
       inactivityTimer?.invalidate()
       inactivityTimer = nil
-      monitor.start()
+      if enabled { monitor.start() }
     }
   }
 }

@@ -1,15 +1,6 @@
 {
-  "originHash" : "24541e43433b9bb465772d7d7ef1b2e2a594e22bb2fb685a84e803a1dd37a1bf",
+  "originHash" : "c807a08c3e1d1a8bf6be9e40c9f96ade4eb022e88c044e410754f18c825564a8",
   "pins" : [
-    {
-      "identity" : "markdown",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/v57/markdown",
-      "state" : {
-        "branch" : "main",
-        "revision" : "9c3ec55524a45963d2818feb9540578bb403c831"
-      }
-    },
     {
       "identity" : "swift-asn1",
       "kind" : "remoteSourceControl",

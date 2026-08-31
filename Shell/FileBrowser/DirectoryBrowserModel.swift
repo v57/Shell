@@ -230,6 +230,13 @@ import TerminalIntegrations
       guard visible, Date().timeIntervalSince(lastSSHTick) >= sshTickInterval else { return }
       lastSSHTick = Date()
       Task { if await ctx.refresh() { await refresh() } }
+    case .web:
+      // Web sessions have no directory to browse; the Files panel is never
+      // shown for them, so there is nothing to tick.
+      break
+    case .database:
+      // Database sessions have no terminal directory to browse; nothing to tick.
+      break
     }
   }
 }

@@ -31,6 +31,11 @@ struct ContentView: View {
   @State private var showFirstLaunchWelcome = false
   private let directoryTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
+  /// The feature-flag source of truth. Reads `.isEnabled(_:)` here so a
+  /// disabled feature's controls vanish from the UI. Accessing it through
+  /// `@Observable` re-renders the toolbar when a flag flips.
+  private var flags: FeatureFlagsStore { .shared }
+
   var body: some View {
     @Bindable var model = model
     ZStack {
@@ -39,73 +44,106 @@ struct ContentView: View {
           .navigationSplitViewColumnWidth(min: 190, ideal: 230)
       } detail: {
         if let session = model.selectedSession {
-          ZStack {
-            // The terminal stays mounted so its scrollback/focus state is
-            // preserved while the Files panel is shown on top of it.
-            TerminalView(session: session)
-              .id(session.id)
-              .allowsHitTesting(!model.directoryBrowser.visible)
+          let kind = model.kind(of: session)
+          Group {
+            if case .web(let web) = kind {
+              // A web session renders its URL in the system SwiftUI WebView
+              // (no terminal, no Files panel, no terminal toolbar). For an
+              // ssh-owned session the tunnel runtime supplies the reachable
+              // local URL (or a connecting/error state) instead of the raw URL.
+              WebSessionDetailView(web: web, tunnel: model.webSessionRuntime(for: web))
+                .id(session.id)
+            } else if case .database(let connection) = kind {
+              // A database session renders the per-engine documents/tables
+              // browser (no terminal, no Files panel). The live engine
+              // lifecycle is owned by AppModel.
+              if let dbSession = model.databaseSession(for: connection) {
+                DatabaseBrowserView(session: dbSession)
+                  .id(session.id)
+              } else {
+                ContentUnavailableView(
+                  "Database Not Open",
+                  systemImage: "server.rack",
+                  description: Text("The database connection is not open.")
+                )
+                .id(session.id)
+              }
+            } else {
+              ZStack {
+                // The terminal stays mounted so its scrollback/focus state is
+                // preserved while the Files panel is shown on top of it. The
+                // panel only covers it (and blocks its hit-testing) when the
+                // Files feature is enabled AND the panel is open.
+                TerminalView(session: session)
+                  .id(session.id)
+                  .allowsHitTesting(!(model.directoryBrowser.visible && flags.isEnabled(.files)))
 
-            if model.directoryBrowser.visible {
-              FilesPanelView(model: model.directoryBrowser)
-                .transition(.opacity)
-                .background(.background)
+                if model.directoryBrowser.visible, flags.isEnabled(.files) {
+                  FilesPanelView(model: model.directoryBrowser)
+                    .transition(.opacity)
+                    .background(.background)
+                }
+              }
+              .toolbar {
+                  // Terminal | Files view toggle: a single button whose icon flips
+                  // between the two. Shows `folder.fill` (open Files) while in the
+                  // terminal and `terminal.fill` (back to the terminal) while Files
+                  // is shown.
+                  // The Files panel is part of the Files feature; hide the
+                  // toggle button entirely when the feature is disabled.
+                  if flags.isEnabled(.files) {
+                    ToolbarItem(placement: .primaryAction) {
+                      Button {
+                        model.directoryBrowser.visible.toggle()
+                      } label: {
+                        Label(
+                          "Files & Terminal",
+                          systemImage: model.directoryBrowser.visible ? "terminal.fill" : "folder.fill")
+                      }
+                      .help(model.directoryBrowser.visible ? "Show Terminal" : "Show Files")
+                    }
+                  }
+#if os(macOS)
+                  // Smart actions for the active local directory: a Run button per
+                  // action, a Stop button (disabled unless something is running), and a
+                  // target picker when the project has multiple targets/schemes.
+                  if let directory = model.smartActionDirectory, !model.smartActionActions.isEmpty {
+                    ToolbarItemGroup(placement: .primaryAction) {
+                      if smartActionsTargets.count > 1 {
+                        Menu {
+                          Button("Project") { smartActionsTarget = nil }
+                          Divider()
+                          ForEach(smartActionsTargets, id: \.self) { target in
+                            Button(target) { smartActionsTarget = target }
+                          }
+                        } label: {
+                          Label(smartActionsTarget ?? "Project", systemImage: "scope")
+                        }
+                        .help("Select target")
+                      }
+                      ForEach(smartActionGroups) { group in
+                        SmartActionMenu(actions: group.actions, directory: directory)
+                      }
+                    }
+                  }
+                  
+                  if #available(macOS 26.0, *) {
+                    ToolbarSpacer()
+                  }
+                  
+                  // Open With for the active local directory — trailing secondary
+                  // action, showing the available apps' real icons.
+                  if let directory = model.smartActionDirectory, !model.openWithKinds.isEmpty {
+                    ToolbarItemGroup(placement: .primaryAction) {
+                      OpenWithMenu(directory: directory, kinds: model.openWithKinds)
+                    }
+                  }
+#endif
+                }
             }
           }
           .navigationTitle(model.displayName(for: session))
           .navigationDirectorySubtitle(localDirectoryText)
-          .toolbar {
-              // Terminal | Files view toggle: a single button whose icon flips
-              // between the two. Shows `folder.fill` (open Files) while in the
-              // terminal and `terminal.fill` (back to the terminal) while Files
-              // is shown.
-              ToolbarItem(placement: .primaryAction) {
-                Button {
-                  model.directoryBrowser.visible.toggle()
-                } label: {
-                  Label(
-                    "Files & Terminal",
-                    systemImage: model.directoryBrowser.visible ? "terminal.fill" : "folder.fill")
-                }
-                .help(model.directoryBrowser.visible ? "Show Terminal" : "Show Files")
-              }
-#if os(macOS)
-              // Smart actions for the active local directory: a Run button per
-              // action, a Stop button (disabled unless something is running), and a
-              // target picker when the project has multiple targets/schemes.
-              if let directory = model.smartActionDirectory, !model.smartActionActions.isEmpty {
-                ToolbarItemGroup(placement: .primaryAction) {
-                  if smartActionsTargets.count > 1 {
-                    Menu {
-                      Button("Project") { smartActionsTarget = nil }
-                      Divider()
-                      ForEach(smartActionsTargets, id: \.self) { target in
-                        Button(target) { smartActionsTarget = target }
-                      }
-                    } label: {
-                      Label(smartActionsTarget ?? "Project", systemImage: "scope")
-                    }
-                    .help("Select target")
-                  }
-                  ForEach(smartActionGroups) { group in
-                    SmartActionMenu(actions: group.actions, directory: directory)
-                  }
-                }
-              }
-              
-              if #available(macOS 26.0, *) {
-                ToolbarSpacer()
-              }
-              
-              // Open With for the active local directory — trailing secondary
-              // action, showing the available apps' real icons.
-              if let directory = model.smartActionDirectory, !model.openWithKinds.isEmpty {
-                ToolbarItemGroup(placement: .primaryAction) {
-                  OpenWithMenu(directory: directory, kinds: model.openWithKinds)
-                }
-              }
-#endif
-            }
         } else if let historySession = model.selectedHistorySession {
           HistorySessionView(session: historySession)
             .id(historySession.id)
@@ -149,6 +187,14 @@ struct ContentView: View {
       }
       .sheet(isPresented: $model.showingNewConnection) {
         NewConnectionView()
+      }
+      .sheet(isPresented: $model.showingNewDatabaseConnection) {
+        if let editing = model.editingDatabaseConnection {
+          NewDatabaseConnectionView(connection: editing,
+                                   savedPassword: model.passwordForDatabase(editing))
+        } else {
+          NewDatabaseConnectionView(connection: nil)
+        }
       }
       .sheet(isPresented: $model.showingNewAction) {
         NewActionView(

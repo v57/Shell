@@ -19,7 +19,13 @@ struct SidebarView: View {
   @State private var statsMonitor = SystemStatsMonitor()
   /// The stats graphs sheet, opened by clicking the Local section header.
   @State private var showingStatsGraphs = false
+  /// Whether the Monitoring feature is on — gates the live stats monitor so
+  /// it never samples when the feature is off.
+  private var monitoringEnabled: Bool {
+    FeatureFlagsStore.shared.isEnabled(.monitoring)
+  }
   #endif
+
   #if os(iOS)
   /// Presents the Settings sheet (iOS reaches Settings via a sidebar gear;
   /// macOS uses the ⌘, Settings scene).
@@ -32,16 +38,35 @@ struct SidebarView: View {
   @AppStorage("sidebar.remote.collapsed") private var remoteCollapsed = false
   @AppStorage("sidebar.notes.collapsed") private var notesCollapsed = false
 
+  /// The feature-flag source of truth. Reads `.isEnabled(_:)` here so a
+  /// disabled feature's rows/sections vanish from the sidebar. Accessing it
+  /// through `@Observable` re-renders the sidebar when a flag flips.
+  private var flags: FeatureFlagsStore { .shared }
+
   private var localSessions: [TerminalSession] {
     model.sessions.filter { model.kind(of: $0) == .local }
+  }
+
+  /// Saved web pages shown in the Local section: those not bound to an SSH
+  /// host. A page is "local" when no sshConfigID is set — the WebView loads
+  /// its URL directly (this covers localhost URLs).
+  private var localWebSessions: [WebSession] {
+    model.webSessions.all.filter { $0.sshConfigID == nil }
+  }
+
+  /// Local database connections: those reached directly (no SSH tunnel), so
+  /// they render under Local alongside local shells. Connections bound to an
+  /// SSH host render under Remote, grouped by that host.
+  private var localDatabaseConnections: [DatabaseConnection] {
+    model.databaseConnections.filter { $0.sshConfigID == nil }
   }
   
   var body: some View {
     @Bindable var model = model
     List(selection: $model.selection) {
-      if !model.actionSessions.isEmpty {
+      if flags.isEnabled(.actions), !model.actionSessions.isEmpty {
         Section {
-          ForEach(runningCollapsed ? [] : model.actionSessions) { session in
+          ForEach(runningCollapsed || !flags.isEnabled(.actions) ? [] : model.actionSessions) { session in
             ActionRunRow(session: session, spec: model.actionSpec(for: session))
               .tag(session.id)   // mandatory: untagged rows write nil into selection
               .contextMenu {
@@ -62,14 +87,19 @@ struct SidebarView: View {
       }
 
       #if os(macOS)
+      // The Local section hosts local terminals (sessions), persistent
+      // screen/tmux (screen), history, and web sessions. It stays visible
+      // while ANY of these features is enabled; each is filtered to its own
+      // rows below.
+      if flags.isEnabled(.sessions) || flags.isEnabled(.screen) || flags.isEnabled(.history) || flags.isEnabled(.web) || flags.isEnabled(.database) {
       Section {
         if model.historyMode {
-          ForEach(localCollapsed ? [] : model.history.sessions) { record in
+          ForEach(localCollapsed || !flags.isEnabled(.history) ? [] : model.history.sessions) { record in
             HistorySessionRow(session: record)
               .tag(record.id)
           }
         } else {
-          ForEach(localCollapsed ? [] : localSessions) { session in
+          ForEach(localCollapsed || !flags.isEnabled(.sessions) ? [] : localSessions) { session in
             SessionRow(
               session: session,
               defaultLabel: model.displayName(for: session),
@@ -90,7 +120,7 @@ struct SidebarView: View {
               }
             }
           }
-          ForEach(localCollapsed ? [] : model.screenMonitor.sessions) { info in
+          ForEach(localCollapsed || !flags.isEnabled(.screen) ? [] : model.screenMonitor.sessions) { info in
             ScreenSessionRow(
               info: info,
               isRenaming: renamingScreenName == info.name,
@@ -114,7 +144,7 @@ struct SidebarView: View {
               }
             }
           }
-          ForEach(localCollapsed ? [] : model.remoteScreenSessions) { info in
+          ForEach(localCollapsed || !flags.isEnabled(.screen) ? [] : model.remoteScreenSessions) { info in
             ScreenSessionRow(
               info: info,
               isRenaming: false,
@@ -141,6 +171,20 @@ struct SidebarView: View {
               }
             }
           }
+          ForEach(localCollapsed || !flags.isEnabled(.web) ? [] : localWebSessions) { web in
+            WebSessionRow(web: web)
+              // Tag with the open session's id when the page is open (so the
+              // row shows selected while its WebView is up), else the stable
+              // web id — same convention as the screen rows above.
+              .tag(model.liveWebSession(for: web)?.id ?? web.id)
+          }
+          // Local database connections (no SSH tunnel) live in the Local
+          // section like local shells; remote ones group under Remote instead.
+          ForEach(localCollapsed || !flags.isEnabled(.database) ? [] : localDatabaseConnections) { connection in
+            DatabaseConnectionRow(connection: connection)
+              .tag(model.liveDatabaseSession(for: connection)?.id ?? connection.id)
+              .contextMenu { DatabaseConnectionActions(connection: connection) }
+          }
         }
       } header: {
         HStack {
@@ -148,13 +192,15 @@ struct SidebarView: View {
           #if os(macOS)
           if model.historyMode {
             Text("Local History")
-          } else {
+          } else if flags.isEnabled(.monitoring) {
             statsHeader
+          } else {
+            Text("Local")
           }
           #else
           Text(model.historyMode ? "Local History" : "Local")
           #endif
-          if model.historyMode {
+          if model.historyMode, flags.isEnabled(.history) {
             Button(role: .destructive) {
               model.deleteAllHistory()
             } label: {
@@ -167,7 +213,7 @@ struct SidebarView: View {
           // Only meaningful when there is something to show; hidden while
           // the list is empty (the trash button still serves as the exit
           // when viewing history).
-          if !model.history.sessions.isEmpty {
+          if flags.isEnabled(.history), !model.history.sessions.isEmpty {
             Button {
               model.toggleHistoryMode()
             } label: {
@@ -177,11 +223,14 @@ struct SidebarView: View {
             .buttonStyle(.borderless)
             .help(model.historyMode ? "Show local terminals" : "Show local history")
           }
+          if flags.isEnabled(.sessions) {
           Button {
             model.addLocalTerminal()
           } label: {
             Image(systemName: "plus")
           }.buttonStyle(.borderless).help("New local terminal")
+          }
+          if flags.isEnabled(.screen) {
           Button {
             model.screenMonitor.refresh()
           } label: {
@@ -192,13 +241,32 @@ struct SidebarView: View {
           } label: {
             Image(systemName: "plus")
           }.buttonStyle(.borderless).help("New persistent zsh session")
+          }
+          if flags.isEnabled(.web) {
+          Button {
+            model.showingNewWebSession = true
+          } label: {
+            Image(systemName: "globe")
+          }.buttonStyle(.borderless).help("New web session")
+          }
+          if flags.isEnabled(.database) {
+          Button {
+            model.editingDatabaseConnection = nil
+            model.showingNewDatabaseConnection = true
+          } label: {
+            Image(systemName: "cylinder.split.1x2")
+          }.buttonStyle(.borderless).help("New database connection")
+          }
         }.padding(.trailing, 4)
       }
-      
+      } // end if (local section gate)
+
       #endif // os(macOS) — Local section (no local terminals on iOS)
 
+      // Remote SSH section: hidden entirely when the ssh feature is off.
+      if flags.isEnabled(.ssh) {
       Section {
-        ForEach(remoteCollapsed ? [] : model.connections) { config in
+        ForEach(remoteCollapsed || !flags.isEnabled(.ssh) ? [] : model.connections) { config in
           SSHConfigGroup(
             config: config,
             renamingSessionID: renamingSessionID,
@@ -216,16 +284,36 @@ struct SidebarView: View {
           sidebarCollapseChevron(collapsed: $remoteCollapsed)
           Text("Remote")
           Spacer()
+          if flags.isEnabled(.ssh) {
           Button {
             model.showingNewConnection = true
           } label: {
             Image(systemName: "plus")
           }.buttonStyle(.borderless).help("New SSH connection")
+          }
+          if flags.isEnabled(.web) {
+          Button {
+            model.showingNewWebSession = true
+          } label: {
+            Image(systemName: "globe")
+          }.buttonStyle(.borderless).help("New web session")
+          }
+          if flags.isEnabled(.database) {
+          Button {
+            model.editingDatabaseConnection = nil
+            model.showingNewDatabaseConnection = true
+          } label: {
+            Image(systemName: "cylinder.split.1x2")
+          }.buttonStyle(.borderless).help("New database connection")
+          }
         }.padding(.trailing, 4)
       }
+      } // end if (ssh section gate)
 
+      // Notes section: hidden entirely when the notes feature is off.
+      if flags.isEnabled(.notes) {
       Section {
-        ForEach(notesCollapsed ? [] : model.notes.notes) { note in
+        ForEach(notesCollapsed || !flags.isEnabled(.notes) ? [] : model.notes.notes) { note in
           NoteRow(note: note)
             .tag(note.id)
             .contextMenu {
@@ -239,13 +327,17 @@ struct SidebarView: View {
           sidebarCollapseChevron(collapsed: $notesCollapsed)
           Text("Notes")
           Spacer()
+          if flags.isEnabled(.notes) {
           Button {
             model.newNote()
           } label: {
             Image(systemName: "plus")
           }.buttonStyle(.borderless).help("New note")
+          }
         }.padding(.trailing, 4)
       }
+      } // end if (notes section gate)
+
     }
     // Clicking an SSH row selects its config id; turn that into an
     // actual connection (select the existing session or create one).
@@ -259,6 +351,20 @@ struct SidebarView: View {
       guard let id = newValue else { return }
       if let config = model.connections.first(where: { $0.id == id }) {
         model.connect(to: config)
+        return
+      }
+      // A web-session row id: open (or focus) its page. A closed row tags
+      // with the web id; an open row tags with the live session id (which is
+      // already selected). Mirrors the screen rows' attach/focus behavior.
+      if let web = model.webSessions.all.first(where: { $0.id == id }) {
+        model.openOrFocusWebSession(web)
+        return
+      }
+      // A database-connection row id: open (or focus) its browser. A closed
+      // row tags with the connection id; an open row tags with the live
+      // session id (already selected).
+      if let connection = model.databaseConnections.first(where: { $0.id == id }) {
+        model.openOrFocusDatabaseConnection(connection)
         return
       }
       #if os(macOS)
@@ -305,6 +411,15 @@ struct SidebarView: View {
     .sheet(item: $editingConfig) { config in
       NewConnectionView(config: config)
     }
+    // The New Web Session sheet (Local/Remote header "+").
+    .sheet(isPresented: $model.showingNewWebSession) {
+      NewWebSessionView()
+    }
+    // The Edit… action on a saved web session: the same form as new,
+    // prefilled, saving in place (same id).
+    .sheet(item: $model.editingWebSession) { web in
+      NewWebSessionView(web: web)
+    }
     .alert("Authorized Keys", isPresented: Binding(
       get: { model.authorizedKeysError != nil },
       set: { if !$0 { model.authorizedKeysError = nil } }
@@ -314,8 +429,16 @@ struct SidebarView: View {
       Text(model.authorizedKeysError ?? "")
     }
     #if os(macOS)
-    .background(WindowStatsObserver(monitor: statsMonitor))
-    .onAppear { statsMonitor.start() }
+    .background {
+      // The observer owns the enable-state policy: it starts the monitor when
+      // the Monitoring feature is on and stops it the moment the feature is
+      // toggled off (and never restarts it while disabled). Always installed
+      // so the enable toggle is handled here rather than by view teardown.
+      WindowStatsObserver(monitor: statsMonitor, enabled: monitoringEnabled)
+    }
+    .onAppear {
+      if monitoringEnabled { statsMonitor.start() }
+    }
     .onDisappear { statsMonitor.stop() }
     // Stats graphs for the last minute, opened from the Local header.
     .sheet(isPresented: $showingStatsGraphs) {
@@ -433,6 +556,7 @@ private struct ActionRunRow: View {
   var session: TerminalSession
   let spec: ActionSpec?
 
+  @Environment(AppModel.self) private var model
   @Environment(\.terminalBackgroundsDisabled) private var disableBackgrounds
   @Environment(\.colorScheme) private var colorScheme
 
@@ -550,6 +674,28 @@ private struct SSHConfigGroup: View {
           model.removeSession(session.id)
         }
       }
+    }
+    // Saved web pages bound to this host render as SSH-section rows, in the
+    // same indented sub-row layout as the connection's terminals. Hidden when
+    // the web feature is disabled.
+    if FeatureFlagsStore.shared.isEnabled(.web) {
+    ForEach(model.webSessions.all.filter { $0.sshConfigID == config.id }) { web in
+      WebSessionRow(web: web, environmentName: config.displayName)
+        .padding(.leading, 14)
+        .tag(model.liveWebSession(for: web)?.id ?? web.id)
+    }
+    }
+    // Database connections tunneled through this host render as SSH-section
+    // sub-rows, grouped per host the same way web sessions are. Hidden when
+    // the database feature is disabled; orphaned refs (a removed host) simply
+    // don't render, matching the web-session behavior.
+    if FeatureFlagsStore.shared.isEnabled(.database) {
+    ForEach(model.databaseConnections.filter { $0.sshConfigID == config.id }) { connection in
+      DatabaseConnectionRow(connection: connection)
+        .padding(.leading, 14)
+        .tag(model.liveDatabaseSession(for: connection)?.id ?? connection.id)
+        .contextMenu { DatabaseConnectionActions(connection: connection) }
+    }
     }
   }
 }
@@ -673,6 +819,7 @@ private struct SessionRow: View {
   let onCommitRename: (String) -> Void
   let onCancelRename: () -> Void
 
+  @Environment(AppModel.self) private var model
   @Environment(\.terminalBackgroundsDisabled) private var disableBackgrounds
   @Environment(\.colorScheme) private var colorScheme
   
@@ -935,6 +1082,64 @@ private struct NoteRow: View {
       }
     }
     .contentShape(Rectangle())
+  }
+}
+
+/// A sidebar row for a saved database connection: engine icon, display name,
+/// and host:port (or file path) subtitle, plus an "open" dot when the browser
+/// is live. Clicking the row opens/focuses the database browser.
+private struct DatabaseConnectionRow: View {
+  @Environment(AppModel.self) private var model
+  let connection: DatabaseConnection
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 2) {
+      HStack(spacing: 8) {
+        Image(systemName: connection.engine.systemImage)
+          .foregroundStyle(.secondary)
+        Text(connection.displayName)
+          .lineLimit(1)
+          .truncationMode(.tail)
+        Spacer()
+        if model.liveDatabaseSession(for: connection) != nil {
+          Circle()
+            .fill(Color.green)
+            .frame(width: 8, height: 8)
+            .help("Open")
+        }
+      }
+      Text(connection.subtitle)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+        .truncationMode(.tail)
+    }
+    .contentShape(Rectangle())
+  }
+}
+
+/// The context menu for a database connection row, shared by the Local and
+/// Remote (per-host) sections so both offer the same actions. Connect and
+/// Disconnect flip on whether the engine is live; Duplicate clones the row
+/// and its Keychain credential (fresh id); Edit opens the prefilled sheet;
+/// Delete closes the browser, drops the credential, then the record.
+private struct DatabaseConnectionActions: View {
+  @Environment(AppModel.self) private var model
+  let connection: DatabaseConnection
+
+  var body: some View {
+    if model.liveDatabaseSession(for: connection) != nil {
+      Button("Disconnect") { model.closeDatabaseSession(connection) }
+    } else {
+      Button("Connect") { model.openOrFocusDatabaseConnection(connection) }
+    }
+    Button("Duplicate") { model.duplicateDatabaseConnection(connection) }
+    Button("Edit…") {
+      model.editingDatabaseConnection = connection
+      model.showingNewDatabaseConnection = true
+    }
+    Divider()
+    Button("Delete", role: .destructive) { model.deleteDatabaseConnection(connection) }
   }
 }
 

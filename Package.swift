@@ -6,11 +6,17 @@ import PackageDescription
 let package = Package(
     name: "Terminal",
     platforms: [.macOS(.v15), .iOS(.v18)],
-    products: [.library(name: "Terminal", targets: ["Terminal"]), .library(name: "TerminalIntegrations", targets: ["TerminalIntegrations"]), .library(name: "Monitoring", targets: ["Monitoring"])],
+    products: [.library(name: "Terminal", targets: ["Terminal"]), .library(name: "TerminalIntegrations", targets: ["TerminalIntegrations"]), .library(name: "Monitoring", targets: ["Monitoring"]), .library(name: "DatabaseEngines", targets: ["DatabaseEngines"])],
     dependencies: [
         .package(url: "https://github.com/apple/swift-nio-ssh", exact: "0.15.0"),
         .package(url: "https://github.com/apple/swift-nio", from: "2.81.0"),
         .package(url: "https://github.com/apple/swift-crypto", from: "4.0.0"),
+        // Local Database package (MongoDB / PostgreSQL / Redis / SQLite engine
+        // libraries). All four engines are cross-platform — the C-driver
+        // XCFramework (Cdrivers) ships iOS device + simulator slices, and
+        // SQLite uses the SDK's system SQLite3 module that is present on both
+        // macOS and iOS — so every engine links and runs on both platforms.
+        .package(path: "../Database"),
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
@@ -38,6 +44,23 @@ let package = Package(
         ),
         .target(
             name: "Monitoring",
+            swiftSettings: [
+                .swiftLanguageMode(.v5),
+            ]
+        ),
+        // Aggregates the local ../Database engine libraries for shell/DB
+        // sidebar integration. All four engines (MongoDB / PostgreSQL / Redis
+        // / SQLite) are cross-platform now — the C-driver XCFramework adds iOS
+        // slices and SQLite rides the SDK's system SQLite3 module — so no
+        // engine is conditionally excluded from iOS builds anymore.
+        .target(
+            name: "DatabaseEngines",
+            dependencies: [
+                .product(name: "PostgreSQL", package: "Database"),
+                .product(name: "Redis", package: "Database"),
+                .product(name: "MongoDB", package: "Database"),
+                .product(name: "SQLite", package: "Database"),
+            ],
             swiftSettings: [
                 .swiftLanguageMode(.v5),
             ]

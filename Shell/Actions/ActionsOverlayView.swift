@@ -266,6 +266,22 @@ private struct ActionChip: View {
       return "Local"
     case .ssh(let config):
       return config.displayName
+    case .web(let web):
+      // An action run from a web session targets the bound SSH host when it
+      // has one, else the local machine.
+      if let id = web.sshConfigID,
+         let config = model.connections.first(where: { $0.id == id }) {
+        return config.displayName
+      }
+      return "Local"
+    case .database(let connection):
+      // An action run from a database session targets the bound SSH host when
+      // it has one, else the local machine.
+      if let id = connection.sshConfigID,
+         let config = model.connections.first(where: { $0.id == id }) {
+        return config.displayName
+      }
+      return "Local"
     }
   }
 }

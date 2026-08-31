@@ -78,14 +78,16 @@ final class SSHConfigStore {
   }
 
   /// The synced store (works as a local-only store without an account).
-  /// Holds BOTH the SSH-config and device-key models: sharing one container
-  /// keeps the process's SwiftData container count low — the hosted-runner
-  /// instability (SIGTRAP inside SwiftData's fetch after several containers
-  /// for the same model exist) is triggered by container CHURN, so the app
-  /// deliberately uses as few containers as possible.
+  /// Holds the SSH-config, device-key, AND database-connection models: sharing
+  /// one container keeps the process's SwiftData container count low — the
+  /// hosted-runner instability (SIGTRAP inside SwiftData's fetch after several
+  /// containers for the same model exist) is triggered by container CHURN, so
+  /// the app deliberately uses as few containers as possible. The database
+  /// connections live in this same container (via DatabaseConnectionStore)
+  /// rather than in a second one.
   static func makeContainer() throws -> ModelContainer {
     try ModelContainer(
-      for: SSHConfigRecord.self, DeviceKeyRecord.self,
+      for: SSHConfigRecord.self, DeviceKeyRecord.self, DatabaseConnectionRecord.self,
       configurations: ModelConfiguration(
         "SSHConfigs",
         cloudKitDatabase: .private("iCloud.dev.v57.sh")

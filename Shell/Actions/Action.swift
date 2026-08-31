@@ -122,6 +122,12 @@ struct Action: Identifiable, Codable, Hashable {
         return applies(toSSHConnectionID: config.id)
       }
       return appliesToLocal
+    case .web:
+      // An action never runs against a web page.
+      return false
+    case .database:
+      // An action never runs against a database connection.
+      return false
     }
   }
 

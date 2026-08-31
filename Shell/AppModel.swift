@@ -6,6 +6,7 @@ import UIKit
 import CoreData
 import Crypto
 import Foundation
+import Observation
 import SwiftData
 import SwiftUI
 import Terminal
@@ -18,12 +19,24 @@ import TerminalIntegrations
 final class AppModel {
   static let shared = AppModel()
   
+  /// The feature-flag source of truth. Background surfaces and probes read
+  /// `isEnabled(_:)` from here so a disabled feature never spawns work.
+  private var features: FeatureFlagsStore { .shared }
+  
   var sessions: [TerminalSession] = []
   var selection: UUID?
   /// The directory browser (Files panel) model, driven by the selected
   /// session. Shared so both ContentView and ShellCommands can drive it.
   let directoryBrowser = DirectoryBrowserModel()
   var showingNewConnection = false
+  /// The New Web Session sheet (Local/Remote header "+").
+  var showingNewWebSession = false
+  /// The web session being edited in the sheet (nil = creating a new one).
+  var editingWebSession: WebSession?
+  /// The New Database Connection sheet (Database section header "+").
+  var showingNewDatabaseConnection = false
+  /// The database connection being edited in the sheet (nil = creating).
+  var editingDatabaseConnection: DatabaseConnection?
   var publicKeyError: String?
   
   #if os(macOS)
@@ -40,6 +53,12 @@ final class AppModel {
 
   /// The sidebar's saved Actions (UserDefaults-backed).
   var actions = ActionsStore()
+  /// The sidebar's saved web sessions (UserDefaults-backed).
+  var webSessions = WebSessionStore()
+  /// The live SSH-tunnel runtimes for OPEN ssh-owned web sessions, keyed by
+  /// web session id. Created on connect (openWebSession), stopped and removed
+  /// on teardown (removeSession). Plain web sessions have no entry.
+  private(set) var webSessionRuntimes: [UUID: WebSessionRuntime] = [:]
   /// Encrypted local-session history. Active captures remain in memory until
   /// their terminal closes or the app terminates.
   var history = HistoryStore()
@@ -91,6 +110,12 @@ final class AppModel {
   /// local write — refreshing once per notification is redundant main-thread
   /// re-fetch work on top of the framework's own export loop.
   private var cloudKitRefreshTask: Task<Void, Never>?
+  /// Whether the Notes store is currently backed by the CloudKit container
+  /// (`.notes` on) versus a local-only store (`.notes` off). Used to detect
+  /// the ON↔OFF transition in the feature-flag reactivity so the store and
+  /// its observer are only swapped when the flag actually flips (reactivity
+  /// re-arms on every observed flag change).
+  private var notesFeatureEnabled = false
   /// How long a remote-change burst is coalesced before one refresh runs.
   private static let cloudKitRefreshCoalesceDelay: Duration = .milliseconds(400)
 
@@ -116,6 +141,10 @@ final class AppModel {
   /// clears) so an in-flight background scan from a previous directory is
   /// discarded as stale instead of overwriting newer results.
   private var smartActionsGeneration = 0
+  /// Whether `probeEnvironment()` has already run. Guards the one-time probe
+  /// so it runs only while the Smart Actions feature is enabled (and re-runs
+  /// on the OFF→ON transition, never repeatedly).
+  private var smartActionsProbed = false
   /// In-memory display state per canonical directory path, published
   /// synchronously when a session switch revisits the directory — avoids
   /// waiting on the encrypted cache read (Secure Enclave round-trip) that
@@ -159,6 +188,11 @@ final class AppModel {
         newActionTargetSSHConnectionID = config.id
       case .action(let spec):
         newActionTargetSSHConnectionID = spec.config?.id
+      case .web(let web):
+        newActionTargetSSHConnectionID = web.sshConfigID
+      case .database(let connection):
+        // A database session has no shell/SSH to run an action in.
+        newActionTargetSSHConnectionID = connection.sshConfigID
       case .local, .screen:
         newActionTargetSSHConnectionID = nil
       }
@@ -182,6 +216,15 @@ final class AppModel {
   /// Observation automatically.
   var connections: [SSHConfig] { connectionStore.all }
 
+  /// Persists the sidebar's saved database connections (SwiftData, shared
+  /// container, encrypted — mirrors SSHConfigStore). Cheap `@Observable`
+  /// accessor so SidebarView re-renders on save/reload.
+  private let databaseStore: DatabaseConnectionStore
+  var databaseConnections: [DatabaseConnection] { databaseStore.all }
+  /// Live engine sessions keyed by database-connection id. Created on open,
+  /// torn down on close/delete. Backs the DatabaseBrowserView.
+  private(set) var databaseSessions: [UUID: DatabaseSession] = [:]
+
   /// The iCloud registry of every device's public key (this device
   /// publishes on launch; other devices' keys power the authorized-keys
   /// panel).
@@ -200,18 +243,19 @@ final class AppModel {
     (try? SSHConfigStore.makeContainer()) ?? {
       // swiftlint:disable:next force_try
       try! ModelContainer(
-        for: SSHConfigRecord.self, DeviceKeyRecord.self,
+        for: SSHConfigRecord.self, DeviceKeyRecord.self, DatabaseConnectionRecord.self,
         configurations: ModelConfiguration("SSHConfigs", cloudKitDatabase: .none)
       )
     }()
   }()
 
-  /// The notes' two containers. Built in a `static let` closure — NOT
-  /// inside an init: containers created inside an @Observable init trap
-  /// on their first insert (silent SIGTRAP at `localContext.insert`;
-  /// probe-verified — the old `NotesStore()` factory path crashed while
-  /// the injected `NotesStore(stores:)` path always worked).
-  private static let notesStores: NoteStores = {
+  /// The notes' two containers (local + CloudKit cloud), built in a
+  /// `static let` closure — NOT inside an init: containers created inside an
+  /// @Observable init trap on their first insert (silent SIGTRAP at
+  /// `localContext.insert`; probe-verified — the old `NotesStore()` factory
+  /// path crashed while the injected `NotesStore(stores:)` path always
+  /// worked). Used when the Notes feature is enabled.
+  private static let notesStoresWithCloud: NoteStores = {
     if let made = try? NoteStores.make() { return made }
     // Store setup failed — degrade to two plain local stores rather than
     // crash. Plain SQLite stores are effectively infallible.
@@ -238,27 +282,128 @@ final class AppModel {
     return NoteStores(local: local, cloud: cloud)
   }()
 
+  /// Local-only notes container, used when the Notes feature is disabled so
+  /// NO CloudKit container is loaded (a disabled feature must not run
+  /// CloudKit background sync) and the notes store is not observed. Built in
+  /// a `static let` closure for the same trap-avoidance reason as above.
+  /// Safe: while Notes is off no note-insert path is reachable (the Notes
+  /// sidebar and the new-note command are gated), and a NotesStore with a nil
+  /// cloud context only SIGTRAPs on its first local *insert* — reload()/fetch
+  /// on an empty store does not. The on-disk files are reused unchanged, so
+  /// re-enabling restores the prior notes from disk.
+  private static let notesStoresLocalOnly: NoteStores = {
+    let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+      .appendingPathComponent(Bundle.main.bundleIdentifier ?? "Shell", isDirectory: true)
+    // swiftlint:disable:next force_try
+    try! FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let local = try! ModelContainer(
+      for: NoteRecord.self,
+      configurations: ModelConfiguration(
+        "LocalNotes",
+        url: dir.appendingPathComponent("LocalNotes.store"),
+        cloudKitDatabase: .none
+      )
+    )
+    return NoteStores(local: local, cloud: nil)
+  }()
+
   private init() {
     appearanceMode = AppearanceMode(rawValue: UserDefaults.standard.string(forKey: Self.appearanceModeKey) ?? "") ?? .system
     disableTerminalBackgrounds = UserDefaults.standard.bool(forKey: Self.disableTerminalBackgroundsKey)
     connectionStore = SSHConfigStore(container: Self.sharedSSHContainer)
     deviceKeys = DeviceKeyStore(container: Self.sharedSSHContainer)
-    notes = NotesStore(stores: Self.notesStores)
+    databaseStore = DatabaseConnectionStore(container: Self.sharedSSHContainer)
+    // Notes gating must not read `self` here (stored properties are still
+    // being initialized); read the flag first, wire `notes`, then publish it.
+    let notesFlag = FeatureFlagsStore.shared.isEnabled(.notes)
+    if notesFlag {
+      // Notes enabled: load the CloudKit-topped store and observe its
+      // remote-change notifications so cross-device edits surface at runtime.
+      notes = NotesStore(stores: Self.notesStoresWithCloud)
+      observeCloudKitRemoteChanges()
+    } else {
+      // Notes disabled: build a local-only store so NO CloudKit container is
+      // loaded and nothing is observed — a disabled feature must not run
+      // CloudKit background sync. The on-disk notes files are reused
+      // unchanged, so re-enabling restores the prior notes from disk.
+      notes = NotesStore(stores: Self.notesStoresLocalOnly)
+    }
+    notesFeatureEnabled = notesFlag
     // Publish this device's identity key to iCloud (no-op when the Secure
     // Enclave key is unreachable, e.g. locked screen — retried when the
     // authorized-keys panel opens).
     deviceKeys.publishThisDevice()
-    observeCloudKitRemoteChanges()
     #if os(macOS)
-    // Probe toolchains (xcodebuild/swift) once so integrations know their
-    // availability for the whole process.
-    smartActions.probeEnvironment()
+    // Probe toolchains (xcodebuild/swift) only when Smart Actions is enabled
+    // — the probe is background work and must not run when the feature is off.
+    if features.isEnabled(.smartActions) {
+      smartActions.probeEnvironment()
+      smartActionsProbed = true
+    }
+    // Start (or leave stopped) the Screen feature's pollers to match the flag.
+    configureGatedBackgroundWork()
+    // React to runtime feature-flag flips (start/stop pollers, re-probe).
+    startFeatureFlagReactivity()
     // Start with a local terminal so the window is never empty. iOS has no
     // local terminals — it starts with just the sidebar (SSH + notes).
     _ = addLocalTerminal()
     #endif
   }
-  
+
+  #if os(macOS)
+  /// Starts or stops the Screen feature's background pollers to match the
+  /// current feature flag. Idempotent; safe to call at any time.
+  private func configureGatedBackgroundWork() {
+    if features.isEnabled(.screen) {
+      screenMonitor.start()
+    } else {
+      screenMonitor.stop()
+    }
+  }
+
+  /// Re-applies the gated background configuration whenever any flag we gate
+  /// on flips, and re-probes Smart Actions on the OFF→ON transition. Uses
+  /// `withObservationTracking` so we do not touch the store's persistence
+  /// layer (a dependency); each observed flip re-arms the observation.
+  private func startFeatureFlagReactivity() {
+    withObservationTracking {
+      // Read the flags we gate on so any flip re-arms the observation.
+      // `screen` is consumed via configureGatedBackgroundWork().
+      _ = features.isEnabled(.screen)
+      let smart = features.isEnabled(.smartActions)
+      let notes = features.isEnabled(.notes)
+      configureGatedBackgroundWork()
+      if smart && !smartActionsProbed {
+        smartActions.probeEnvironment()
+        smartActionsProbed = true
+      }
+      configureNotesGating(notesEnabled: notes)
+    } onChange: { [weak self] in
+      Task { @MainActor [weak self] in
+        self?.startFeatureFlagReactivity()
+      }
+    }
+  }
+
+  /// Swaps the Notes store to match the `.notes` flag: on loads the
+  /// CloudKit-topped store and observes remote changes; off swaps to a
+  /// local-only store and stops observing. No-op unless the flag actually
+  /// flipped (reactivity re-arms on every observed flag change, so the store
+  /// must not be rebuilt every time). Persisted notes files are reused
+  /// untouched, so re-enabling restores the prior set from disk.
+  private func configureNotesGating(notesEnabled: Bool) {
+    guard notesEnabled != notesFeatureEnabled else { return }
+    notesFeatureEnabled = notesEnabled
+    if notesEnabled {
+      notes = NotesStore(stores: Self.notesStoresWithCloud)
+      observeCloudKitRemoteChanges()
+    } else {
+      notes = NotesStore(stores: Self.notesStoresLocalOnly)
+      stopObservingCloudKitRemoteChanges()
+    }
+  }
+  #endif
+
   var selectedSession: TerminalSession? {
     sessions.first { $0.id == selection }
   }
@@ -305,6 +450,10 @@ final class AppModel {
     case .ssh(let config):
       let number = (sessions(for: config).firstIndex { $0.id == session.id } ?? 0) + 1
       return "\(config.displayName) #\(number)"
+    case .web(let web):
+      return web.name
+    case .database(let connection):
+      return connection.displayName
     }
   }
 
@@ -394,6 +543,75 @@ final class AppModel {
     return session
   }
 
+  /// Opens a saved web session: a live TerminalSession whose CONTENT is a
+  /// SwiftUI WebView (ContentView branches on the `.web` kind). The transport
+  /// is inert — it only reports `.connected` so the sidebar/toolbar treat the
+  /// session as live — and the WebView loads the stored URL. For an ssh-owned
+  /// session the port-forward utility (a sibling task) later redirects the
+  /// WebView at the host's localhost via a local tunnel. Web sessions never
+  /// register a terminal capture, so they don't land in local history.
+  @discardableResult
+  func openWebSession(_ web: WebSession) -> TerminalSession {
+    if historyMode {
+      historyMode = false
+      selectionBeforeHistory = nil
+    }
+    // An ssh-owned web page is reachable only through a local port-forward to
+    // the SSH host's localhost. Create + start the runtime here (the connect
+    // path) so the tunnel lifecycle is tied to the session's connect/disconnect
+    // behavior; removeSession stops it. A plain web page needs no runtime.
+    if web.sshConfigID != nil {
+      let config = connections.first { $0.id == web.sshConfigID }
+      let runtime = WebSessionRuntime(web: web, config: config)
+      webSessionRuntimes[web.id] = runtime
+      runtime.start()
+    }
+    let session = TerminalSession(transport: WebSessionTransport())
+    sessionKinds[session.id] = .web(web)
+    sessions.append(session)
+    selection = session.id
+    return session
+  }
+
+  /// The live SSH-tunnel runtime for `web`, if the page is open and ssh-owned.
+  /// Feeds the WebSessionDetailView's tunneled URL / error state.
+  func webSessionRuntime(for web: WebSession) -> WebSessionRuntime? {
+    webSessionRuntimes[web.id]
+  }
+
+  /// The live terminal session currently rendering `web`, if any — lets the
+  /// sidebar row show an open dot and makes Open focus the existing page
+  /// instead of launching a duplicate (same convention as the screen rows).
+  func liveWebSession(for web: WebSession) -> TerminalSession? {
+    sessions.first { session in
+      if case .web(let open) = kind(of: session) { return open.id == web.id }
+      return false
+    }
+  }
+
+  /// Opens a saved web session, or focuses the one already open.
+  func openOrFocusWebSession(_ web: WebSession) {
+    if let live = liveWebSession(for: web) {
+      selection = live.id
+    } else {
+      openWebSession(web)
+    }
+  }
+
+  /// Reopens a web session: closes any open page and starts a fresh one.
+  /// The WebView cannot be reloaded in place from here, so the open session
+  /// is dropped and a new one opened at the same URL.
+  func reconnectWebSession(_ web: WebSession) {
+    if let live = liveWebSession(for: web) { removeSession(live.id) }
+    openWebSession(web)
+  }
+
+  /// Deletes a saved web session and closes any open page bound to it.
+  func deleteWebSession(_ web: WebSession) {
+    if let live = liveWebSession(for: web) { removeSession(live.id) }
+    webSessions.remove(web.id)
+  }
+
   #if os(macOS)
   /// The SSH sessions that are currently open (kind `.ssh` AND
   /// `connectionState == .connected`). This is the ONLY set the remote
@@ -410,7 +628,9 @@ final class AppModel {
   /// connections (empty until a scan). The sidebar renders these in the
   /// merged Local section.
   var remoteScreenSessions: [ScreenSessionInfo] {
-    remoteScreenScanner.sessions
+    // A disabled Screen feature never scans, so publish an empty list.
+    guard features.isEnabled(.screen) else { return [] }
+    return remoteScreenScanner.sessions
   }
 
   /// Re-scans the connected SSH hosts for screen/tmux sessions. Called when a
@@ -418,6 +638,9 @@ final class AppModel {
   /// main thread — each remote exec is scheduled on its connection's NIO
   /// event loop, so the main thread is never blocked.
   func refreshRemoteScreenSessions() {
+    // A remote scan dials every connected SSH host — background work that
+    // must not run while the Screen feature is disabled.
+    guard features.isEnabled(.screen) else { return }
     remoteScreenScanner.scan(using: self)
   }
   #endif
@@ -500,6 +723,16 @@ final class AppModel {
   
   func removeSession(_ id: UUID) {
     archiveLocalSession(id)
+    // Tear down an ssh-owned web session's tunnel on disconnect/teardown.
+    if let session = sessions.first(where: { $0.id == id }),
+       case .web(let web) = kind(of: session) {
+      webSessionRuntimes.removeValue(forKey: web.id)?.stop()
+    }
+    // Tear down a database session's engine lifecycle on close.
+    if let session = sessions.first(where: { $0.id == id }),
+       case .database(let connection) = kind(of: session) {
+      disconnectDatabaseSession(connection)
+    }
     sessions.first(where: { $0.id == id })?.close()
     sessions.removeAll { $0.id == id }
     sessionKinds.removeValue(forKey: id)
@@ -534,6 +767,15 @@ final class AppModel {
       return connections.flatMap { sessions(for: $0) }
     case .action:
       return sessions.filter { if case .action = kind(of: $0) { return true }; return false }
+    case .web(let web):
+      // Group web sessions with everything sharing their SSH host (or, for a
+      // plain web session, with the local-nil set) so ⌘W/⌘N navigates them
+      // alongside the connections they belong to.
+      return sessions.filter { kind(of: $0).sshConfigID == web.sshConfigID }
+    case .database:
+      // Database sessions share their connection's section: all DB rows group
+      // together for ⌘W/⌘N, mirroring the Remote section.
+      return sessions.filter { if case .database = kind(of: $0) { return true }; return false }
     }
   }
   
@@ -553,16 +795,25 @@ final class AppModel {
       return connect(to: config)
     case .action:
       return addLocalTerminal()
+    case .web(let web):
+      return openWebSession(web)
+    case .database(let connection):
+      return openOrFocusDatabaseConnection(connection)
     }
   }
   #else
   @discardableResult
   func newSession(inSameSectionAs session: TerminalSession) -> TerminalSession? {
     // iOS: no local terminals — SSH sessions duplicate their connection,
+    // web sessions reopen the page, database rows reopen their browser,
     // anything else opens the New Connection sheet.
     switch kind(of: session) {
     case .ssh(let config):
       return connect(to: config)
+    case .web(let web):
+      return openWebSession(web)
+    case .database(let connection):
+      return openOrFocusDatabaseConnection(connection)
     default:
       showingNewConnection = true
       return selectedSession
@@ -591,7 +842,7 @@ final class AppModel {
   }
   #endif
   
-  /// ⌘W: closes the selected session (quitting persistent sessions like
+/// ⌘W: closes the selected session (quitting persistent sessions like
   /// the toolbar does), then selects the previous session in the same
   /// section — the next one when it was the first, a fresh session in
   /// that section when it was the only one.
@@ -736,7 +987,130 @@ final class AppModel {
   func updateConnection(_ config: SSHConfig) {
     connectionStore.save(config)
   }
-  
+
+  // MARK: - Database connections
+
+  /// Persists a database connection (creating or updating the record) and,
+  /// when a non-nil `password` is passed, writes the credential to the
+  /// Keychain. Does not open a session.
+  func saveDatabaseConnection(_ connection: DatabaseConnection, password: String? = nil) {
+    databaseStore.save(connection, password: password)
+  }
+
+  /// Deletes a saved database connection: closes any open browser session,
+  /// removes the Keychain credential, then removes the record.
+  func deleteDatabaseConnection(_ connection: DatabaseConnection) {
+    disconnectDatabaseSession(connection)
+    if let session = liveDatabaseSession(for: connection) {
+      removeSession(session.id)
+    }
+    databaseStore.remove(connection.id)
+  }
+
+  /// Persists a database connection edit in place (same id) and, when a
+  /// browser is currently open for it, reconnects so the live view reflects
+  /// the new settings.
+  func updateDatabaseConnection(_ connection: DatabaseConnection, password: String? = nil) {
+    databaseStore.save(connection, password: password)
+    if let dbSession = databaseSessions[connection.id] {
+      // The old connection reference is stale; swap it and reconnect.
+      databaseSessions.removeValue(forKey: connection.id)
+      Task { @MainActor in
+        await dbSession.disconnect()
+        let fresh = DatabaseSession(connection: connection, sshConfigStore: connectionStore)
+        databaseSessions[connection.id] = fresh
+        await fresh.connect(password: databaseStore.password(for: connection))
+      }
+    }
+  }
+
+  /// Opens a saved database connection (or focuses its already-open browser).
+  /// Mirrors `openOrFocusWebSession`: create a live session backed by the
+  /// inert transport, then connect the engine.
+  @discardableResult
+  func openOrFocusDatabaseConnection(_ connection: DatabaseConnection, password: String? = nil)
+    -> TerminalSession
+  {
+    if let live = liveDatabaseSession(for: connection) {
+      selection = live.id
+      return live
+    }
+    // Load the persisted credential when the caller didn't supply one.
+    let password = password ?? databaseStore.password(for: connection)
+    let dbSession = DatabaseSession(connection: connection, sshConfigStore: connectionStore)
+    let session = TerminalSession(transport: DatabaseTransport())
+    sessionKinds[session.id] = .database(connection)
+    sessions.append(session)
+    selection = session.id
+    databaseSessions[connection.id] = dbSession
+    Task { @MainActor in
+      await dbSession.connect(password: password)
+    }
+    return session
+  }
+
+  /// The live terminal session currently rendering `connection`, if any —
+  /// lets the sidebar row show an open dot and makes Open focus the existing
+  /// browser instead of launching a duplicate (same convention as web rows).
+  func liveDatabaseSession(for connection: DatabaseConnection) -> TerminalSession? {
+    sessions.first { session in
+      if case .database(let open) = kind(of: session) { return open.id == connection.id }
+      return false
+    }
+  }
+
+  /// The engine session backing `connection`, if it is open.
+  func databaseSession(for connection: DatabaseConnection) -> DatabaseSession? {
+    databaseSessions[connection.id]
+  }
+
+  /// The saved Keychain password for a connection (nil when unset), for
+  /// pre-filling the edit form.
+  func passwordForDatabase(_ connection: DatabaseConnection) -> String? {
+    databaseStore.password(for: connection)
+  }
+
+  /// Disconnects the engine lifecycle for `connection` (if open), keeping the
+  /// saved row and any terminal session so the browser shows a disconnected
+  /// state rather than vanishing.
+  func disconnectDatabase(_ connection: DatabaseConnection) {
+    disconnectDatabaseSession(connection)
+  }
+
+  /// Closes + removes a database session (used by delete and by the sidebar
+  /// close affordance). Keeps the saved row intact.
+  func closeDatabaseSession(_ connection: DatabaseConnection) {
+    disconnectDatabaseSession(connection)
+    if let session = liveDatabaseSession(for: connection) {
+      removeSession(session.id)
+    }
+  }
+
+  /// Tears down the engine connection and its runtime entry.
+  private func disconnectDatabaseSession(_ connection: DatabaseConnection) {
+    guard let session = databaseSessions.removeValue(forKey: connection.id) else { return }
+    Task { @MainActor in await session.disconnect() }
+  }
+
+  /// Reorders the sidebar's database section (drag-to-reorder).
+  func moveDatabaseConnection(from source: IndexSet, to destination: Int) {
+    var reordered = databaseStore.all
+    reordered.move(fromOffsets: source, toOffset: destination)
+    databaseStore.reorder(reordered)
+  }
+
+  /// Duplicates a database connection: a brand-new record (fresh id) copying
+  /// every field plus the Keychain credential from the source, so the copy is
+  /// independently usable. The displayed name gets a " copy" suffix (only when
+  /// a name was set) so the two rows are distinguishable in the sidebar.
+  func duplicateDatabaseConnection(_ source: DatabaseConnection) {
+    var copy = source
+    copy.id = UUID()
+    if !source.name.isEmpty { copy.name = "\(source.name) copy" }
+    let password = databaseStore.password(for: source)
+    databaseStore.save(copy, password: password)
+  }
+
   // MARK: - Public keys
   
   /// Copies the Secure Enclave key's public key (OpenSSH authorized_keys
@@ -999,6 +1373,22 @@ final class AppModel {
         return .local
       case .ssh(let config):
         return .ssh(config)
+      case .database(let connection):
+        // A database session has no shell to run actions in; honor the
+        // bound SSH host when it has one, else run locally.
+        if let id = connection.sshConfigID,
+           let config = connections.first(where: { $0.id == id }) {
+          return .ssh(config)
+        }
+        return .local
+      case .web(let web):
+        // An action run from a web session executes in that session's
+        // environment: the bound SSH host when it has one, else locally.
+        if let id = web.sshConfigID,
+           let config = connections.first(where: { $0.id == id }) {
+          return .ssh(config)
+        }
+        return .local
       }
     } else {
       #if os(macOS)
@@ -1124,6 +1514,13 @@ final class AppModel {
     smartActionsGeneration += 1
     smartActionDirectory = directory
     guard let directory else {
+      smartActionActions = []
+      openWithKinds = []
+      return
+    }
+    // Smart Actions disabled → the directory listing + integration scan is
+    // background work that must not run; publish nothing.
+    guard features.isEnabled(.smartActions) else {
       smartActionActions = []
       openWithKinds = []
       return
@@ -1268,6 +1665,18 @@ final class AppModel {
     }
   }
 
+  /// Tears down the CloudKit remote-change observation. Called when the Notes
+  /// feature is disabled so a disabled feature never holds a live observer or
+  /// a pending coalesced refresh.
+  private func stopObservingCloudKitRemoteChanges() {
+    if let observer = cloudKitChangeObserver {
+      NotificationCenter.default.removeObserver(observer)
+      cloudKitChangeObserver = nil
+    }
+    cloudKitRefreshTask?.cancel()
+    cloudKitRefreshTask = nil
+  }
+
   /// Debounces a store refresh: cancels any pending one and schedules a
   /// single refresh shortly after the last trigger. A burst of remote-change
   /// notifications (and the app's own writes, which also fire them) becomes
@@ -1285,8 +1694,12 @@ final class AppModel {
   /// whatever CloudKit pulled while the app ran. Called when the scene
   /// becomes active; the launch-time activation is skipped in ContentView.
   func refreshOnActivation() {
-    notes.refreshOnActivation()
+    // Notes CloudKit is gated behind its feature: when off, don't observe or
+    // refresh the notes stores (persisted data is left untouched, so
+    // re-enabling restores it). SSH configs and device keys always refresh.
+    if features.isEnabled(.notes) { notes.refreshOnActivation() }
     connectionStore.refreshOnActivation()
     deviceKeys.refreshOnActivation()
+    databaseStore.refreshOnActivation()
   }
 }

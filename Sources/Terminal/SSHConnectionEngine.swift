@@ -73,20 +73,28 @@ nonisolated final class SSHConnectionEngine: @unchecked Sendable {
   /// When non-nil the channel requests PTY + exec instead of a shell
   /// (action sessions); the remote exit status arrives via onExit.
   private let execCommand: String?
+  /// When true the connection opens NO session channel — it exists purely to
+  /// multiplex `direct-tcpip` (port-forward) channels, so it carries no
+  /// remote shell/exec. `onConnected` fires once SSH authentication succeeds.
+  private let forwardingOnly: Bool
   private let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
   private let knownHosts = KnownHostsStore()
-  
+
   private let channelBox = NIOLockedValueBox<Channel?>(nil)
   private let childChannelBox = NIOLockedValueBox<Channel?>(nil)
   private let sizeBox = NIOLockedValueBox<(columns: Int, rows: Int)>((columns: 80, rows: 24))
   /// Set once an exec channel reports its exit status; the channel then
   /// closes on its own, and that close must NOT surface as an error.
   private let execExitSeen = NIOLockedValueBox(false)
-  
-  init(config: SSHConfig, privateKey: SecureEnclave.P256.Signing.PrivateKey?, execCommand: String? = nil) {
+  /// The active local port-forward (web / remote tunnel), if any. Kept here so
+  /// teardown is tied to this engine's lifecycle.
+  private let localPortForward = NIOLockedValueBox<SSHLocalPortForward?>(nil)
+
+  init(config: SSHConfig, privateKey: SecureEnclave.P256.Signing.PrivateKey?, execCommand: String? = nil, forwardingOnly: Bool = false) {
     self.config = config
     self.privateKey = privateKey
     self.execCommand = execCommand
+    self.forwardingOnly = forwardingOnly
   }
   
   deinit {
@@ -98,6 +106,7 @@ nonisolated final class SSHConnectionEngine: @unchecked Sendable {
   // MARK: Public API (main thread)
   
   func start() {
+    let isForwarding = forwardingOnly
     let userAuth = UserAuthDelegate(
       username: config.user,
       privateKey: privateKey,
@@ -136,11 +145,31 @@ nonisolated final class SSHConnectionEngine: @unchecked Sendable {
             inboundChildChannelInitializer: nil
           )
           try channel.pipeline.syncOperations.addHandler(sshHandler)
-          try channel.pipeline.syncOperations.addHandler(ParentErrorHandler(onError: { [weak self] message in
-            DispatchQueue.main.async {
-              self?.fail(message)
-            }
-          }))
+          try channel.pipeline.syncOperations.addHandler(ParentErrorHandler(
+            onError: { [weak self] message in
+              DispatchQueue.main.async {
+                self?.fail(message)
+              }
+            },
+            // A forwarding session has no session channel, so a clean parent
+            // close must still surface the connection as gone.
+            onInactive: isForwarding ? { [weak self] in
+              DispatchQueue.main.async {
+                self?.fail("Connection closed.")
+              }
+            } : nil
+          ))
+          // Port-forward-only sessions open no session channel, so there is no
+          // `openChannel -> onConnected` path; signal readiness instead once
+          // SSH authentication completes (the moment the connection can
+          // multiplex direct-tcpip channels).
+          if isForwarding {
+            try channel.pipeline.syncOperations.addHandler(ForwardingReadyHandler(onReady: { [weak self] in
+              DispatchQueue.main.async {
+                self?.onConnected?()
+              }
+            }))
+          }
         }
       }
       .channelOption(ChannelOptions.socket(SocketOptionLevel(IPPROTO_TCP), TCP_NODELAY), value: 1)
@@ -156,6 +185,11 @@ nonisolated final class SSHConnectionEngine: @unchecked Sendable {
       switch outcome {
       case .success(let channel):
         self?.channelBox.withLockedValue { $0 = channel }
+        if self?.forwardingOnly == true {
+          // No session channel for a port-forward-only connection. The
+          // ForwardingReadyHandler fires onConnected once auth completes.
+          return
+        }
         self?.openChannel(on: channel, execCommand: self?.execCommand)
       case .failure(let error):
         DispatchQueue.main.async {
@@ -185,6 +219,7 @@ nonisolated final class SSHConnectionEngine: @unchecked Sendable {
   }
   
   func close() {
+    stopLocalPortForward()
     let child = childChannelBox.withLockedValue { channel in
       let value = channel
       channel = nil
@@ -198,6 +233,60 @@ nonisolated final class SSHConnectionEngine: @unchecked Sendable {
     child?.close(promise: nil)
     parent?.close(promise: nil)
     group.shutdownGracefully { _ in }
+  }
+
+  // MARK: Local port-forward (web session + remote Database tunnel)
+  //
+  // Reuses the SAME authenticated connection — no new SSH dial or
+  // authentication. The reusable `SSHLocalPortForward` bridges an in-app
+  // local port to remote `targetHost:targetPort` over `direct-tcpip`
+  // channels multiplexed on the parent channel, independent of this engine's
+  // shell/exec session channel.
+
+  /// Starts a local port-forward over this (already-authenticated) connection.
+  /// Resolves to the bound LOCAL port once the listener is up; on failure the
+  /// error is surfaced on the main thread via `completion` AND `onTerminated`
+  /// (so a dropping tunnel still replaces a blank page with a message).
+  func startLocalPortForward(
+    bindHost: String = "127.0.0.1",
+    bindPort: Int = 0,
+    targetHost: String,
+    targetPort: Int,
+    completion: @escaping @Sendable (Result<Int, Error>) -> Void
+  ) {
+    guard let parent = channelBox.withLockedValue({ $0 }) else {
+      DispatchQueue.main.async { completion(.failure(EngineError.notConnected)) }
+      return
+    }
+    // A reconnect may start a fresh tunnel over the same live connection.
+    localPortForward.withLockedValue { $0 }?.close()
+    let tunnel = SSHLocalPortForward(parentChannel: parent) { [weak self] message in
+      DispatchQueue.main.async { self?.fail(message) }
+    }
+    localPortForward.withLockedValue { $0 = tunnel }
+    let config = SSHLocalPortForward.Config(
+      bindHost: bindHost,
+      bindPort: bindPort,
+      targetHost: targetHost,
+      targetPort: targetPort
+    )
+    tunnel.start(config: config).whenComplete { result in
+      DispatchQueue.main.async {
+        switch result {
+        case .success(let port):
+          completion(.success(port))
+        case .failure(let error):
+          completion(.failure(error))
+        }
+      }
+    }
+  }
+
+  /// Closes the local port-forward (if any). The connection's session channel
+  /// is not affected.
+  func stopLocalPortForward() {
+    localPortForward.withLockedValue { $0 }?.close()
+    localPortForward.withLockedValue { $0 = nil }
   }
 
   // MARK: One-shot remote exec (persistent-session scan)
@@ -563,17 +652,50 @@ private final class ShellDataHandler: ChannelDuplexHandler {
 }
 
 /// Catches errors on the parent (TCP/SSH) channel, e.g. authentication failures.
+/// For port-forward-only sessions it also reports a CLEAN close (channel
+/// inactive) — such a session has no session channel to report closure, so the
+/// parent close is the only teardown signal.
 private final class ParentErrorHandler: ChannelInboundHandler {
   typealias InboundIn = Any
   
   private let onError: @Sendable (String) -> Void
+  private let onInactive: (@Sendable () -> Void)?
   
-  init(onError: @escaping @Sendable (String) -> Void) {
+  init(onError: @escaping @Sendable (String) -> Void, onInactive: (@Sendable () -> Void)? = nil) {
     self.onError = onError
+    self.onInactive = onInactive
   }
   
   func errorCaught(context: ChannelHandlerContext, error: Error) {
     onError(error.localizedDescription)
     context.fireErrorCaught(error)
+  }
+  
+  func channelInactive(context: ChannelHandlerContext) {
+    onInactive?()
+    context.fireChannelInactive()
+  }
+}
+
+/// Signals when a port-forward-only connection finishes SSH authentication.
+/// The engine opens no session channel for such a connection, so there is no
+/// `openChannel -> onConnected` path; this handler watches for the
+/// `UserAuthSuccessEvent` (fired by NIOSSH once the server accepts auth) and
+/// reports readiness — the point at which `direct-tcpip` channels can be
+/// multiplexed.
+private final class ForwardingReadyHandler: ChannelInboundHandler {
+  typealias InboundIn = Any
+  
+  private let onReady: @Sendable () -> Void
+  
+  init(onReady: @escaping @Sendable () -> Void) {
+    self.onReady = onReady
+  }
+  
+  func userInboundEventTriggered(context: ChannelHandlerContext, event: Any) {
+    if event is UserAuthSuccessEvent {
+      onReady()
+    }
+    context.fireUserInboundEventTriggered(event)
   }
 }

@@ -11,6 +11,9 @@ public final class SSHSession: TerminalTransport {
   /// When non-nil the connection runs this command via PTY + exec
   /// instead of an interactive shell (action sessions).
   private let execCommand: String?
+  /// When true the connection carries no shell/exec session channel and exists
+  /// purely to multiplex `direct-tcpip` port-forward channels.
+  private let forwardingOnly: Bool
 
   /// All callbacks are delivered on the main thread.
   public var onOutput: ((Data) -> Void)?
@@ -24,9 +27,10 @@ public final class SSHSession: TerminalTransport {
   private var engine: SSHConnectionEngine?
   private var started = false
 
-  public init(config: SSHConfig, execCommand: String? = nil) {
+  public init(config: SSHConfig, execCommand: String? = nil, forwardingOnly: Bool = false) {
     self.config = config
     self.execCommand = execCommand
+    self.forwardingOnly = forwardingOnly
   }
 
   public func start() {
@@ -35,7 +39,12 @@ public final class SSHSession: TerminalTransport {
 
     // The identity key lives in the Secure Enclave; it never touches disk.
     let key = try? SSHKeychain.loadOrCreateDefaultKey()
-    let engine = SSHConnectionEngine(config: config, privateKey: key, execCommand: execCommand)
+    let engine = SSHConnectionEngine(
+      config: config,
+      privateKey: key,
+      execCommand: execCommand,
+      forwardingOnly: forwardingOnly
+    )
 
     engine.onOutput = { [weak self] data in
       self?.onOutput?(data)
@@ -103,5 +112,37 @@ public final class SSHSession: TerminalTransport {
       return
     }
     engine.runRemoteCommand(command, completion: completion)
+  }
+
+  // MARK: - Local port-forward (web / remote tunnel)
+
+  /// Starts a local port-forward over this ALREADY-CONNECTED connection — no
+  /// new SSH dial/auth. Resolves to the bound local port once the listener is
+  /// up. Only meaningful after `start()` has authenticated (the web session
+  /// calls this from `onConnected`).
+  public func startLocalPortForward(
+    bindHost: String = "127.0.0.1",
+    bindPort: Int = 0,
+    targetHost: String,
+    targetPort: Int,
+    completion: @escaping @Sendable (Result<Int, Error>) -> Void
+  ) {
+    guard let engine else {
+      completion(.failure(SSHConnectionEngine.EngineError.notConnected))
+      return
+    }
+    engine.startLocalPortForward(
+      bindHost: bindHost,
+      bindPort: bindPort,
+      targetHost: targetHost,
+      targetPort: targetPort,
+      completion: completion
+    )
+  }
+
+  /// Closes the local port-forward (if any); the SSH connection itself is left
+  /// open.
+  public func stopLocalPortForward() {
+    engine?.stopLocalPortForward()
   }
 }

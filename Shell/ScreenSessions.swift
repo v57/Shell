@@ -45,8 +45,27 @@ final class ScreenSessionsMonitor {
   
   private let queue = DispatchQueue(label: "ScreenSessionsMonitor.list")
   private var timer: Timer?
-  
-  init() {
+  /// The feature-flag source of truth. Injected so tests can gate on a
+  /// hermetic store; production uses the shared store.
+  private let features: FeatureFlagsStore
+
+  /// `features == nil` falls back to the app-wide shared store.
+  init(features: FeatureFlagsStore? = nil) {
+    self.features = features ?? .shared
+  }
+
+  /// The Screen feature must be enabled for any subprocess work.
+  private var featureEnabled: Bool {
+    features.isEnabled(.screen)
+  }
+
+  /// Whether the 5s poller is currently armed.
+  var isPolling: Bool { timer != nil }
+
+  /// Starts the poller (immediate refresh + 5s repeats). Idempotent; no-op
+  /// when the Screen feature is disabled.
+  func start() {
+    guard featureEnabled, timer == nil else { return }
     refresh()
     timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
       Task { @MainActor [weak self] in
@@ -54,8 +73,17 @@ final class ScreenSessionsMonitor {
       }
     }
   }
-  
+
+  /// Stops the poller and clears the published rows. Idempotent.
+  func stop() {
+    timer?.invalidate()
+    timer = nil
+    sessions = []
+    errorMessage = nil
+  }
+
   func refresh() {
+    guard featureEnabled else { return }
     queue.async { [weak self] in
       let (sessions, message) = Self.runList()
       DispatchQueue.main.async {
@@ -99,6 +127,7 @@ final class ScreenSessionsMonitor {
   /// the new session's info so the caller can immediately open a terminal
   /// attached to it.
   func createSession(onCreated: ((ScreenSessionInfo) -> Void)? = nil) {
+    guard featureEnabled else { return }
     let kind = Self.preferredKind
     let name = ScreenSessionsParser.nextSessionName(existing: Set(sessions.map(\.shortName)))
     queue.async { [weak self] in
@@ -152,6 +181,7 @@ final class ScreenSessionsMonitor {
   /// terminates the session and every client attached to it (including
   /// our own), then refreshes the list.
   func quit(_ info: ScreenSessionInfo) {
+    guard featureEnabled else { return }
     let name = info.name
     let kind = info.kind
     queue.async { [weak self] in
@@ -202,6 +232,7 @@ final class ScreenSessionsMonitor {
   /// `tmux rename-session -t <name> <new>`. Sets `actionError` on
   /// failure, then refreshes the list.
   func rename(_ info: ScreenSessionInfo, to newName: String) {
+    guard featureEnabled else { return }
     let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else {
       actionError = ScreenActionError(
@@ -454,6 +485,14 @@ final class RemoteScreenSessionsScanner {
   /// The latest remote persistent session list. The UI (SidebarView) renders
   /// these rows in the merged Local section; empty until the first scan.
   private(set) var sessions: [ScreenSessionInfo] = []
+  /// The feature-flag source of truth. Injected so tests can gate on a
+  /// hermetic store; production uses the shared store.
+  private let features: FeatureFlagsStore
+
+  /// `features == nil` falls back to the app-wide shared store.
+  init(features: FeatureFlagsStore? = nil) {
+    self.features = features ?? .shared
+  }
 
   /// The remote list commands are the package's canonical strings (the tmux
   /// format matches the local poller, so both reuse `ScreenSessionsParser`).
@@ -466,6 +505,9 @@ final class RemoteScreenSessionsScanner {
   /// actor, which is the only safe place to touch these MainActor-default
   /// types.
   func scan(using model: AppModel) {
+    // A scan dials the connected SSH transports — that is background work.
+    // Never run it while the Screen feature is disabled.
+    guard features.isEnabled(.screen) else { return }
     let hostEntries: [(transport: SSHSession, origin: ScreenRemoteOrigin)] =
       model.connectedSSHSessions.compactMap { session in
         // Only kind .ssh, and only sessions that are connected.

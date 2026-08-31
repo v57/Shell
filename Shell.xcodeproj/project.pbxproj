@@ -7,11 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		26237461303E07C900E704FA /* Md in Frameworks */ = {isa = PBXBuildFile; productRef = 26237460303E07C900E704FA /* Md */; };
+		2611F6FA3042CFF000E1213E /* Md in Frameworks */ = {isa = PBXBuildFile; productRef = 2611F6F93042CFF000E1213E /* Md */; };
 		26C2D067302C066C008363F2 /* Terminal in Frameworks */ = {isa = PBXBuildFile; productRef = 26C2D066302C066C008363F2 /* Terminal */; };
-		26D2B09730244F870016694B /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 26D2B09630244F870016694B /* AppIcon.icon */; };
 		A10000000000000000000002 /* TerminalIntegrations in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000001 /* TerminalIntegrations */; };
 		A10000000000000000000004 /* Monitoring in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000003 /* Monitoring */; };
+		A35000000000000000000002 /* DatabaseEngines in Frameworks */ = {isa = PBXBuildFile; productRef = A35000000000000000000001 /* DatabaseEngines */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -27,7 +27,6 @@
 /* Begin PBXFileReference section */
 		000000000000000000000120 /* Shell.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Shell.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		000000000000000000000130 /* ShellTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ShellTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		26D2B09630244F870016694B /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIcon.icon; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -60,10 +59,11 @@
 		000000000000000130000000 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
+				2611F6FA3042CFF000E1213E /* Md in Frameworks */,
 				A10000000000000000000004 /* Monitoring in Frameworks */,
 				A10000000000000000000002 /* TerminalIntegrations in Frameworks */,
 				26C2D067302C066C008363F2 /* Terminal in Frameworks */,
-				26237461303E07C900E704FA /* Md in Frameworks */,
+				A35000000000000000000002 /* DatabaseEngines in Frameworks */,
 			);
 		};
 		000000000000000230000000 /* Frameworks */ = {
@@ -77,7 +77,6 @@
 		000000000000000000000001 = {
 			isa = PBXGroup;
 			children = (
-				26D2B09630244F870016694B /* AppIcon.icon */,
 				000000000000000000000010 /* Shell */,
 				000000000000000000000020 /* Products */,
 				000000000000000000000011 /* Tests */,
@@ -114,7 +113,8 @@
 				A10000000000000000000003 /* Monitoring */,
 				A10000000000000000000001 /* TerminalIntegrations */,
 				26C2D066302C066C008363F2 /* Terminal */,
-				26237460303E07C900E704FA /* Md */,
+				A35000000000000000000001 /* DatabaseEngines */,
+				2611F6F93042CFF000E1213E /* Md */,
 			);
 			productName = MyApp;
 			productReference = 000000000000000000000120 /* Shell.app */;
@@ -172,7 +172,8 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				26C2D065302C066C008363F2 /* XCLocalSwiftPackageReference "../Shell" */,
-				2623745F303E07C900E704FA /* XCRemoteSwiftPackageReference "markdown" */,
+				A200000000000000000000E1 /* XCLocalSwiftPackageReference "../Database" */,
+				2611F6F83042CFF000E1213E /* XCLocalSwiftPackageReference "../Markdown" */,
 			);
 			preferredProjectObjectVersion = 90;
 			productRefGroup = 000000000000000000000020 /* Products */;
@@ -189,7 +190,6 @@
 		000000000000000140000000 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			files = (
-				26D2B09730244F870016694B /* AppIcon.icon in Resources */,
 			);
 		};
 		000000000000000240000000 /* Resources */ = {
@@ -366,7 +366,7 @@
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				"INFOPLIST_FILE[sdk=macosx*]" = Config/Shell-Info.plist;
+				"INFOPLIST_FILE[sdk=macosx*]" = "Config/Shell-Info.plist";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
@@ -412,7 +412,7 @@
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				"INFOPLIST_FILE[sdk=macosx*]" = Config/Shell-Info.plist;
+				"INFOPLIST_FILE[sdk=macosx*]" = "Config/Shell-Info.plist";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
@@ -531,27 +531,23 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
+		2611F6F83042CFF000E1213E /* XCLocalSwiftPackageReference "../Markdown" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../Markdown;
+		};
 		26C2D065302C066C008363F2 /* XCLocalSwiftPackageReference "../Shell" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../Shell;
 		};
+		A200000000000000000000E1 /* XCLocalSwiftPackageReference "../Database" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../Database;
+		};
 /* End XCLocalSwiftPackageReference section */
 
-/* Begin XCRemoteSwiftPackageReference section */
-		2623745F303E07C900E704FA /* XCRemoteSwiftPackageReference "markdown" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/v57/markdown";
-			requirement = {
-				branch = main;
-				kind = branch;
-			};
-		};
-/* End XCRemoteSwiftPackageReference section */
-
 /* Begin XCSwiftPackageProductDependency section */
-		26237460303E07C900E704FA /* Md */ = {
+		2611F6F93042CFF000E1213E /* Md */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 2623745F303E07C900E704FA /* XCRemoteSwiftPackageReference "markdown" */;
 			productName = Md;
 		};
 		26C2D066302C066C008363F2 /* Terminal */ = {
@@ -565,6 +561,10 @@
 		A10000000000000000000003 /* Monitoring */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = Monitoring;
+		};
+		A35000000000000000000001 /* DatabaseEngines */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DatabaseEngines;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

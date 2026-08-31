@@ -57,6 +57,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 /// Application menu commands for creating terminals and managing the SSH key.
 struct ShellCommands: Commands {
+  /// Feature-flag source of truth; a disabled feature's commands are dropped
+  /// from the Shell menu so they aren't reachable by key equivalent either.
+  private var flags: FeatureFlagsStore { .shared }
+
   var body: some Commands {
     CommandMenu("Shell") {
       Button(newTerminalLabel) {
@@ -74,22 +78,27 @@ struct ShellCommands: Commands {
       // local terminal when there's no local cwd). Menu key equivalents
       // are processed before terminal keyDown, so it works while a
       // terminal has focus.
+      if flags.isEnabled(.sessions) {
       Button("New Terminal in Same Directory") {
         AppModel.shared.openTerminalInSameDirectoryAsSelected()
       }
       .keyboardShortcut("t", modifiers: .command)
+      }
       
       // ⌘⇧N opens a new persistent session and auto-attaches a terminal
       // (screen/tmux). Menu key equivalents are processed before terminal
       // keyDown, so it works while a terminal has focus.
+      if flags.isEnabled(.screen) {
       Button("New Persistent Session") {
         AppModel.shared.createScreenSession()
       }
       .keyboardShortcut("n", modifiers: [.command, .shift])
+      }
 
       // ⌘R toggles the actions overlay. Menu key equivalents are
       // processed before terminal keyDown, so it works while a terminal
       // has focus (same precedent as the ⌘W/⌘N rebind).
+      if flags.isEnabled(.actions) {
       Button("Actions…") {
         AppModel.shared.showingActions.toggle()
       }
@@ -100,6 +109,7 @@ struct ShellCommands: Commands {
       }
       .keyboardShortcut("r", modifiers: [.command, .shift])
       .disabled(!AppModel.shared.canCreateActionFromCurrentSession)
+      }
 
       Divider()
 
@@ -112,20 +122,22 @@ struct ShellCommands: Commands {
       .keyboardShortcut("e", modifiers: .command)
       .disabled(AppModel.shared.selectedSession == nil)
 
-      Divider()
 
       // ⌘⇧H opens the Themes sheet. Menu key equivalents dispatch before
       // terminal keyDown, so it works while a terminal has focus (and ⌘⇧H
       // doesn't collide with Hide/Hide Others, which are ⌘H/⌥⌘H).
+      if flags.isEnabled(.themes) {
       Button("Themes…") {
         AppModel.shared.showingThemes = true
       }
       .keyboardShortcut("h", modifiers: [.command, .shift])
+      }
 
       // ⌘⇧F toggles the Files panel. Disabled without a selected terminal
       // session (the Files panel only shows alongside a live session). Menu
       // key equivalents dispatch before terminal keyDown, so it works while a
       // terminal has focus.
+      if flags.isEnabled(.files) {
       Button("Toggle Files Panel") {
         AppModel.shared.directoryBrowser.visible.toggle()
       }
@@ -141,6 +153,7 @@ struct ShellCommands: Commands {
       .disabled(
         AppModel.shared.selectedSession == nil
           || !AppModel.shared.directoryBrowser.canNavigateUp)
+      }
 
       Divider()
       
@@ -152,12 +165,14 @@ struct ShellCommands: Commands {
       }
       .keyboardShortcut("w", modifiers: .command)
       
+      if flags.isEnabled(.ssh) {
       Divider()
       
       Button("Copy SSH Public Key") {
         AppModel.shared.copyPublicKey()
       }
       .keyboardShortcut("c", modifiers: [.command, .shift])
+      }
     }
   }
   
@@ -176,6 +191,10 @@ struct ShellCommands: Commands {
       return "New Persistent Session"
     case .ssh(let config):
       return "New Connection to \(config.displayName)"
+    case .web:
+      return "New Web Page"
+    case .database(let connection):
+      return "Open \(connection.displayName)"
     }
   }
   
@@ -193,6 +212,10 @@ struct ShellCommands: Commands {
       return "Close Session"
     case .ssh:
       return "Close Connection"
+    case .web:
+      return "Close Web Page"
+    case .database:
+      return "Close Database"
     }
   }
 }

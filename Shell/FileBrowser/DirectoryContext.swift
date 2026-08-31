@@ -83,6 +83,14 @@ final class DirectoryContext: Identifiable {
         return SSHCommandRunner(config: config)
       }
       return LocalProcessCommandRunner()
+    case .web:
+      // Web sessions have no file browser/executor; the Files panel is not
+      // offered for them. Default keeps the switch exhaustive (unused).
+      return LocalProcessCommandRunner()
+    case .database:
+      // Database sessions have no file system browser; the Files panel is
+      // never offered for them. Default keeps the switch exhaustive (unused).
+      return LocalProcessCommandRunner()
     }
   }
 
