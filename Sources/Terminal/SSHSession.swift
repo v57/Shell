@@ -105,7 +105,7 @@ public final class SSHSession: TerminalTransport {
   /// server" case), so callers interpret the text rather than treat non-zero
   /// as a failure. Only meaningful after `start()` has connected — the
   /// scanner gates on `connectionState == .connected` before calling.
-  public func runCommand(_ command: String, completion: @escaping @Sendable (Result<String, Error>) -> Void) {
+  public func runCommand(_ command: String, completion: @escaping @Sendable (Result<RemoteCommandResult, Error>) -> Void) {
     guard let engine else {
       completion(.failure(Libssh2Connection.EngineError.notConnected))
       return

@@ -2,6 +2,23 @@ import CLibssh2
 import CryptoKit
 import Foundation
 
+/// The outcome of a one-shot remote `exec` on an already-authenticated
+/// connection: the captured stdout plus the command's remote exit status.
+///
+/// The exit status is carried alongside the stdout rather than being fused
+/// into `.failure` — a non-zero exit (e.g. `tmux ls` exit 1 on "no server
+/// running", command-not-found 127) is a normal result the caller interprets,
+/// and only connection/channel-level problems produce `.failure`.
+public struct RemoteCommandResult: Sendable {
+  public let stdout: String
+  public let exitStatus: Int32
+
+  public init(stdout: String, exitStatus: Int32) {
+    self.stdout = stdout
+    self.exitStatus = exitStatus
+  }
+}
+
 /// Owns a single libssh2 SSH connection for one remote terminal session.
 ///
 /// All libssh2 work happens on the engine's private serial queue (a dedicated
@@ -185,8 +202,8 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
   /// `tmux ls` exit 1 on the normal "no server running" case, and
   /// `command not found` (exit 127) is the absence case — callers interpret the
   /// captured stdout. `.failure` is reserved for connection/channel-level
-  /// problems.
-  func runRemoteCommand(_ command: String, completion: @escaping @Sendable (Result<String, Error>) -> Void) {
+  /// problems. The remote exit status is delivered in `RemoteCommandResult`.
+  func runRemoteCommand(_ command: String, completion: @escaping @Sendable (Result<RemoteCommandResult, Error>) -> Void) {
     queue.async { [weak self] in
       guard let self, let sess = self.session else {
         DispatchQueue.main.async { completion(.failure(EngineError.notConnected)) }
@@ -701,7 +718,7 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
   private func runOneShotCommand(
     _ sess: OpaquePointer,
     command: String,
-    completion: @escaping @Sendable (Result<String, Error>) -> Void
+    completion: @escaping @Sendable (Result<RemoteCommandResult, Error>) -> Void
   ) {
     let delivered = LockedFlag()
 
@@ -756,11 +773,12 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
 
     // Deliver exactly once on the main thread. Non-zero remote exit status is
     // NOT a failure (tmux ls exits 1 on "no server running"; command-not-found
-    // is 127); callers interpret the captured stdout.
+    // is 127); the exit status is carried in the payload for callers to
+    // interpret, and .failure is reserved for connection/channel problems.
     if delivered.compareAndSet() {
-      DispatchQueue.main.async { completion(.success(out)) }
+      let result = RemoteCommandResult(stdout: out, exitStatus: exitStatus)
+      DispatchQueue.main.async { completion(.success(result)) }
     }
-    _ = exitStatus
   }
 
   // MARK: Teardown

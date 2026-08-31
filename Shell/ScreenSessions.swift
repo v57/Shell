@@ -526,7 +526,7 @@ final class RemoteScreenSessionsScanner {
         for command in commands {
           let output = await withCheckedContinuation { (cont: CheckedContinuation<String?, Never>) in
             transport.runCommand(command) { result in
-              if case .success(let text) = result { cont.resume(returning: text) }
+              if case .success(let r) = result { cont.resume(returning: r.stdout) }
               else { cont.resume(returning: nil) }
             }
           }
