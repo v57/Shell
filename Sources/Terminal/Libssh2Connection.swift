@@ -226,11 +226,13 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
 
       if forwardingOnly {
         // No session channel. The connection can now multiplex direct-tcpip
-        // channels; signal readiness on the main thread.
+        // channels; signal readiness on the main thread. Watch the socket only
+        // so a remote close surfaces as onTerminated (the port-forward helper
+        // owns the actual tunnel channels).
         DispatchQueue.main.async { [weak self] in
           self?.onConnected?()
         }
-        startPump()
+        watchSocket()
         return
       }
 
@@ -543,6 +545,26 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
   }
 
   // MARK: Byte-output pump
+
+  /// For a forwarding-only connection (no session channel), watch the socket so
+  /// a remote close / hangup surfaces as `onTerminated`. Also drains any
+  /// session-level packets so the connection stays responsive. There is no
+  /// shell/exec channel to read.
+  private func watchSocket() {
+    while running {
+      let ready = waitForSocket(socketFD, events: Int16(POLLIN | POLLHUP), timeoutMs: 100)
+      if ready {
+        var pfd = pollfd(fd: socketFD, events: Int16(POLLIN | POLLHUP), revents: 0)
+        _ = poll(&pfd, 1, 0)
+        if pfd.revents & Int16(POLLHUP | POLLERR | POLLNVAL) != 0 {
+          finishOnMain("Connection closed.")
+          return
+        }
+        // Drain any pending session packets so the SSH session stays healthy.
+        _ = libssh2_session_block_directions(session!)
+      }
+    }
+  }
 
   /// The non-blocking read/write pump. Runs on `queue`. Waits on the socket for
   /// readiness via `poll()`, drains stdout into `onOutput` (main thread), and
