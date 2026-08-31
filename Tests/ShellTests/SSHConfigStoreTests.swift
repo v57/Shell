@@ -75,7 +75,10 @@ struct SSHConfigStoreTests {
     let config = makeConfig()
     let store = makeStore()
     store.save(config)
-    let updated = makeConfig()
+    // Same id → save() updates the existing record in place rather than
+    // inserting a second one (a distinct id would now be deduped as a
+    // same-endpoint duplicate).
+    let updated = SSHConfig(id: config.id, name: "prod", host: config.host, user: config.user, port: config.port)
     store.save(updated)
     #expect(store.all.filter { $0.id == config.id }.count == 1)
     #expect(store.all.first { $0.id == config.id }?.name == "prod")
@@ -132,5 +135,26 @@ struct SSHConfigStoreTests {
     let records2 = try Self.sharedContainer.mainContext.fetch(FetchDescriptor<SSHConfigRecord>())
     #expect(records2.first { $0.id == fallback.id }?.keyId == SSHConfigKey.device)
     #expect(store2.all.contains { $0.id == fallback.id && $0.name == "fallback" })
+  }
+
+  @Test @MainActor func dedupsSameEndpointKeepsNewest() throws {
+    // Two devices each saving the same connection produce distinct UUIDs but
+    // the same endpoint (host + port). The most recently edited record must
+    // win and the older one must be deleted so the dedup propagates back to
+    // CloudKit (not just hidden for this list).
+    let context = Self.sharedContainer.mainContext
+    let oldCfg = SSHConfig(name: "old", host: "dup.example.com", user: "deploy", port: 2202)
+    let newCfg = SSHConfig(name: "new", host: "dup.example.com", user: "deploy", port: 2202)
+    let oldCipher = try SecureFileStore.seal(JSONEncoder().encode(oldCfg), using: Self.iCloudKey)
+    let newCipher = try SecureFileStore.seal(JSONEncoder().encode(newCfg), using: Self.iCloudKey)
+    context.insert(SSHConfigRecord(id: oldCfg.id, order: 0, keyId: SSHConfigKey.icloud, updatedAt: Date(timeIntervalSince1970: 100), payloadCipher: oldCipher))
+    context.insert(SSHConfigRecord(id: newCfg.id, order: 1, keyId: SSHConfigKey.icloud, updatedAt: Date(timeIntervalSince1970: 200), payloadCipher: newCipher))
+    try context.save()
+
+    // A fresh store's reload dedups: only the newest record survives.
+    let rereader = makeStore()
+    #expect(rereader.all.filter { $0.id == oldCfg.id }.isEmpty)
+    #expect(rereader.all.contains { $0.id == newCfg.id && $0.name == "new" })
+    #expect(rereader.all.first { $0.id == newCfg.id }?.displayName == "new")
   }
 }

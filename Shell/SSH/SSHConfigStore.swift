@@ -218,19 +218,65 @@ final class SSHConfigStore {
     let records = (try? context.fetch(
       FetchDescriptor<SSHConfigRecord>(sortBy: [SortDescriptor(\.order)])
     )) ?? []
-    var configs: [SSHConfig] = []
+    // Dedup on reload: iCloud sync can deliver the same connection as two
+    // separate records (one UUID per device, since each device generates a
+    // fresh `SSHConfig.id`). The connection identity is the endpoint
+    // (host + port) — the `user` field is NOT usable because it defaults to
+    // each device's own `NSUserName()`, so two devices naming the same host
+    // store different users. For each endpoint keep only the record with the
+    // most recent `updatedAt` and delete the rest. This is convergent across
+    // devices: every device runs the same "newest updatedAt wins" rule, so
+    // the same survivor is chosen and the losers are removed everywhere (the
+    // delete propagates through CloudKit).
+    var winnerByKey: [String: (record: SSHConfigRecord, config: SSHConfig)] = [:]
+    var losers: [SSHConfigRecord] = []
     for record in records {
+      let config: SSHConfig
       do {
-        if let config = try unseal(record) {
-          configs.append(config)
-        }
+        guard let unsealed = try unseal(record) else { continue }
+        config = unsealed
       } catch {
         // Undecryptable here (e.g. a device-keyed record synced from
         // another machine) — skip it rather than break the list.
         NSLog("SSHConfigStore: could not decrypt a config record: \(error)")
+        continue
+      }
+      let key = duplicateKey(for: config)
+      if let winner = winnerByKey[key] {
+        if record.updatedAt > winner.record.updatedAt {
+          losers.append(winner.record)
+          winnerByKey[key] = (record, config)
+        } else {
+          losers.append(record)
+        }
+      } else {
+        winnerByKey[key] = (record, config)
+      }
+    }
+    // Drop the losing duplicates so the dedup holds (and propagates) rather
+    // than merely hiding them for this list.
+    if !losers.isEmpty {
+      for loser in losers {
+        context.delete(loser)
+      }
+      try? context.save()
+    }
+    // Emit the survivors in store order; a winner's record may be the one
+    // from a later (winning) entry, so re-join against the winning configs.
+    var configs: [SSHConfig] = []
+    for record in records {
+      if let winner = winnerByKey.values.first(where: { $0.record === record }) {
+        configs.append(winner.config)
       }
     }
     all = configs
+  }
+
+  /// Identity of a connection for duplicate detection: the endpoint
+  /// (lowercased host + port). `user`/`name` are excluded because they are
+  /// device-local and can legitimately differ across synced devices.
+  private func duplicateKey(for config: SSHConfig) -> String {
+    "\(config.host.lowercased()):\(config.port)"
   }
 
   private func fetch(_ id: UUID) -> SSHConfigRecord? {
