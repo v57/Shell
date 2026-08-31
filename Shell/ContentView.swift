@@ -43,7 +43,7 @@ struct ContentView: View {
         SidebarView()
           .navigationSplitViewColumnWidth(min: 190, ideal: 230)
       } detail: {
-        if let session = model.selectedSession {
+        if let session = model.mainSelectedSession {
           let kind = model.kind(of: session)
           Group {
             if case .web(let web) = kind {
@@ -144,7 +144,7 @@ struct ContentView: View {
           }
           .navigationTitle(model.displayName(for: session))
           .navigationDirectorySubtitle(localDirectoryText)
-        } else if let historySession = model.selectedHistorySession {
+        } else if let historySession = model.mainSelectedHistorySession {
           HistorySessionView(session: historySession)
             .id(historySession.id)
             .navigationTitle(historySession.title)
@@ -172,7 +172,7 @@ struct ContentView: View {
                 .help("Create Action")
               }
             }
-        } else if let note = model.selectedNote {
+        } else if let note = model.mainSelectedNote {
           NoteEditorView(noteID: note.id)
             .id(note.id)
             .navigationTitle(model.notes.title(for: note.id))
@@ -281,7 +281,7 @@ struct ContentView: View {
     // Kick the directory refresh the moment the selected session changes
     // (the timer alone adds up to a second of lag before the toolbar
     // actions refresh when switching sessions in the sidebar).
-    .onChange(of: model.selectedSession?.id) { _, _ in
+    .onChange(of: model.mainSelectedSession?.id) { _, _ in
       refreshLocalDirectory()
       syncFileBrowser()
     }
@@ -314,7 +314,7 @@ struct ContentView: View {
   /// follows the shell's `cd`. Non-local sessions clear the subtitle.
   /// The home-directory prefix is shortened to `~` for display.
   private func refreshLocalDirectory() {
-    guard let session = model.selectedSession,
+    guard let session = model.mainSelectedSession,
           case .local = model.kind(of: session),
           let path = session.currentDirectory?.path else {
       localDirectoryText = ""
@@ -348,7 +348,7 @@ struct ContentView: View {
   /// (or clears it when nothing terminal-ish is selected), so the Files panel
   /// rebuilds its context and lists the right directory for the right runner.
   private func syncFileBrowser() {
-    if let session = model.selectedSession {
+    if let session = model.mainSelectedSession {
       model.directoryBrowser.setSession(session, kind: model.kind(of: session))
     } else {
       model.directoryBrowser.setSession(nil, kind: .local)

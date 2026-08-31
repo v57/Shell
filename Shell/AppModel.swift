@@ -93,6 +93,12 @@ final class AppModel {
   /// The Themes sheet (Shell menu: Themes… ⌘⇧H).
   var showingThemes = false
 
+  /// Ids of sessions and notes currently presented in their own detached
+  /// window/scene (macOS `WindowGroup` id "detach", or a separate iPad scene).
+  /// Mutated by detach/reattach and published via @Observable, so
+  /// ContentView/SidebarView re-render when an item is detached or returned.
+  var detachedIDs: Set<UUID> = []
+
   /// App-side kind per session id (the library session is transport-based
   /// and kind-agnostic). Written when a session is created, removed on
   /// removal — every session in `sessions` has an entry.
@@ -418,6 +424,53 @@ final class AppModel {
   var selectedHistorySession: HistorySession? {
     guard historyMode else { return nil }
     return history.sessions.first { $0.id == selection }
+  }
+
+  /// The selected session as shown in the MAIN window. A session currently
+  /// presented in its own detached window is not shown again in the main
+  /// detail (its window owns it); re-attaching (`markAttached`) restores it.
+  var mainSelectedSession: TerminalSession? {
+    guard let session = selectedSession, !detachedIDs.contains(session.id) else { return nil }
+    return session
+  }
+
+  /// The selected note as shown in the MAIN window (nil if it is detached).
+  var mainSelectedNote: NotesStore.NoteSummary? {
+    guard let note = selectedNote, !detachedIDs.contains(note.id) else { return nil }
+    return note
+  }
+
+  /// The selected history session as shown in the MAIN window (nil if detached).
+  var mainSelectedHistorySession: HistorySession? {
+    guard let history = selectedHistorySession, !detachedIDs.contains(history.id) else { return nil }
+    return history
+  }
+
+  // MARK: - Detached windows (macOS + iPad)
+
+  /// Whether `id` is currently presented in its own detached window/scene.
+  func isDetached(_ id: UUID) -> Bool { detachedIDs.contains(id) }
+
+  /// Marks `id` as detached (presented in its own window/scene) and republishes.
+  func markDetached(_ id: UUID) { detachedIDs.insert(id) }
+
+  /// Returns `id` to the main window (removes it from the detached set).
+  func markAttached(_ id: UUID) { detachedIDs.remove(id) }
+
+  /// Flips the detached state for `id`.
+  func toggleDetached(_ id: UUID) {
+    if detachedIDs.contains(id) { detachedIDs.remove(id) } else { detachedIDs.insert(id) }
+  }
+
+  /// The id of the currently selected item that can be detached (a session
+  /// or a note), nil when nothing detachable is selected. Drives the
+  /// "Detach Session/Note" menu command: its enabled state and which item
+  /// the ⌘⇧D toggle acts on. A session is detachable even while detached
+  /// (so pressing ⌘⇧D again returns it to the main window).
+  var selectedDetachableID: UUID? {
+    if let session = selectedSession { return session.id }
+    if let note = selectedNote { return note.id }
+    return nil
   }
   
   /// The app-side kind of a session. Registered at creation, dropped on

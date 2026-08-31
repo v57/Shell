@@ -27,6 +27,17 @@ struct ShellApp: App {
         .environment(AppModel.shared)
     }
     #endif
+
+    // A detached session/note lives in its own value-keyed window (macOS) or
+    // scene (iPad), created by `openWindow(id: "detach", value: id)`; it is
+    // returned to the main window by re-attaching (removing the id from
+    // AppModel.detachedIDs) and dismissing (`dismissWindow(id: "detach")`).
+    // The UUID resolves to the same detail content (TerminalView/NoteEditorView
+    // via DetachDetailView). Present on macOS + iPad; iPhone stays single-scene.
+    WindowGroup("Detach", id: "detach", for: UUID.self) { itemID in
+      DetachDetailView(itemID: itemID.wrappedValue ?? UUID())
+        .environment(AppModel.shared)
+    }
   }
 }
 
@@ -57,6 +68,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 /// Application menu commands for creating terminals and managing the SSH key.
 struct ShellCommands: Commands {
+  @Environment(\.openWindow) private var openWindow
+  @Environment(\.dismissWindow) private var dismissWindow
   /// Feature-flag source of truth; a disabled feature's commands are dropped
   /// from the Shell menu so they aren't reachable by key equivalent either.
   private var flags: FeatureFlagsStore { .shared }
@@ -122,6 +135,29 @@ struct ShellCommands: Commands {
       .keyboardShortcut("e", modifiers: .command)
       .disabled(AppModel.shared.selectedSession == nil)
 
+      Divider()
+
+      // ⌘⇧D detaches the selected session/note into its own window/scene
+      // (macOS window, iPad scene) when attached, or returns it to the main
+      // window when pressed again while detached (its window/scene is
+      // dismissed and the item is selected in the main window). Disabled
+      // when nothing detachable is selected. Menu key equivalents dispatch
+      // before terminal keyDown, so it works while a terminal has focus.
+      Button("Detach Session/Note") {
+        guard let id = AppModel.shared.selectedDetachableID else { return }
+        if AppModel.shared.isDetached(id) {
+          AppModel.shared.markAttached(id)
+          AppModel.shared.selection = id
+          dismissWindow(id: "detach", value: id)
+        } else {
+          openWindow(id: "detach", value: id)
+          AppModel.shared.markDetached(id)
+        }
+      }
+      .keyboardShortcut("d", modifiers: [.command, .shift])
+      .disabled(AppModel.shared.selectedDetachableID == nil)
+
+      Divider()
 
       // ⌘⇧H opens the Themes sheet. Menu key equivalents dispatch before
       // terminal keyDown, so it works while a terminal has focus (and ⌘⇧H

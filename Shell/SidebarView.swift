@@ -572,6 +572,7 @@ private struct ActionRunRow: View {
           .lineLimit(1)
           .truncationMode(.middle)
         Spacer()
+        DetachReturnBadge(itemID: session.id)
         Text(environmentLabel)
           .font(.caption2)
           .foregroundStyle(.secondary)
@@ -847,6 +848,7 @@ private struct SessionRow: View {
           Text(currentLabel)
         }
         Spacer()
+        DetachReturnBadge(itemID: session.id)
         stateDot
       }
       // Second line: the session's status (n-th non-empty terminal line
@@ -1066,6 +1068,7 @@ private struct NoteRow: View {
           .lineLimit(1)
           .truncationMode(.tail)
         Spacer()
+        DetachReturnBadge(itemID: note.id)
         if note.storedInICloud {
           Image(systemName: "icloud.fill")
             .font(.caption2)
@@ -1220,5 +1223,33 @@ extension TerminalSession {
       result.append(AttributedString(character, attributes: attrs))
     }
     return result
+  }
+}
+
+/// A trailing return badge shown on a sidebar row whose item is currently
+/// detached: an `arrowshape.turn.up.left.fill` button that re-attaches the
+/// item — removing it from `AppModel.detachedIDs`, selecting it in the main
+/// window, and dismissing its detached window/scene (`WindowGroup` id
+/// "detach"). Hidden for attached items. Reading `model.isDetached` through
+/// the @Observable model re-renders the row when detach state flips.
+private struct DetachReturnBadge: View {
+  @Environment(AppModel.self) private var model
+  @Environment(\.dismissWindow) private var dismissWindow
+  let itemID: UUID
+
+  var body: some View {
+    if model.isDetached(itemID) {
+      Button {
+        model.markAttached(itemID)
+        model.selection = itemID
+        dismissWindow(id: "detach", value: itemID)
+      } label: {
+        Image(systemName: "arrowshape.turn.up.left.fill")
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+      }
+      .buttonStyle(.plain)
+      .help("Return to main window")
+    }
   }
 }
