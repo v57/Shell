@@ -10,7 +10,6 @@ struct NewDatabaseConnectionView: View {
   let connection: DatabaseConnection?
 
   @State private var engine: DatabaseEngine
-  @State private var name: String
   @State private var host: String
   @State private var port: String
   @State private var database: String
@@ -32,7 +31,6 @@ struct NewDatabaseConnectionView: View {
     self.isEditing = connection != nil
     let c = connection
     _engine = State(initialValue: c?.engine ?? .mongodb)
-    _name = State(initialValue: c?.name ?? "")
     _host = State(initialValue: c?.host ?? "")
     _port = State(initialValue: c.map { "\($0.port)" } ?? "")
     _database = State(initialValue: c?.database ?? "")
@@ -64,6 +62,15 @@ struct NewDatabaseConnectionView: View {
             }
           }
           .pickerStyle(.menu)
+          // A new connection's port follows the engine's default port. Only
+          // reset when the user hasn't typed a custom port (i.e. the field still
+          // holds the previous engine's default).
+          .onChange(of: engine) { oldEngine, newEngine in
+            guard !isEditing else { return }
+            if port == String(oldEngine.defaultPort) {
+              port = String(newEngine.defaultPort)
+            }
+          }
           // Engines that don't link on this platform can't connect; grey the
           // picker setting rather than allow a doomed selection.
           if !engine.isAvailable {
@@ -74,7 +81,6 @@ struct NewDatabaseConnectionView: View {
         }
 
         Section("Connection") {
-          TextField("Name", text: $name)
           TextField(engine == .sqlite ? "File Path" : "Host", text: $host)
             .autocorrectionDisabled()
           if engine != .sqlite {
@@ -152,7 +158,7 @@ struct NewDatabaseConnectionView: View {
       connection = DatabaseConnection(
         id: existing.id,
         engine: engine,
-        name: name,
+        name: existing.name,
         host: host,
         port: UInt16(Int(port) ?? Int(engine.defaultPort)),
         database: database.isEmpty ? nil : database,
@@ -164,7 +170,7 @@ struct NewDatabaseConnectionView: View {
     } else {
       connection = DatabaseConnection(
         engine: engine,
-        name: name,
+        name: engine.displayName,
         host: host,
         port: UInt16(Int(port) ?? Int(engine.defaultPort)),
         database: database.isEmpty ? nil : database,
