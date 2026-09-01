@@ -105,14 +105,20 @@ import TerminalIntegrations
     guard let ctx = context else { return }
     let path = ctx.path
     let runner = ctx.runner
+    let isLocal = ctx.isLocal
     busy = true
     lastError = nil
     do {
       // List off the main thread so an `ls` (or a remote `ls`) never blocks the
       // UI. The executor is Sendable; for a local session it is an `actor`, for
       // a remote one a @MainActor class whose `run` we simply await (it hops).
+      // A local session takes the `FileManager` fast path (no `/bin/zsh` spawn
+      // per listing); a remote session keeps the shell-based `DirectoryLister`.
       let result = try await Task.detached(priority: .userInitiated) {
-        try await DirectoryLister.list(directory: path, executor: runner)
+        if isLocal {
+          return try LocalDirectoryLister.list(directory: path)
+        }
+        return try await DirectoryLister.list(directory: path, executor: runner)
       }.value
       guard gen == generation, context === ctx else { return }  // superseded
       rows = result

@@ -30,6 +30,22 @@ final class DirectoryContext: Identifiable {
   /// The command executor selected by `kind`, used to run remote `pwd`/`ls`.
   let runner: any FileCommandExecutor
 
+  /// Whether the session's directory lives on this host, so it can be listed
+  /// with `FileManager`'s fast path instead of spawning a shell `ls`. This
+  /// mirrors the runner selection in `runner(for:)`: local and screen sessions
+  /// (and config-less action sessions) are local; SSH and remote-action sessions
+  /// are remote.
+  var isLocal: Bool {
+    switch kind {
+    case .local, .screen:
+      return true
+    case .action(let spec):
+      return spec.config == nil
+    case .ssh, .web, .database:
+      return false
+    }
+  }
+
   /// The absolute current directory the browser is showing.
   private(set) var path: String
 
