@@ -35,7 +35,8 @@ struct FilesPanelView: View {
         showsDeleteConfirm = true
       }, onMove: { names, _ in beginMutate(names: names, mode: .move) },
       onCopy: { names in beginMutate(names: names, mode: .copy) },
-      onDrop: { urls in model.copyIn(urls: urls) })
+      onDrop: { urls in model.copyIn(urls: urls) },
+      onRename: { from, to in model.rename(from: from, to: to) })
       .confirmationDialog(
         "Delete \(deleteCandidates.count) item\(deleteCandidates.count == 1 ? "" : "s")?",
         isPresented: $showsDeleteConfirm, titleVisibility: .visible

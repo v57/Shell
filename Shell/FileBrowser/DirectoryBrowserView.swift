@@ -57,6 +57,22 @@ struct DirectoryBrowserView: View {
   /// A non-nil value replaces the table with an error state + Retry.
   let errorMessage: String?
 
+  /// The name of the row currently being renamed, or nil when not editing.
+  /// A row is in rename mode when `renamingName == row.name`.
+  @State private var renamingName: String?
+  /// The in-progress text of the rename field, seeded from the row name when
+  /// rename mode begins. Only one row is ever in rename mode.
+  @State private var renameText = ""
+  /// Focus for the rename `TextField`, keyed by the row name so the field is
+  /// focused the moment rename mode begins.
+  @FocusState private var renameFieldFocused: String?
+  /// A short suppression window so a Return that just committed a rename
+  /// (the focused TextField's `.onSubmit`) cannot be re-interpreted by the
+  /// table's `.onKeyPress(.return)` in the same event pass and immediately
+  /// re-open the editor. Cleared on commit/cancel; a human Return press
+  /// never lands inside this window except the commit itself.
+  @State private var suppressRenameUntil = Date.distantPast
+
   /// Double-clicking a directory emits `navigate(into:)`.
   var onNavigate: (FileRow) -> Void
   /// Double-clicking a file emits `open(file:)`.
@@ -73,6 +89,10 @@ struct DirectoryBrowserView: View {
   var onCopy: (Set<String>) -> Void
   /// Copy files dropped onto the table (from Finder) into the current directory.
   var onDrop: ([URL]) -> Void
+  /// Rename a single entry from `from` to `to`. The view enters rename mode on
+  /// Return and commits via this callback; the model reuses its move/copy path
+  /// (rename is a move within the current directory).
+  var onRename: (String, String) -> Void
 
   init(
     rows: [FileRow], path: String, selection: Binding<Set<String>>,
@@ -82,7 +102,8 @@ struct DirectoryBrowserView: View {
     onRetry: @escaping () -> Void = {}, onDelete: @escaping (Set<String>) -> Void = { _ in },
     onMove: @escaping (Set<String>, String) -> Void = { _, _ in },
     onCopy: @escaping (Set<String>) -> Void = { _ in },
-    onDrop: @escaping ([URL]) -> Void = { _ in }
+    onDrop: @escaping ([URL]) -> Void = { _ in },
+    onRename: @escaping (String, String) -> Void = { _, _ in }
   ) {
     self.rows = rows
     self.path = path
@@ -98,6 +119,7 @@ struct DirectoryBrowserView: View {
     self.onMove = onMove
     self.onCopy = onCopy
     self.onDrop = onDrop
+    self.onRename = onRename
   }
 
   var body: some View {
@@ -106,6 +128,14 @@ struct DirectoryBrowserView: View {
       Divider()
       content
     }.frame(minWidth: 480)
+      // Blur cancels rename mode: when the focused field loses focus for any
+      // reason other than the field's own Return/Esc (whose handlers clear
+      // focus first), exit rename mode without issuing a rename.
+      .onChange(of: renameFieldFocused) { _, newValue in
+        if let renaming = renamingName, newValue != renaming {
+          cancelRenameLocal()
+        }
+      }
   }
 
   // MARK: - Content states
@@ -139,7 +169,16 @@ struct DirectoryBrowserView: View {
     private var fileTable: some View {
       Table(of: FileRow.self, selection: $selection, sortOrder: $sortOrder) {
         TableColumn("Name", sortUsing: KeyPathComparator(\FileRow.name)) { row in
-          iconAndName(row).frame(maxWidth: .infinity, alignment: .leading)
+          if renamingName == row.name {
+            TextField("", text: $renameText)
+              .textFieldStyle(.roundedBorder)
+              .font(.body)
+              .focused($renameFieldFocused, equals: row.name)
+              .onSubmit { commitRename() }
+              .onExitCommand { cancelRename() }
+          } else {
+            iconAndName(row).frame(maxWidth: .infinity, alignment: .leading)
+          }
         }
         TableColumn("Type", sortUsing: KeyPathComparator(\FileRow.sortableType)) { row in
           Text(row.sortableType)
@@ -172,6 +211,48 @@ struct DirectoryBrowserView: View {
         onDrop(urls)
         return true
       }
+      // Return on a single selected row enters rename mode. When already in
+      // rename mode, the TextField's own `.onSubmit` (Return) commits — so this
+      // key handler is only active in the non-editing state.
+      .onKeyPress(.return, phases: .down) { _ in
+        beginRenameIfSingleSelection()
+        return .handled
+      }
+    }
+
+    /// The rename field's OnSubmit was already handled by the contained
+    /// `TextField`, so this covers the path where Return reaches the table.
+    private func beginRenameIfSingleSelection() {
+      guard renamingName == nil, renameFieldFocused == nil, selection.count == 1,
+        let name = selection.first
+      else { return }
+      guard Date() >= suppressRenameUntil else { return }
+      guard rows.contains(where: { $0.name == name }) else { return }
+      renamingName = name
+      renameText = name
+      renameFieldFocused = name
+    }
+
+    /// Commits the rename: fires `onRename(from:to:)` when the text changed,
+    /// then always exits rename mode (the model re-lists on success).
+    private func commitRename() {
+      guard let name = renamingName else { return }
+      let to = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+      if !to.isEmpty && to != name { onRename(name, to) }
+      suppressRenameUntil = Date().addingTimeInterval(0.25)
+      cancelRenameLocal()
+    }
+
+    /// Cancels rename mode without issuing any rename.
+    private func cancelRename() {
+      suppressRenameUntil = Date().addingTimeInterval(0.25)
+      cancelRenameLocal()
+    }
+
+    private func cancelRenameLocal() {
+      renamingName = nil
+      renameText = ""
+      renameFieldFocused = nil
     }
 
     private func iconAndName(_ row: FileRow) -> some View {

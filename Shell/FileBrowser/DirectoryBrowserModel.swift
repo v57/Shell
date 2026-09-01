@@ -182,6 +182,22 @@ import TerminalIntegrations
     }
   }
 
+  /// Renames a single entry `from` to `to` within the current directory. A
+  /// rename is a move of one entry to a new name in the same directory, so it
+  /// reuses the move/copy path: it moves `from` to a relative destination of
+  /// just the new name, which `FileBrowserActions` anchors to the current
+  /// directory. The listing refreshes on success (via the shared move path).
+  func rename(from: String, to: String) {
+    guard let ctx = context, !from.isEmpty, !to.isEmpty, from != to else { return }
+    let actions = FileBrowserActions(model: self)
+    Task {
+      guard let row = rows.first(where: { $0.name == from }) else { return }
+      await actions.moveCopy(
+        source: Self.absolutePath(from, in: ctx), destination: to, mode: .move,
+        isDirectory: row.isDirectory)
+    }
+  }
+
   /// Copies files dropped onto the browser (from Finder) into the current
   /// directory, via the shared rsync move/copy path. This is the drop side of
   /// the browser's drag-and-drop: `DirectoryBrowserView` calls it with the
