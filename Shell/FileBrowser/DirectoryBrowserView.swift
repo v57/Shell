@@ -6,17 +6,27 @@ import UniformTypeIdentifiers
 #if os(macOS)
 /// A row dragged out of the browser. Carries the absolute file URL so a LOCAL
 /// file can be dropped into Finder (which copies/moves the actual file); for a
-/// remote listing the URL is best-effort and simply won't resolve there.
-private struct RowDragPayload: Transferable {
+/// remote listing the URL is best-effort and simply won't resolve there. Also
+/// carries the names of the dragged rows, so a drop onto a directory row in the
+/// SAME table can move/copy them into that directory — the drag-OUT URL and the
+/// drag-IN names travel together as two representations of one payload.
+private struct RowDragPayload: Transferable, Codable {
+  /// The dragged row names. Dragging a selected row carries the whole
+  /// selection; dragging an unselected row carries just that one name.
+  let names: [String]
+  /// The absolute file URL for drag-OUT to Finder (single-file export).
   let url: URL
 
   // The app target compiles MainActor-default; the transfer representation is
   // read by the framework on a background thread, so it must be nonisolated.
   nonisolated static var transferRepresentation: some TransferRepresentation {
-    FileRepresentation(contentType: .fileURL) { item in
+    // Internal drag: JSON payload, so a directory row's
+    // `.dropDestination(for: RowDragPayload.self)` reconstructs the names and
+    // can move/copy them into the target directory.
+    CodableRepresentation(for: RowDragPayload.self, contentType: .json)
+    // Drag-OUT to Finder: export the file URL as a file.
+    FileRepresentation(exportedContentType: .fileURL) { item in
       SentTransferredFile(item.url)
-    } importing: { received in
-      RowDragPayload(url: received.file)
     }
   }
 }
@@ -93,6 +103,12 @@ struct DirectoryBrowserView: View {
   /// Return and commits via this callback; the model reuses its move/copy path
   /// (rename is a move within the current directory).
   var onRename: (String, String) -> Void
+  /// Move or copy the named entries into a target directory row. Fired by an
+  /// internal drag dropped onto a directory row, and by the directory row's
+  /// "Move Here" / "Copy Here" context-menu items. `targetPath` is the absolute
+  /// directory path; the model routes through `FileBrowserActions.moveCopy` so
+  /// the canonical-path / directory-into-itself guards still apply.
+  var onMoveCopyIntoDirectory: (Set<String>, String, FileCommandBuilder.MoveCopyMode) -> Void
 
   init(
     rows: [FileRow], path: String, selection: Binding<Set<String>>,
@@ -103,7 +119,9 @@ struct DirectoryBrowserView: View {
     onMove: @escaping (Set<String>, String) -> Void = { _, _ in },
     onCopy: @escaping (Set<String>) -> Void = { _ in },
     onDrop: @escaping ([URL]) -> Void = { _ in },
-    onRename: @escaping (String, String) -> Void = { _, _ in }
+    onRename: @escaping (String, String) -> Void = { _, _ in },
+    onMoveCopyIntoDirectory: @escaping (Set<String>, String, FileCommandBuilder.MoveCopyMode) -> Void
+      = { _, _, _ in }
   ) {
     self.rows = rows
     self.path = path
@@ -120,6 +138,7 @@ struct DirectoryBrowserView: View {
     self.onCopy = onCopy
     self.onDrop = onDrop
     self.onRename = onRename
+    self.onMoveCopyIntoDirectory = onMoveCopyIntoDirectory
   }
 
   var body: some View {
@@ -191,7 +210,19 @@ struct DirectoryBrowserView: View {
         }
       } rows: {
         ForEach(sortedRows) { row in
-          TableRow(row).draggable(RowDragPayload(url: URL(fileURLWithPath: absolutePath(for: row))))
+          let tableRow = TableRow(row)
+            .draggable(dragPayload(for: row))
+          if row.isDirectory {
+            // A directory row is a drop target for an INTERNAL drag: dropping
+            // one or more (selected) rows here moves/copies them into it. This
+            // uses the dedicated internal payload type so it never captures the
+            // Finder (URL) drops handled by the table-level dropDestination.
+            tableRow.dropDestination(for: RowDragPayload.self) { payloads in
+              handleRowDrop(payloads, onto: row)
+            }
+          } else {
+            tableRow
+          }
         }
       }
       // Right-click → context-menu actions; double-click (or Return) → primary
@@ -231,6 +262,30 @@ struct DirectoryBrowserView: View {
       renamingName = name
       renameText = name
       renameFieldFocused = name
+    }
+
+    /// The drag payload for a row. Dragging a selected row carries the whole
+    /// selection (so a drop onto a directory moves all of them); dragging an
+    /// unselected row carries just that one. The exported URL is always the
+    /// single row's own absolute file URL, so drag-OUT to Finder is unchanged.
+    private func dragPayload(for row: FileRow) -> RowDragPayload {
+      let names = selection.contains(row.name) ? selection.sorted() : [row.name]
+      return RowDragPayload(names: names, url: URL(fileURLWithPath: absolutePath(for: row)))
+    }
+
+    /// Handles an internal drop of one or more rows onto a directory row: moves
+    /// them into that directory via the shared move/copy path. The model routes
+    /// through `FileBrowserActions.moveCopy`, so the canonical-path guard (a
+    /// directory moved into itself) and the source==destination guard still
+    /// apply. The target directory is excluded up front so a selection that
+    /// already contains it (or the target dragged onto itself) never attempts a
+    /// self-move. Finder (URL) drops never reach here — they use the table-level
+    /// `.dropDestination(for: URL.self)` and route to `copyIn`.
+    private func handleRowDrop(_ payloads: [RowDragPayload], onto target: FileRow) {
+      guard target.isDirectory else { return }
+      let names = Set(payloads.flatMap(\.names)).subtracting([target.name])
+      guard !names.isEmpty else { return }
+      onMoveCopyIntoDirectory(names, absolutePath(for: target), .move)
     }
 
     /// Commits the rename: fires `onRename(from:to:)` when the text changed,
@@ -303,7 +358,24 @@ struct DirectoryBrowserView: View {
       Button(row.isDirectory ? "Open Folder" : "Open in Default App", systemImage: "arrow.up.forward.app") {
         activate(row)
       }
+      // For a directory row, offer to move/copy the OTHER selected entries into
+      // it — the menu-side counterpart of dropping rows onto the directory. The
+      // target directory itself is excluded (a directory cannot be moved into
+      // itself), so these appear only when other rows are selected.
+      if row.isDirectory {
+        let others = names.subtracting([row.name])
+        if !others.isEmpty {
+          Divider()
+          Button("Move Here", systemImage: "folder") {
+            onMoveCopyIntoDirectory(others, absolutePath(for: row), .move)
+          }
+          Button("Copy Here", systemImage: "doc.on.doc") {
+            onMoveCopyIntoDirectory(others, absolutePath(for: row), .copy)
+          }
+        }
+      }
     }
+    Divider()
     Button("Move…", systemImage: "folder") { onMove(names, "") }
     Button("Copy…", systemImage: "doc.on.doc") { onCopy(names) }
     Divider()
