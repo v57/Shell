@@ -239,7 +239,7 @@ struct SidebarView: View {
           }
           if flags.isEnabled(.web) {
           Button {
-            model.showingNewWebSession = true
+            model.openEmptyWebSession()
           } label: {
             Image(systemName: "globe")
           }.buttonStyle(.borderless).help("New web session")
@@ -289,7 +289,7 @@ struct SidebarView: View {
           }
           if flags.isEnabled(.web) {
           Button {
-            model.showingNewWebSession = true
+            model.openEmptyWebSession()
           } label: {
             Image(systemName: "globe")
           }.buttonStyle(.borderless).help("New web session")

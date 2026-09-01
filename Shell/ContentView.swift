@@ -2,6 +2,9 @@ import Combine
 import SwiftUI
 import Terminal
 import TerminalIntegrations
+#if os(macOS)
+import AppKit
+#endif
 
 struct ContentView: View {
   @Environment(AppModel.self) private var model
@@ -656,6 +659,32 @@ struct WebAddressBar: View {
     .padding(.horizontal, 10)
     .padding(.vertical, 6)
     .frame(maxWidth: .infinity)
-    .onAppear { editing = urlText }
+    .onAppear {
+      editing = urlText
+      // Focus the address bar so the user can immediately type a new URL
+      // (for a freshly-opened empty web session the bar is empty; for an
+      // existing page the current URL is selected so typing overwrites it).
+      // SwiftUI can drop a FocusState request issued during the same
+      // run-loop pass that inserts the view, so the request is deferred one
+      // tick; on macOS a second tick selects all once focus lands.
+      DispatchQueue.main.async {
+        focused = true
+        #if os(macOS)
+        DispatchQueue.main.async { addressBarSelectAll() }
+        #endif
+      }
+    }
   }
+
+  #if os(macOS)
+  /// Selects the address bar's contents once it holds focus. After the
+  /// `@FocusState` request lands, the TextField's field editor — an
+  /// `NSTextView` — becomes the window's first responder, so this selects all
+  /// text in that editor without guessing which field is the address bar.
+  private func addressBarSelectAll() {
+    guard let window = NSApp.keyWindow,
+          let editor = window.firstResponder as? NSTextView else { return }
+    editor.selectAll(nil)
+  }
+  #endif
 }

@@ -673,6 +673,19 @@ final class AppModel {
     return session
   }
 
+  /// Opens a blank web session with no URL configured: creates an empty
+  /// `WebSession`, opens it like any saved page (so it lands in the sidebar
+  /// and is selected), and leaves the address bar focused so the user can
+  /// type a URL immediately. Unlike the New-Web sheet this does NOT persist
+  /// a saved session up front — the user types a URL and presses Return to
+  /// navigate, and `updateWebSessionURL` persists on the first commit. Used
+  /// by the Web menu item to open an empty page with the address bar focused
+  /// instead of showing the New-Web sheet.
+  @discardableResult
+  func openEmptyWebSession() -> TerminalSession {
+    openWebSession(WebSession())
+  }
+
   /// The live SSH-tunnel runtime for `web`, if the page is open and ssh-owned.
   /// Feeds the WebSessionDetailView's tunneled URL / error state.
   func webSessionRuntime(for web: WebSession) -> WebSessionRuntime? {
