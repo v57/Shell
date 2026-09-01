@@ -144,7 +144,7 @@ private struct DetachWindowAccessor: NSViewRepresentable {
   }
 
   /// Never intercepts mouse events; reports when it moves into/out of a window.
-  private final class PassThroughView: NSView {
+  final class PassThroughView: NSView {
     var onWindow: ((NSWindow?) -> Void)?
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
