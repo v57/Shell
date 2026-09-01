@@ -1274,6 +1274,17 @@ final class AppModel {
     }
   }
 
+  /// Renames a saved database connection in place (same id, so the sidebar row
+  /// and any open browser session keep referring to the same connection), then
+  /// persists via `databaseStore.save`. Empty/whitespace-only input resets the
+  /// name to the engine display name, matching the displayName fallback.
+  func renameDatabaseConnection(_ connection: DatabaseConnection, to name: String) {
+    var updated = connection
+    let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    updated.name = trimmed.isEmpty ? updated.engine.displayName : trimmed
+    databaseStore.save(updated)
+  }
+
   /// Opens a saved database connection (or focuses its already-open browser).
   /// Mirrors `openOrFocusWebSession`: create a live session backed by the
   /// inert transport, then connect the engine.

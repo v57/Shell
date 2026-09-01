@@ -11,6 +11,10 @@ struct SidebarView: View {
   @State private var renamingSessionID: UUID?
   /// The saved SSH connection currently being edited (opens the edit sheet).
   @State private var editingConfig: SSHConfig?
+  /// The database connection being renamed (drives the rename sheet), and the
+  /// text field's draft value, pre-filled with the connection's display name.
+  @State private var renamingDatabaseConnection: DatabaseConnection?
+  @State private var databaseRenameText = ""
   #if os(macOS)
   /// The screen session currently being renamed (keyed by full name).
   @State private var renamingScreenName: String?
@@ -181,7 +185,7 @@ struct SidebarView: View {
           ForEach(localCollapsed || !flags.isEnabled(.database) ? [] : localDatabaseConnections) { connection in
             DatabaseConnectionRow(connection: connection)
               .tag(model.liveDatabaseSession(for: connection)?.id ?? connection.id)
-              .contextMenu { DatabaseConnectionActions(connection: connection) }
+              .contextMenu { DatabaseConnectionActions(connection: connection) { beginRenameDatabase($0) } }
           }
           .transition(.blurReplace)
         }
@@ -264,6 +268,7 @@ struct SidebarView: View {
             onBeginRename: { renamingSessionID = $0 },
             onCommitRename: commitRename,
             onCancelRename: { renamingSessionID = nil },
+            onRenameDatabase: beginRenameDatabase,
             onEdit: { editingConfig = $0 }
           )
         }
@@ -440,6 +445,18 @@ struct SidebarView: View {
     .sheet(item: $model.editingWebSession) { web in
       NewWebSessionView(web: web)
     }
+    // The Rename… action on a database connection: a small sheet with a
+    // TextField pre-filled with the connection's current name/display name.
+    // Empty input resets to the engine display name.
+    .sheet(item: $renamingDatabaseConnection) { connection in
+      DatabaseRenameSheet(
+        connection: connection,
+        text: $databaseRenameText,
+        onCommit: { commitRenameDatabase(connection) },
+        onCancel: { renamingDatabaseConnection = nil }
+      )
+      .environment(model)
+    }
     .alert("Authorized Keys", isPresented: Binding(
       get: { model.authorizedKeysError != nil },
       set: { if !$0 { model.authorizedKeysError = nil } }
@@ -519,6 +536,20 @@ struct SidebarView: View {
   private func commitRename(_ id: UUID, _ name: String) {
     model.renameSession(id, to: name)
     renamingSessionID = nil
+  }
+
+  /// Opens the database rename sheet pre-filled with the connection's current
+  /// name (or its display name fallback).
+  private func beginRenameDatabase(_ connection: DatabaseConnection) {
+    databaseRenameText = connection.displayName
+    renamingDatabaseConnection = connection
+  }
+
+  /// Applies a database rename (empty input resets to the engine display name)
+  /// and dismisses the sheet.
+  private func commitRenameDatabase(_ connection: DatabaseConnection) {
+    model.renameDatabaseConnection(connection, to: databaseRenameText)
+    renamingDatabaseConnection = nil
   }
 
   /// A leading disclosure triangle that collapses/expands a sidebar section.
@@ -656,6 +687,7 @@ private struct SSHConfigGroup: View {
   let onBeginRename: (UUID) -> Void
   let onCommitRename: (UUID, String) -> Void
   let onCancelRename: () -> Void
+  let onRenameDatabase: (DatabaseConnection) -> Void
   let onEdit: (SSHConfig) -> Void
   private var flags: FeatureFlagsStore { .shared }
   
@@ -719,7 +751,7 @@ private struct SSHConfigGroup: View {
       DatabaseConnectionRow(connection: connection)
         .padding(.leading, 14)
         .tag(model.liveDatabaseSession(for: connection)?.id ?? connection.id)
-        .contextMenu { DatabaseConnectionActions(connection: connection) }
+        .contextMenu { DatabaseConnectionActions(connection: connection) { onRenameDatabase($0) } }
     }
     }
   }
@@ -1147,12 +1179,16 @@ private struct DatabaseConnectionRow: View {
 
 /// The context menu for a database connection row, shared by the Local and
 /// Remote (per-host) sections so both offer the same actions. Connect and
-/// Disconnect flip on whether the engine is live; Duplicate clones the row
-/// and its Keychain credential (fresh id); Edit opens the prefilled sheet;
-/// Delete closes the browser, drops the credential, then the record.
+/// Disconnect flip on whether the engine is live; Rename opens the rename
+/// sheet; Duplicate clones the row and its Keychain credential (fresh id);
+/// Edit opens the prefilled sheet; Delete closes the browser, drops the
+/// credential, then the record.
 private struct DatabaseConnectionActions: View {
   @Environment(AppModel.self) private var model
   let connection: DatabaseConnection
+  /// Called when the user picks Rename… so the parent view can open the
+  /// rename sheet pre-filled with this connection's display name.
+  let onRename: (DatabaseConnection) -> Void
 
   var body: some View {
     if model.liveDatabaseSession(for: connection) != nil {
@@ -1160,6 +1196,7 @@ private struct DatabaseConnectionActions: View {
     } else {
       Button("Connect") { model.openOrFocusDatabaseConnection(connection) }
     }
+    Button("Rename…") { onRename(connection) }
     Button("Duplicate") { model.duplicateDatabaseConnection(connection) }
     Button("Edit…") {
       model.editingDatabaseConnection = connection
@@ -1167,6 +1204,43 @@ private struct DatabaseConnectionActions: View {
     }
     Divider()
     Button("Delete", role: .destructive) { model.deleteDatabaseConnection(connection) }
+  }
+}
+
+/// A small rename prompt presented as a sheet from the database connection
+/// context menu. The TextField is pre-filled with the connection's current
+/// name (or its display name fallback); committing an empty value resets the
+/// name to the engine display name, matching the displayName fallback.
+private struct DatabaseRenameSheet: View {
+  let connection: DatabaseConnection
+  @Binding var text: String
+  let onCommit: () -> Void
+  let onCancel: () -> Void
+
+  @FocusState private var fieldFocused: Bool
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      Text("Rename Database Connection")
+        .font(.headline)
+      TextField(connection.displayName, text: $text)
+        .textFieldStyle(.roundedBorder)
+        .focused($fieldFocused)
+        .onSubmit { onCommit() }
+      Label(connection.displayName, systemImage: connection.engine.systemImage)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+      HStack {
+        Spacer()
+        Button("Cancel", role: .cancel) { onCancel() }
+        Button("Rename") { onCommit() }
+          .keyboardShortcut(.defaultAction)
+      }
+    }
+    .padding(20)
+    .frame(width: 360)
+    .onAppear { fieldFocused = true }
   }
 }
 
