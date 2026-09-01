@@ -30,9 +30,13 @@ struct NewDatabaseConnectionView: View {
     self.savedPassword = savedPassword
     self.isEditing = connection != nil
     let c = connection
-    _engine = State(initialValue: c?.engine ?? .mongodb)
-    _host = State(initialValue: c?.host ?? "")
-    _port = State(initialValue: c.map { "\($0.port)" } ?? "")
+    // Seed the engine first so host/port defaults can reference its defaultPort.
+    let chosenEngine = c?.engine ?? .mongodb
+    _engine = State(initialValue: chosenEngine)
+    // Network engines default the host to "localhost"; SQLite is file-based and
+    // starts with an empty file-path field instead.
+    _host = State(initialValue: c?.host ?? (chosenEngine == .sqlite ? "" : "localhost"))
+    _port = State(initialValue: c.map { String($0.port) } ?? String(chosenEngine.defaultPort))
     _database = State(initialValue: c?.database ?? "")
     _username = State(initialValue: c?.username ?? "")
     _authSource = State(initialValue: c?.authSource ?? "")
