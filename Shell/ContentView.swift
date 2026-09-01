@@ -51,18 +51,28 @@ struct ContentView: View {
               // (no terminal, no Files panel, no terminal toolbar). For an
               // ssh-owned session the tunnel runtime supplies the reachable
               // local URL (or a connecting/error state) instead of the raw URL.
-              WebSessionDetailView(web: web, tunnel: model.webSessionRuntime(for: web))
-                .id(session.id)
-                .toolbar {
-                  // The SSH-tunnel picker is a web-session-only control: it
-                  // lets the user switch which host the open page is tunnelled
-                  // through (or clear the tunnel). See webSSHTunnelPicker.
-                  #if os(macOS)
-                  ToolbarItem(placement: .primaryAction) {
-                    webSSHTunnelPicker(web: web)
-                  }
-                  #endif
+              let tunnel = model.webSessionRuntime(for: web)
+              // The address bar value: the tunneled local URL for an ssh-owned
+              // session once the tunnel is up, otherwise the stored web URL —
+              // so the displayed value matches what the WebView actually loads.
+              let effectiveURLText: String = tunnel?.tunnelURL?.absoluteString ?? web.url
+              VStack(spacing: 0) {
+                WebAddressBar(urlText: effectiveURLText) { newURL in
+                  model.updateWebSessionURL(web, to: newURL)
                 }
+                WebSessionDetailView(web: web, tunnel: tunnel)
+                  .id(session.id)
+              }
+              .toolbar {
+                // The SSH-tunnel picker is a web-session-only control: it
+                // lets the user switch which host the open page is tunnelled
+                // through (or clear the tunnel). See webSSHTunnelPicker.
+                #if os(macOS)
+                ToolbarItem(placement: .primaryAction) {
+                  webSSHTunnelPicker(web: web)
+                }
+                #endif
+              }
             } else if case .database(let connection) = kind {
               // A database session renders the per-engine documents/tables
               // browser (no terminal, no Files panel). The live engine
@@ -601,3 +611,51 @@ private struct OpenWithMenu: View {
   }
 }
 #endif // os(macOS)
+
+/// A one-line URL address bar shown above the WebView for `.web` sessions.
+/// Displays the current effective URL (the tunneled local URL for an ssh-owned
+/// session, or the stored web URL) and, on Return, commits the edited text to
+/// navigate the WebView at the new address.
+struct WebAddressBar: View {
+  /// The current URL text to display. Re-renders as the tunnel comes up so an
+  /// ssh-owned session's bar reflects the reachable local URL.
+  let urlText: String
+  /// Called with the user's edited text when they press Return.
+  let onSubmit: (String) -> Void
+
+  @State private var editing = ""
+  /// Whether the field is currently being edited (so we don't clobber the
+  /// user's typing when the tunnel transitions an in-flight update).
+  @State private var isEditing = false
+  /// True while the user has typed text that differs from `urlText`; used to
+  /// decide whether a Return should be ignored (nothing changed).
+  @FocusState private var focused: Bool
+
+  var body: some View {
+    HStack(spacing: 6) {
+      TextField("URL", text: $editing)
+        .textFieldStyle(.roundedBorder)
+        .focused($focused)
+        .onSubmit {
+          // Only navigate when the edited text actually differs from what's
+          // currently displayed — pressing Return on an unchanged bar is a
+          // no-op (avoids an unnecessary reconnect/reload).
+          guard editing != urlText else { return }
+          onSubmit(editing)
+        }
+        .onChange(of: urlText) { _, newText in
+          // Keep the field in sync with the effective URL. While the user is
+          // actively editing, don't overwrite their keystrokes.
+          if !isEditing { editing = newText }
+        }
+        .onChange(of: focused) { _, nowFocused in
+          isEditing = nowFocused
+          if !nowFocused { editing = urlText }
+        }
+    }
+    .padding(.horizontal, 10)
+    .padding(.vertical, 6)
+    .frame(maxWidth: .infinity)
+    .onAppear { editing = urlText }
+  }
+}

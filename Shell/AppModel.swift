@@ -723,6 +723,22 @@ final class AppModel {
     }
   }
 
+  /// Updates a web session's URL in place and, if the page is open, reloads
+  /// it at the new address. A reconnect rebuilds the WebView (and, for an
+  /// ssh-owned session, retargets the local port-forward at the new host URL)
+  /// so the loaded page matches the address bar. A saved-but-closed session
+  /// only persists the new URL for the next open.
+  func updateWebSessionURL(_ web: WebSession, to newURL: String) {
+    let trimmed = newURL.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty, web.url != trimmed else { return }
+    var updated = web
+    updated.url = trimmed
+    webSessions.save(updated)
+    if liveWebSession(for: web) != nil {
+      reconnectWebSession(updated)
+    }
+  }
+
   /// Deletes a saved web session and closes any open page bound to it.
   func deleteWebSession(_ web: WebSession) {
     if let live = liveWebSession(for: web) { removeSession(live.id) }
