@@ -53,6 +53,16 @@ struct ContentView: View {
               // local URL (or a connecting/error state) instead of the raw URL.
               WebSessionDetailView(web: web, tunnel: model.webSessionRuntime(for: web))
                 .id(session.id)
+                .toolbar {
+                  // The SSH-tunnel picker is a web-session-only control: it
+                  // lets the user switch which host the open page is tunnelled
+                  // through (or clear the tunnel). See webSSHTunnelPicker.
+                  #if os(macOS)
+                  ToolbarItem(placement: .primaryAction) {
+                    webSSHTunnelPicker(web: web)
+                  }
+                  #endif
+                }
             } else if case .database(let connection) = kind {
               // A database session renders the per-engine documents/tables
               // browser (no terminal, no Files panel). The live engine
@@ -409,6 +419,53 @@ struct ContentView: View {
   /// Non-nil smart-action targets (schemes/executables) sorted for the picker.
   private var smartActionsTargets: [String] {
     Array(Set(model.smartActionActions.compactMap(\.target))).sorted()
+  }
+
+  /// The SSH-tunnel picker shown in a `.web` session's toolbar. Lists every
+  /// saved SSH connection from `model.connections` plus a "None (open
+  /// directly)" option (mapped to nil). The current value reflects the web
+  /// session's `sshConfigID`; changing it persists via `webSessions.save` and
+  /// reconnects the open page (see AppModel.updateWebSessionSSH).
+  @ViewBuilder
+  private func webSSHTunnelPicker(web: WebSession) -> some View {
+    Menu {
+      Button {
+        model.updateWebSessionSSH(web, to: nil)
+      } label: {
+        if web.sshConfigID == nil {
+          Label("None (open directly)", systemImage: "checkmark")
+        } else {
+          Text("None (open directly)")
+        }
+      }
+      if !model.connections.isEmpty {
+        Divider()
+        ForEach(model.connections) { config in
+          Button {
+            model.updateWebSessionSSH(web, to: config.id)
+          } label: {
+            if web.sshConfigID == config.id {
+              Label(config.displayName, systemImage: "checkmark")
+            } else {
+              Text(config.displayName)
+            }
+          }
+        }
+      }
+    } label: {
+      Label(currentWebSSHTunnelLabel(for: web), systemImage: "network")
+    }
+    .help("SSH tunnel")
+  }
+
+  /// The picker's current value label: the bound SSH host's display name, or
+  /// "None" when the web session is a plain (no-ssh) page.
+  private func currentWebSSHTunnelLabel(for web: WebSession) -> String {
+    if let id = web.sshConfigID,
+       let config = model.connections.first(where: { $0.id == id }) {
+      return config.displayName
+    }
+    return "None (open directly)"
   }
 
   /// Smart actions to show in the toolbar: everything when no target is

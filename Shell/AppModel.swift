@@ -706,6 +706,23 @@ final class AppModel {
     openWebSession(web)
   }
 
+  /// Changes which SSH host an open (or saved) web session is tunnelled
+  /// through, or clears the tunnel entirely ("None (open directly)"). Persists
+  /// the new `sshConfigID` via `webSessions.save`, and if the page is currently
+  /// open tears the live runtime down and reopens it so the local port-forward
+  /// targets the newly selected host (or the plain no-ssh path when nil).
+  func updateWebSessionSSH(_ web: WebSession, to sshConfigID: UUID?) {
+    guard web.sshConfigID != sshConfigID else { return }
+    var updated = web
+    updated.sshConfigID = sshConfigID
+    webSessions.save(updated)
+    // Reconnect only if the page is open; a saved-but-closed session just
+    // persists the new binding for the next open (openWebSession reads it).
+    if liveWebSession(for: web) != nil {
+      reconnectWebSession(updated)
+    }
+  }
+
   /// Deletes a saved web session and closes any open page bound to it.
   func deleteWebSession(_ web: WebSession) {
     if let live = liveWebSession(for: web) { removeSession(live.id) }
