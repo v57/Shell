@@ -18,7 +18,6 @@ enum FeatureID: String, CaseIterable, Identifiable {
   case smartActions
   case monitoring
   case files
-  case themes
   case authorizedKeys
   case settings
   /// Reserved for a future built-in web-session/browser feature.
@@ -40,7 +39,6 @@ enum FeatureID: String, CaseIterable, Identifiable {
     case .smartActions: return "Smart Actions"
     case .monitoring: return "Monitoring"
     case .files: return "Files"
-    case .themes: return "Themes"
     case .authorizedKeys: return "Authorized Keys"
     case .settings: return "Settings"
     case .web: return "Web"
@@ -61,7 +59,6 @@ enum FeatureID: String, CaseIterable, Identifiable {
     case .smartActions: return "Per-directory project actions"
     case .monitoring: return "Live CPU / GPU / wattage stats"
     case .files: return "Files panel and file browsing"
-    case .themes: return "Color themes and terminal backgrounds"
     case .authorizedKeys: return "SSH authorized keys"
     case .settings: return "Shell settings"
     case .web: return "In-app web sessions"

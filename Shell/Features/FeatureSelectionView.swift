@@ -32,7 +32,9 @@ struct FeatureSelectionView: View {
           feature: feature,
           isOn: store.isEnabled(feature)
         ) { newValue in
-          store.setEnabled(newValue, for: feature)
+          withAnimation {
+            store.setEnabled(newValue, for: feature)
+          }
         }
         if feature != FeatureID.allCases.last {
           Divider()

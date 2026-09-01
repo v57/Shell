@@ -81,6 +81,9 @@ final class AppModel {
   /// The actions overlay (⌘R) and the New Action sheet.
   var showingActions = false
   var showingNewAction = false
+  /// The Settings overlay (opened like the Actions overlay, not a separate
+  /// window or sheet — see SettingsOverlayView).
+  var showingSettings = false
   /// The ⌘E "insert into terminal" overlay.
   var showingCommandInsert = false
   /// The action being edited in the sheet (nil = creating a new one).
@@ -166,6 +169,11 @@ final class AppModel {
   /// so it runs only while the Smart Actions feature is enabled (and re-runs
   /// on the OFF→ON transition, never repeatedly).
   private var smartActionsProbed = false
+  /// The Smart Actions flag value at the last reactivity pass. Tracks the
+  /// ON↔OFF transition so a flip re-runs `refreshSmartActions` — clearing the
+  /// toolbar instantly on OFF and repopulating it on ON, without requiring a
+  /// session switch.
+  private var smartActionsEnabled = false
   /// In-memory display state per canonical directory path, published
   /// synchronously when a session switch revisits the directory — avoids
   /// waiting on the encrypted cache read (Secure Enclave round-trip) that
@@ -360,6 +368,7 @@ final class AppModel {
     if features.isEnabled(.smartActions) {
       smartActions.probeEnvironment()
       smartActionsProbed = true
+      smartActionsEnabled = true
     }
     // Start (or leave stopped) the Screen feature's pollers to match the flag.
     configureGatedBackgroundWork()
@@ -397,6 +406,14 @@ final class AppModel {
       if smart && !smartActionsProbed {
         smartActions.probeEnvironment()
         smartActionsProbed = true
+      }
+      // Smart Actions ON↔OFF flip: re-run the refresh so the toolbar clears
+      // instantly on OFF and repopulates on ON, without a session switch.
+      // (refreshSmartActions itself short-circuits to empty when disabled and
+      // republishes the memo when enabled.)
+      if smart != smartActionsEnabled {
+        smartActionsEnabled = smart
+        refreshSmartActions(for: smartActionDirectory)
       }
       configureNotesGating(notesEnabled: notes)
     } onChange: { [weak self] in

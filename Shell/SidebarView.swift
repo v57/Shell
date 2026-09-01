@@ -26,12 +26,6 @@ struct SidebarView: View {
   }
   #endif
 
-  #if os(iOS)
-  /// Presents the Settings sheet (iOS reaches Settings via a sidebar gear;
-  /// macOS uses the ⌘, Settings scene).
-  @State private var showSettings = false
-  #endif
-
   /// Collapse state for each sidebar section, persisted across launches.
   @AppStorage("sidebar.running.collapsed") private var runningCollapsed = false
   @AppStorage("sidebar.local.collapsed") private var localCollapsed = false
@@ -101,6 +95,7 @@ struct SidebarView: View {
             HistorySessionRow(session: record)
               .tag(record.id)
           }
+          .transition(.blurReplace)
         } else {
           ForEach(localCollapsed || !flags.isEnabled(.sessions) ? [] : localSessions) { session in
             SessionRow(
@@ -188,18 +183,21 @@ struct SidebarView: View {
               .tag(model.liveDatabaseSession(for: connection)?.id ?? connection.id)
               .contextMenu { DatabaseConnectionActions(connection: connection) }
           }
+          .transition(.blurReplace)
         }
       } header: {
         HStack {
           sidebarCollapseChevron(collapsed: $localCollapsed)
           #if os(macOS)
-          if model.historyMode {
-            Text("Local History")
-          } else if flags.isEnabled(.monitoring) {
-            statsHeader
-          } else {
-            Text("Local")
-          }
+          Group {
+            if model.historyMode {
+              Text("Local History")
+            } else if flags.isEnabled(.monitoring) {
+              statsHeader
+            } else {
+              Text("Local")
+            }
+          }.transition(.blurReplace)
           #else
           Text(model.historyMode ? "Local History" : "Local")
           #endif
@@ -211,6 +209,7 @@ struct SidebarView: View {
             }
             .buttonStyle(.borderless)
             .help("Delete all local history")
+            .transition(.blurReplace)
           }
           Spacer()
           // Only meaningful when there is something to show; hidden while
@@ -225,6 +224,7 @@ struct SidebarView: View {
             }
             .buttonStyle(.borderless)
             .help(model.historyMode ? "Show local terminals" : "Show local history")
+            .transition(.blurReplace)
           }
           if flags.isEnabled(.sessions) {
           Button {
@@ -232,18 +232,6 @@ struct SidebarView: View {
           } label: {
             Image(systemName: "plus")
           }.buttonStyle(.borderless).help("New local terminal")
-          }
-          if flags.isEnabled(.screen) {
-          Button {
-            model.screenMonitor.refresh()
-          } label: {
-            Image(systemName: "arrow.clockwise")
-          }.buttonStyle(.borderless).help("Refresh persistent sessions")
-          Button {
-            model.createScreenSession()
-          } label: {
-            Image(systemName: "plus")
-          }.buttonStyle(.borderless).help("New persistent zsh session")
           }
           if flags.isEnabled(.web) {
           Button {
@@ -418,6 +406,9 @@ struct SidebarView: View {
       #endif
     }
     .navigationTitle("Terminals")
+    // Drive the history-mode → terminals swap with a blur-replace transition
+    // (both branches carry .transition(.blurReplace)).
+    .animation(.easeInOut(duration: 0.25), value: model.historyMode)
     #if os(macOS)
     .alert(item: $model.screenMonitor.actionError) { error in
       Alert(
@@ -478,15 +469,11 @@ struct SidebarView: View {
     .toolbar {
       ToolbarItem(placement: .navigationBarTrailing) {
         Button {
-          showSettings = true
+          model.showingSettings = true
         } label: {
           Label("Settings", systemImage: "gearshape")
         }
       }
-    }
-    .sheet(isPresented: $showSettings) {
-      SettingsView()
-        .environment(model)
     }
 #endif
   }
@@ -670,6 +657,7 @@ private struct SSHConfigGroup: View {
   let onCommitRename: (UUID, String) -> Void
   let onCancelRename: () -> Void
   let onEdit: (SSHConfig) -> Void
+  private var flags: FeatureFlagsStore { .shared }
   
   var body: some View {
     SSHConfigRow(config: config)
@@ -681,6 +669,13 @@ private struct SSHConfigGroup: View {
         Button("Authorized Keys", systemImage: "key.2.on.ring") {
           model.showAuthorizedKeys(for: .ssh(config))
         }.buttonStyle(.borderless).help("Manage the selected connection's authorized keys")
+        if flags.isEnabled(.screen) {
+          Button {
+            model.screenMonitor.refresh()
+          } label: {
+            Image(systemName: "arrow.clockwise")
+          }.buttonStyle(.borderless).help("Refresh persistent sessions")
+        }
         Divider()
         Button("Delete Connection", role: .destructive) {
           model.deleteConnection(config)

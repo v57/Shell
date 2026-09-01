@@ -274,8 +274,19 @@ struct ContentView: View {
         ActionsOverlayView()
           .transition(.opacity.combined(with: .scale(scale: 0.97)))
       }
+
+      // Settings as an in-window overlay (same instant appear/close pattern as
+      // the Actions overlay above). Backdrop click, Esc, and ⌘, close it.
+      if model.showingSettings {
+        Color.black.opacity(0.001)
+          .ignoresSafeArea()
+          .onTapGesture { model.showingSettings = false }
+        SettingsView()
+          .transition(.opacity.combined(with: .scale(scale: 0.97)))
+      }
     }
     .animation(.easeOut(duration: 0.15), value: model.showingActions)
+    .animation(.easeOut(duration: 0.15), value: model.showingSettings)
     .preferredColorScheme(model.appearanceMode.colorScheme)
     .environment(\.terminalBackgroundsDisabled, model.disableTerminalBackgrounds)
     .onAppear {
@@ -307,23 +318,47 @@ struct ContentView: View {
         Task { await model.directoryBrowser.refresh() }
       }
     }
-    .onChange(of: model.showingActions) { _, showing in
+    .onChange(of: model.showingActions) { _, _ in
+      // The Esc monitor closes whichever overlay is up (actions or settings).
+      // It is armed while EITHER overlay is showing. Both on/off transitions
+      // re-evaluate the need for the monitor.
       #if os(macOS)
-      if showing {
+      updateEscMonitor()
+      #endif
+    }
+    .onChange(of: model.showingSettings) { _, _ in
+      #if os(macOS)
+      updateEscMonitor()
+      #endif
+    }
+  }
+
+  #if os(macOS)
+  /// Arms/re-arms the local Esc key monitor while either overlay (Actions or
+  /// Settings) is showing, and removes it once both are closed. Esc closes
+  /// whichever overlay is up first.
+  private func updateEscMonitor() {
+    let anyOverlay = model.showingActions || model.showingSettings
+    if anyOverlay {
+      if escMonitor == nil {
         escMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
           if event.keyCode == 53 {   // Esc
-            AppModel.shared.showingActions = false
+            if AppModel.shared.showingActions {
+              AppModel.shared.showingActions = false
+            } else if AppModel.shared.showingSettings {
+              AppModel.shared.showingSettings = false
+            }
             return nil
           }
           return event
         }
-      } else if let escMonitor {
-        NSEvent.removeMonitor(escMonitor)
-        self.escMonitor = nil
       }
-      #endif
+    } else if let escMonitor {
+      NSEvent.removeMonitor(escMonitor)
+      self.escMonitor = nil
     }
   }
+  #endif
 
   /// Re-queries the selected local session's cwd so the window subtitle
   /// follows the shell's `cd`. Non-local sessions clear the subtitle.

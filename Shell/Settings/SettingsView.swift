@@ -1,58 +1,59 @@
 import SwiftUI
 
-/// The Settings screen.
+/// The Settings panel — an in-window overlay (like `ActionsOverlayView`), NOT
+/// a separate window or a `.sheet`, so it appears/closes instantly over the
+/// main window.
 ///
 /// Hosts two cards:
-/// - **Features** — the feature-flags panel (`FeatureSelectionView`), a passive
-///   list of every toggleable Shell feature.
+/// - **Features** — the feature-flags panel (`FeatureSelectionView`).
 /// - **Actions** — the shell actions surfaced here so they're reachable on iOS
-///   (macOS reaches the same actions through the Shell menu). Each row calls the
-///   same `AppModel` method as its menu counterpart.
+///   (macOS reaches the same actions through the Shell menu).
 ///
-/// Presented two ways:
-/// - **macOS** — as the `Settings` scene (⌘, / Shell > Settings…), registered
-///   in `ShellApp`; the platform provides the window and the keyboard shortcut.
-/// - **iOS** — as a `.sheet` opened from the sidebar gear button (`SidebarView`);
-///   there is no menu bar on iOS, so the gear is the only entry point.
+/// Presented the same way on macOS and iOS: a non-modal overlay over the main
+/// window (Backdrop click or Esc closes it). On macOS the Shell menu's
+/// Settings…/⌘, entry point sets `AppModel.showingSettings`; on iOS the sidebar
+/// gear button does the same.
 struct SettingsView: View {
-  @Environment(\.dismiss) private var dismiss
+  @Environment(AppModel.self) private var model
 
   var body: some View {
-    #if os(iOS)
-    NavigationStack {
-      settingsContent
-        .navigationTitle("Settings")
-        .toolbar {
-          ToolbarItem(placement: .confirmationAction) {
-            Button("Done") { dismiss() }
+    VStack(alignment: .leading, spacing: 0) {
+      HStack {
+        Text("Settings").font(.headline)
+        Spacer()
+        Button {
+          model.showingSettings = false
+        } label: {
+          Image(systemName: "xmark")
+        }
+        .buttonStyle(.borderless)
+        .help("Close (Esc)")
+      }
+      .padding(.top, 12)
+
+      ScrollView {
+        VStack(alignment: .leading, spacing: 20) {
+          SettingsCard(title: "Features", systemImage: "square.grid.2x2") {
+            FeatureSelectionView()
+          }
+          SettingsCard(title: "Actions", systemImage: "bolt") {
+            SettingsActionsCard()
           }
         }
-    }
-    #else
-    settingsContent
-    #endif
-  }
-
-  private var settingsContent: some View {
-    ScrollView {
-      VStack(alignment: .leading, spacing: 20) {
-        SettingsCard(title: "Features", systemImage: "square.grid.2x2") {
-          FeatureSelectionView()
-        }
-        SettingsCard(title: "Actions", systemImage: "bolt") {
-          SettingsActionsCard()
-        }
+        .padding(.vertical, 12)
       }
-      .padding(20)
-      .frame(maxWidth: 560, alignment: .leading)
-      .frame(maxWidth: .infinity)
+    }
+    .frame(width: 480, height: 420)
+    .safeAreaPadding(.horizontal, 12)
+    .background {
+      RoundedRectangle(cornerRadius: 16).fill(.background)
+        .strokeBorder(.quaternary).shadow(radius: 32, y: 8)
     }
   }
 }
 
 /// A rounded card: an icon + title header and a labelled body. Cross-platform
-/// (no UIKit-typed colors) so it renders in the macOS Settings scene AND the
-/// iOS sheet.
+/// (no UIKit-typed colors) so it renders in the Settings overlay.
 private struct SettingsCard<Content: View>: View {
   let title: String
   let systemImage: String

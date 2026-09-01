@@ -18,15 +18,10 @@ struct ShellApp: App {
     }
     #endif
 
-    // macOS Settings scene: ⌘, / Shell > Settings… opens SettingsView. The
-    // platform supplies the window and the keyboard shortcut (iOS has no scene
-    // of this kind — it opens Settings via the sidebar gear button instead).
-    #if os(macOS)
-    Settings {
-      SettingsView()
-        .environment(AppModel.shared)
-    }
-    #endif
+    // Settings is an in-window overlay (not a separate window/scene), so it
+    // opens over the main window like the Actions overlay. On macOS it is
+    // reached from the Shell menu's Settings… item (⌘,) which sets
+    // AppModel.showingSettings; on iOS from the sidebar gear button.
 
     // A detached session/note lives in its own value-keyed window (macOS) or
     // scene (iPad), created by `openWindow(id: "detach", value: id)`; it is
@@ -161,13 +156,12 @@ struct ShellCommands: Commands {
 
       // ⌘⇧H opens the Themes sheet. Menu key equivalents dispatch before
       // terminal keyDown, so it works while a terminal has focus (and ⌘⇧H
-      // doesn't collide with Hide/Hide Others, which are ⌘H/⌥⌘H).
-      if flags.isEnabled(.themes) {
+      // doesn't collide with Hide/Hide Others, which are ⌘H/⌥⌘H). Themes
+      // is always enabled (no feature toggle) — the menu item is unconditional.
       Button("Themes…") {
         AppModel.shared.showingThemes = true
       }
       .keyboardShortcut("h", modifiers: [.command, .shift])
-      }
 
       // ⌘⇧F toggles the Files panel. Disabled without a selected terminal
       // session (the Files panel only shows alongside a live session). Menu
@@ -209,6 +203,15 @@ struct ShellCommands: Commands {
       }
       .keyboardShortcut("c", modifiers: [.command, .shift])
       }
+
+      Divider()
+
+      // Settings… is an overlay (not a separate window) — open it like the
+      // Actions overlay. Replaces the system Settings scene's ⌘, binding.
+      Button("Settings…") {
+        AppModel.shared.showingSettings = true
+      }
+      .keyboardShortcut(",", modifiers: .command)
     }
   }
   
