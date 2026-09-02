@@ -1896,11 +1896,63 @@ final class AppModel {
   // MARK: - Reordering
   
   /// Moves an SSH connection within the sidebar list and persists the
-  /// new order (drag-to-reorder).
+  /// new order (drag-to-reorder of the server rows).
   func moveConnection(from source: IndexSet, to destination: Int) {
     var reordered = connections
     reordered.move(fromOffsets: source, toOffset: destination)
     connectionStore.reorder(reordered)
+  }
+
+  /// Shared subset reorder: `items` is a computed slice of `sessions`
+  /// (e.g. all local, or all sessions under one SSH config). `.onMove`
+  /// reports indices into that SLICE, but the order lives in the flat
+  /// `sessions` array interleaved with other kinds, so we reorder only
+  /// the matching entries while leaving every other entry in its slot.
+  private func moveSessionSubset(
+    matching predicate: (TerminalSession) -> Bool,
+    from source: IndexSet,
+    to destination: Int
+  ) {
+    guard !source.isEmpty else { return }
+    let indexes = sessions.indices.filter { predicate(sessions[$0]) }
+    var items = indexes.map { sessions[$0] }
+    items.move(fromOffsets: source, toOffset: destination)
+    for (j, item) in items.enumerated() {
+      sessions[indexes[j]] = item
+    }
+  }
+
+  /// Reorders the Local section's shell rows. The displayed `localSessions`
+  /// is a filtered slice of the flat `sessions` array, so the move is
+  /// applied to the slice and written back into the global slots.
+  func moveLocalSession(from source: IndexSet, to destination: Int) {
+    moveSessionSubset(matching: { kind(of: $0) == .local }, from: source, to: destination)
+  }
+
+  /// Reorders the running sessions under one SSH server (the rows inside an
+  /// SSHConfigGroup). Keeps the server's own ordering untouched — the server
+  /// row is reordered separately via `moveConnection`.
+  func moveSSHSession(for config: SSHConfig, from source: IndexSet, to destination: Int) {
+    let configID = config.id
+    moveSessionSubset(
+      matching: { kind(of: $0).sshConfigID == configID },
+      from: source,
+      to: destination
+    )
+  }
+
+  /// Reorders the Local section's saved web-page rows (pages not bound to an
+  /// SSH tunnel). Web sessions live in `WebSessionStore`, not `sessions`, so
+  /// the move is delegated to the store's local-subset reorder.
+  func moveLocalWebSession(from source: IndexSet, to destination: Int) {
+    webSessions.moveLocalSubset(from: source, to: destination)
+  }
+
+  /// Reorders the Local section's database-connection rows (connections not
+  /// reached through an SSH tunnel). Delegated to the store's local-subset
+  /// reorder, which reassigns `order` for the whole list.
+  func moveLocalDatabaseConnection(from source: IndexSet, to destination: Int) {
+    databaseStore.moveLocalSubset(from: source, to: destination)
   }
 
   // MARK: - Authorized keys

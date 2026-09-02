@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import SwiftUI
 
 /// Persists saved web sessions in UserDefaults (same pattern as
 /// ActionsStore — web sessions carry no secrets, so plain JSON is fine).
@@ -38,6 +39,26 @@ final class WebSessionStore {
 
   func remove(_ id: UUID) {
     all.removeAll { $0.id == id }
+    persist()
+  }
+
+  /// Reorders the whole saved list to `list` (drag-to-reorder) and persists.
+  func reorder(_ list: [WebSession]) {
+    all = list
+    persist()
+  }
+
+  /// Moves a subset of `all` (the local, no-SSH-tunnel pages shown in the
+  /// Local section) and persists the new relative order while leaving every
+  /// other page in its slot.
+  func moveLocalSubset(from source: IndexSet, to destination: Int) {
+    guard !source.isEmpty else { return }
+    let indexes = all.indices.filter { all[$0].sshConfigID == nil }
+    var items = indexes.map { all[$0] }
+    items.move(fromOffsets: source, toOffset: destination)
+    for (j, item) in items.enumerated() {
+      all[indexes[j]] = item
+    }
     persist()
   }
 

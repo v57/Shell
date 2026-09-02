@@ -122,6 +122,9 @@ struct SidebarView: View {
               }
             }
           }
+          .onMove { source, destination in
+            model.moveLocalSession(from: source, to: destination)
+          }
           ForEach(localCollapsed || !flags.isEnabled(.screen) ? [] : model.screenMonitor.sessions) { info in
             ScreenSessionRow(
               info: info,
@@ -180,12 +183,18 @@ struct SidebarView: View {
               // web id — same convention as the screen rows above.
               .tag(model.liveWebSession(for: web)?.id ?? web.id)
           }
+          .onMove { source, destination in
+            model.moveLocalWebSession(from: source, to: destination)
+          }
           // Local database connections (no SSH tunnel) live in the Local
           // section like local shells; remote ones group under Remote instead.
           ForEach(localCollapsed || !flags.isEnabled(.database) ? [] : localDatabaseConnections) { connection in
             DatabaseConnectionRow(connection: connection)
               .tag(model.liveDatabaseSession(for: connection)?.id ?? connection.id)
               .contextMenu { DatabaseConnectionActions(connection: connection) { beginRenameDatabase($0) } }
+          }
+          .onMove { source, destination in
+            model.moveLocalDatabaseConnection(from: source, to: destination)
           }
           .transition(.blurReplace)
         }
@@ -731,6 +740,9 @@ private struct SSHConfigGroup: View {
           model.removeSession(session.id)
         }
       }
+    }
+    .onMove { source, destination in
+      model.moveSSHSession(for: config, from: source, to: destination)
     }
     // Saved web pages bound to this host render as SSH-section rows, in the
     // same indented sub-row layout as the connection's terminals. Hidden when

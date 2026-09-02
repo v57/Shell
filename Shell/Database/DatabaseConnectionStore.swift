@@ -2,6 +2,7 @@ import CryptoKit
 import Foundation
 import Observation
 import SwiftData
+import SwiftUI
 import Terminal
 
 /// Persists the sidebar's saved database connections, synced through iCloud —
@@ -158,6 +159,23 @@ final class DatabaseConnectionStore {
     }
     try? context.save()
     reload()
+  }
+
+  /// Moves a subset of `all` (the local, no-SSH-tunnel connections shown in
+  /// the Local section) and reassigns `order` for the whole list, leaving
+  /// every tunneled connection in its slot. The displayed Local slice is a
+  /// filtered view of `all`, so the subset indices are mapped back into the
+  /// full array before rewriting orders.
+  func moveLocalSubset(from source: IndexSet, to destination: Int) {
+    guard !source.isEmpty else { return }
+    let indexes = all.indices.filter { all[$0].sshConfigID == nil }
+    var items = indexes.map { all[$0] }
+    items.move(fromOffsets: source, toOffset: destination)
+    var reordered = all
+    for (j, item) in items.enumerated() {
+      reordered[indexes[j]] = item
+    }
+    reorder(reordered)
   }
 
   /// Re-fetches + re-decrypts — the no-push sync trigger (called when the
