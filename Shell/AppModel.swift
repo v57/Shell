@@ -1627,7 +1627,7 @@ final class AppModel {
       for (index, a) in order.enumerated() {
         // Only the action the user actually triggered may retake focus.
         let isTopLevel = a.id == action.id
-        self.spawnActionSession(a, in: environment, focus: isTopLevel && a.focusWindow)
+        self.spawnActionSession(a, in: environment, isTopLevel: isTopLevel, focus: isTopLevel && a.focusWindow)
         if index != order.count - 1 {
           try? await Task.sleep(for: .seconds(1))
         }
@@ -1679,7 +1679,7 @@ final class AppModel {
   /// Launches one action session (local zsh or an SSH exec channel) and
   /// wires it to archive to history on completion. `focus` is honored only
   /// for the action the user actually triggered, never for a dependency.
-  private func spawnActionSession(_ action: Action, in environment: ActionEnvironment, focus: Bool) {
+  private func spawnActionSession(_ action: Action, in environment: ActionEnvironment, isTopLevel: Bool, focus: Bool) {
     let spec = ActionSpec(action: action, config: environment.sshConfig)
     let transport: any TerminalTransport
     let startupMessage: String?
@@ -1707,11 +1707,25 @@ final class AppModel {
       self?.actionSessionCompleted(newSession)
     }
     sessions.append(newSession)
-    if focus {
+    // A web-field action is a "run the server AND open it" action: the
+    // command session above is the web server (it stays in the Running
+    // section), and we open a web view at the smart-resolved address. The web
+    // view — not the server terminal — is what the user looks at, so it takes
+    // focus when the action runs. Only the user-triggered (top-level) action
+    // opens a web view; dependencies just run their commands.
+    if isTopLevel, !spec.action.webAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      let web = WebSession(
+        name: spec.action.name,
+        url: SmartAddress.resolve(spec.action.webAddress),
+        sshConfigID: environment.sshConfig?.id
+      )
+      openWebSession(web)
+      showingActions = false
+    } else if focus {
       selection = newSession.id
       showingActions = false   // you're looking at the run now
     }
-    // focusWindow == false: the overlay stays open for queuing more runs.
+    // focusWindow == false and no web field: the overlay stays open for queuing more runs.
   }
 
   /// Post-order startup sequence for `action` and its transitive

@@ -15,6 +15,10 @@ struct Action: Identifiable, Codable, Hashable {
   /// while future targeting was enabled. Newly created ids are absent.
   var excludedSSHConnectionIDs: [UUID]
   var commands: String           // multi-line shell script
+  /// Optional web address to open in a web view when this action runs —
+  /// e.g. `1997` or `localhost:1997` (smart-resolved via `SmartAddress` at
+  /// run time). Empty = no web view; the action just runs its command.
+  var webAddress: String
   /// Actions that must be *running* before this one starts (not awaited to
   /// completion). Each dependency, and its own dependencies, is started
   /// first — recursively, ~1 second apart — before this action launches.
@@ -39,6 +43,7 @@ struct Action: Identifiable, Codable, Hashable {
     appliesToFutureSSHConnections: Bool = false,
     excludedSSHConnectionIDs: [UUID] = [],
     commands: String = "",
+    webAddress: String = "",
     dependencies: [UUID] = [],
     focusWindow: Bool = false,
     keepAfterCompletion: Bool = false,
@@ -52,6 +57,7 @@ struct Action: Identifiable, Codable, Hashable {
     self.appliesToFutureSSHConnections = appliesToFutureSSHConnections
     self.excludedSSHConnectionIDs = excludedSSHConnectionIDs
     self.commands = commands
+    self.webAddress = webAddress
     self.dependencies = dependencies
     self.focusWindow = focusWindow
     self.keepAfterCompletion = keepAfterCompletion
@@ -60,6 +66,7 @@ struct Action: Identifiable, Codable, Hashable {
 
   private enum CodingKeys: String, CodingKey {
     case id, name, category, appliesToLocal, sshConnectionIDs, commands
+    case webAddress
     case dependencies
     case appliesToFutureSSHConnections, excludedSSHConnectionIDs
     case focusWindow, keepAfterCompletion, lastUsed
@@ -85,6 +92,7 @@ struct Action: Identifiable, Codable, Hashable {
       [UUID].self, forKey: .excludedSSHConnectionIDs
     ) ?? []
     commands = try c.decodeIfPresent(String.self, forKey: .commands) ?? ""
+    webAddress = try c.decodeIfPresent(String.self, forKey: .webAddress) ?? ""
     dependencies = try c.decodeIfPresent([UUID].self, forKey: .dependencies) ?? []
     focusWindow = try c.decodeIfPresent(Bool.self, forKey: .focusWindow) ?? false
     keepAfterCompletion = try c.decodeIfPresent(Bool.self, forKey: .keepAfterCompletion) ?? false
@@ -101,6 +109,7 @@ struct Action: Identifiable, Codable, Hashable {
     try c.encode(appliesToFutureSSHConnections, forKey: .appliesToFutureSSHConnections)
     try c.encode(excludedSSHConnectionIDs, forKey: .excludedSSHConnectionIDs)
     try c.encode(commands, forKey: .commands)
+    try c.encode(webAddress, forKey: .webAddress)
     try c.encode(dependencies, forKey: .dependencies)
     try c.encode(focusWindow, forKey: .focusWindow)
     try c.encode(keepAfterCompletion, forKey: .keepAfterCompletion)

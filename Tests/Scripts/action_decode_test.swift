@@ -12,6 +12,7 @@ struct Action: Decodable, Hashable {
   var appliesToFutureSSHConnections: Bool
   var excludedSSHConnectionIDs: [UUID]
   var commands: String
+  var webAddress: String
   var focusWindow: Bool
   var keepAfterCompletion: Bool
   var lastUsed: Date?
@@ -21,6 +22,7 @@ struct Action: Decodable, Hashable {
     appliesToLocal: Bool = true, sshConnectionIDs: [UUID] = [],
     appliesToFutureSSHConnections: Bool = false,
     excludedSSHConnectionIDs: [UUID] = [], commands: String = "",
+    webAddress: String = "",
     focusWindow: Bool = false, keepAfterCompletion: Bool = false,
     lastUsed: Date? = nil
   ) {
@@ -28,12 +30,13 @@ struct Action: Decodable, Hashable {
     self.appliesToLocal = appliesToLocal; self.sshConnectionIDs = sshConnectionIDs
     self.appliesToFutureSSHConnections = appliesToFutureSSHConnections
     self.excludedSSHConnectionIDs = excludedSSHConnectionIDs
-    self.commands = commands; self.focusWindow = focusWindow
+    self.commands = commands; self.webAddress = webAddress; self.focusWindow = focusWindow
     self.keepAfterCompletion = keepAfterCompletion; self.lastUsed = lastUsed
   }
 
   private enum CodingKeys: String, CodingKey {
     case id, name, category, appliesToLocal, sshConnectionIDs, commands
+    case webAddress
     case appliesToFutureSSHConnections, excludedSSHConnectionIDs
     case focusWindow, keepAfterCompletion, lastUsed, appliesToAll
   }
@@ -54,6 +57,7 @@ struct Action: Decodable, Hashable {
       [UUID].self, forKey: .excludedSSHConnectionIDs
     ) ?? []
     commands = try c.decodeIfPresent(String.self, forKey: .commands) ?? ""
+    webAddress = try c.decodeIfPresent(String.self, forKey: .webAddress) ?? ""
     focusWindow = try c.decodeIfPresent(Bool.self, forKey: .focusWindow) ?? false
     keepAfterCompletion = try c.decodeIfPresent(Bool.self, forKey: .keepAfterCompletion) ?? false
     lastUsed = try c.decodeIfPresent(Date.self, forKey: .lastUsed)
@@ -88,6 +92,7 @@ do {
   check(action.appliesToFutureSSHConnections, "legacy global includes future SSH")
   check(!action.focusWindow, "missing focus defaults off")
   check(!action.keepAfterCompletion, "missing keep defaults off")
+  check(action.webAddress == "", "missing web defaults empty")
 } catch {
   check(false, "legacy action decodes: \(error)")
 }

@@ -1,5 +1,6 @@
 import SwiftUI
 import Terminal
+import TerminalIntegrations
 
 /// Sheet for creating a new action: name, optional category, where to
 /// display (local / specific SSH connections / future SSH connections),
@@ -18,6 +19,7 @@ struct NewActionView: View {
   @State private var sshConnectionIDs = Set<UUID>()
   @State private var appliesToFutureSSHConnections = false
   @State private var commands = ""
+  @State private var webAddress = ""
   @State private var dependencies = Set<UUID>()
   @State private var focusWindow = false
   @State private var keepAfterCompletion = false
@@ -31,6 +33,7 @@ struct NewActionView: View {
     _sshConnectionIDs = State(initialValue: Set(action?.sshConnectionIDs ?? targetSSHConnectionID.map { [$0] } ?? []))
     _appliesToFutureSSHConnections = State(initialValue: action?.appliesToFutureSSHConnections ?? false)
     _commands = State(initialValue: action?.commands ?? commands)
+    _webAddress = State(initialValue: action?.webAddress ?? "")
     _dependencies = State(initialValue: Set(action?.dependencies ?? []))
     _focusWindow = State(initialValue: action?.focusWindow ?? false)
     _keepAfterCompletion = State(initialValue: action?.keepAfterCompletion ?? false)
@@ -40,6 +43,12 @@ struct NewActionView: View {
     !name.trimmingCharacters(in: .whitespaces).isEmpty
     && !commands.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     && (appliesToLocal || !sshConnectionIDs.isEmpty || appliesToFutureSSHConnections)
+  }
+
+  /// The smart-resolved absolute URL shown as a live preview of the web field
+  /// (empty input -> empty output, so the footer switches to the hint text).
+  private var resolvedWebAddress: String {
+    SmartAddress.resolve(webAddress)
   }
 
   /// Actions currently selected as dependencies, in store order.
@@ -130,6 +139,19 @@ struct NewActionView: View {
           Text("Commands")
         } footer: {
           Text("Runs in a new terminal with zsh locally, or your shell on the remote host.")
+        }
+
+        Section {
+          TextField("Address (optional)", text: $webAddress)
+            .textContentType(.URL)
+        } header: {
+          Text("Web")
+        } footer: {
+          if webAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            Text("Optional: the command starts a web server; this opens it in a focused web view.")
+          } else {
+            Text("Opens \(resolvedWebAddress) when the action runs.")
+          }
         }
 
         Section {
@@ -238,6 +260,7 @@ struct NewActionView: View {
       appliesToFutureSSHConnections: appliesToFutureSSHConnections,
       excludedSSHConnectionIDs: excludedConnections,
       commands: commands,
+      webAddress: webAddress.trimmingCharacters(in: .whitespacesAndNewlines),
       dependencies: dependencyIDs,
       focusWindow: focusWindow,
       keepAfterCompletion: keepAfterCompletion,
