@@ -1639,23 +1639,38 @@ final class AppModel {
   /// NO session selected (e.g. nothing is open), defaults to the local
   /// machine so ⌘R stays usable from a fresh start.
   ///
-  /// Dependencies: when `action` lists dependencies, each unresolved
-  /// dependency — recursively following its OWN dependencies — is started
-  /// FIRST, ~1 second before its dependent. A dependency is guaranteed to be
-  /// *running* (never waited on to completion) when the depending action
-  /// launches. Everything starts in the same target environment; a
+  /// Dependencies: when `action` lists dependencies, every unresolved
+  /// dependency — recursively following its OWN dependencies — is started in
+  /// a batch: all leaves launch at once, and each action starts 1 second
+  /// AFTER ALL of its dependencies have started. A dependency is guaranteed
+  /// to be *running* (never waited on to completion) when the depending
+  /// action launches. Everything starts in the same target environment; a
   /// dependency is never focused and never MRU-touched.
   func runAction(_ action: Action) {
     actions.touch(action.id)
     guard let environment = currentActionEnvironment else { return }
     let order = dependencyStartupOrder(for: action)
+    // Group actions into dependency "levels": every action with no
+    // dependency-that-needs-starting (a leaf, or a dep already running)
+    // launches at level 0; each dependent launches one level deeper than the
+    // deepest dependency it waits on. All actions at a level start together,
+    // then we advance one level per second — so an action starts 1 second
+    // AFTER ALL of its (unresolved) dependencies have started, not one by one.
+    var levelByID: [UUID: Int] = [:]
+    for a in order {
+      let depLevels = a.dependencies.compactMap { levelByID[$0] }
+      levelByID[a.id] = (depLevels.max() ?? -1) + 1
+    }
+    let maxLevel = levelByID.values.max() ?? 0
     Task { @MainActor [weak self] in
       guard let self else { return }
-      for (index, a) in order.enumerated() {
-        // Only the action the user actually triggered may retake focus.
-        let isTopLevel = a.id == action.id
-        self.spawnActionSession(a, in: environment, isTopLevel: isTopLevel, focus: isTopLevel && a.focusWindow)
-        if index != order.count - 1 {
+      for level in 0...maxLevel {
+        for a in order where levelByID[a.id] == level {
+          // Only the action the user actually triggered may retake focus.
+          let isTopLevel = a.id == action.id
+          self.spawnActionSession(a, in: environment, isTopLevel: isTopLevel, focus: isTopLevel && a.focusWindow)
+        }
+        if level != maxLevel {
           try? await Task.sleep(for: .seconds(1))
         }
       }

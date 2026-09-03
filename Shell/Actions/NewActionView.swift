@@ -203,7 +203,7 @@ struct NewActionView: View {
         } header: {
           Text("Dependencies")
         } footer: {
-          Text("Each dependency (and its own dependencies) starts ~1 second before this action, so it is running — not necessarily finished.")
+          Text("All of this action's dependencies start at once, and this action starts 1 second after its dependencies have started — so it is running, not necessarily finished.")
         }
       }
       .formStyle(.grouped)
