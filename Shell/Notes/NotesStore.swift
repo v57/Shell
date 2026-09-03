@@ -119,6 +119,16 @@ final class NotesStore {
     }
   }
 
+  /// Whether a note has no meaningful content: its decrypted text is nil
+  /// (never-saved new note) or whitespace-only. Used to delete an empty note
+  /// when it's closed — a freshly created note that the user never typed
+  /// into shouldn't linger in the sidebar as "Untitled".
+  func isEmptyNote(_ id: UUID) -> Bool {
+    guard let contents = decryptedNote(id: id) else { return true }
+    let trimmed = contents.text.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty
+  }
+
   // MARK: - Editing
 
   /// Creates a new empty note in the LOCAL store (device-bound key, always

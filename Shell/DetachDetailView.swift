@@ -43,6 +43,12 @@ struct DetachDetailView: View {
         }
         #endif
       }
+      .onDisappear {
+        // Closing the detached window/scene returns the item to the main
+        // window (and deletes it if it was an empty note). Only runs on a
+        // real close — the item is otherwise re-selected in the main window.
+        model.handleDetachedWindowClosed(itemID)
+      }
   }
 
   @ViewBuilder

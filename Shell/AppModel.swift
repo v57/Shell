@@ -509,6 +509,27 @@ final class AppModel {
     if detachedIDs.contains(id) { detachedIDs.remove(id) } else { detachedIDs.insert(id) }
   }
 
+  /// Called when a detached window/scene is closed via its own close button
+  /// (not the ⌘⇧D toggle or the sidebar return badge). Closing the window
+  /// destroys the scene but previously left the id in `detachedIDs`, so the
+  /// main window treated the item as still detached while it had no window —
+  /// `mainSelectedSession`/`mainSelectedNote` returned nil and the item was
+  /// stuck. This returns it to the main window: remove from `detachedIDs` and
+  /// select it so it reappears and is focusable. An empty note is deleted
+  /// (mirrors the ⌘W close behavior).
+  func handleDetachedWindowClosed(_ id: UUID) {
+    guard detachedIDs.contains(id) else { return }
+    markAttached(id)
+    // A detached empty note is deleted just like an empty note closed with
+    // ⌘W — look it up by id (not by the current selection, which may have
+    // moved on while the detached window was up).
+    if let note = notes.notes.first(where: { $0.id == id }), notes.isEmptyNote(id) {
+      deleteNote(id)
+      return
+    }
+    selection = id
+  }
+
   /// The id of the currently selected item that can be detached (a session
   /// or a note), nil when nothing detachable is selected. Drives the
   /// "Detach Session/Note" menu command: its enabled state and which item
@@ -1098,8 +1119,14 @@ final class AppModel {
   /// section — the next one when it was the first, a fresh session in
   /// that section when it was the only one.
   func closeSelectedSessionAndSelectNeighbor() {
-    // ⌘W with a note focused just closes the note editor (non-destructive).
-    if selectedNote != nil {
+    // ⌘W with a note focused closes the note editor — and, if the note is
+    // empty (never typed into), deletes it so it doesn't linger as
+    // "Untitled". A note with content is left intact (non-destructive).
+    if let note = selectedNote {
+      if notes.isEmptyNote(note.id) {
+        deleteNote(note.id)
+        return
+      }
       selection = nil
       return
     }
