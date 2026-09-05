@@ -25,8 +25,8 @@ struct XcodeIntegrationTests {
       files: files
     )
 
-    #expect(actions.count == 3)
-    #expect(actions.filter { $0.target == "Demo" }.count == 3)
+    #expect(actions.count == 6)
+    #expect(actions.filter { $0.target == "Demo" }.count == 6)
 
     let build = actions.first { $0.kind == .build }
     #expect(build?.command.contains("-project") == true)
@@ -39,6 +39,25 @@ struct XcodeIntegrationTests {
     #expect(run?.command.contains("-derivedDataPath") == true)
     #expect(run?.command.contains("open ") == true)
     #expect(run?.command.hasSuffix("Demo.app'") == true)
+
+    let distribute = actions.filter { $0.kind == .distribute }
+    #expect(distribute.count == 3)
+
+    let archive = distribute.first { $0.title == "Archive · Demo" }
+    #expect(archive?.command == "xcodebuild -project '/tmp/Demo/Demo.xcodeproj' -scheme 'Demo' archive")
+    #expect(archive?.command.contains("-archivePath") == false)
+    #expect(archive?.command.contains("-derivedDataPath") == false)
+
+    let install = distribute.first { $0.title == "Install · Demo" }
+    #expect(install?.command.contains("rm -rf '/Applications/Demo.app'") == true)
+    #expect(install?.command.contains("ditto 'build/Demo/Demo.xcarchive/Products/Applications/Demo.app' '/Applications/Demo.app'") == true)
+    #expect(install?.command.contains("-archivePath 'build/Demo/Demo.xcarchive'") == true)
+
+    let upload = distribute.first { $0.title == "Upload to App Store · Demo" }
+    #expect(upload?.command.contains("-archivePath 'build/Demo/Demo.xcarchive' archive -allowProvisioningUpdates") == true)
+    #expect(upload?.command.contains("exportOptions.plist") == true)
+    #expect(upload?.command.contains("-allowProvisioningUpdates") == true)
+    #expect(upload?.command.contains("app-store-connect") == true)
   }
 
   @Test func scanIgnoresDirectoryWithoutProject() throws {
