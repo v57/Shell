@@ -145,7 +145,11 @@ struct ContentView: View {
                         .help("Select target")
                       }
                       ForEach(smartActionGroups) { group in
-                        SmartActionMenu(actions: group.actions, directory: directory)
+                        if group.kind == .distribute {
+                          DistributeMenu(actions: group.actions, directory: directory)
+                        } else {
+                          SmartActionMenu(actions: group.actions, directory: directory)
+                        }
                       }
                     }
                   }
@@ -563,7 +567,33 @@ private struct SmartActionMenu: View {
     case .build: return "hammer.fill"
     case .run: return "play.fill"
     case .test: return "play.diamond"
+    case .distribute: return "square.and.arrow.up"
     }
+  }
+}
+
+/// A smart-action control for the `.distribute` kind: a plain Menu labeled
+/// "Distribute" whose items each run their action immediately on click.
+/// Distribute actions (Install / Archive / Upload) are one-shot — unlike
+/// build/run/test they never toggle to a stop state.
+private struct DistributeMenu: View {
+  let actions: [IntegrationAction]
+  let directory: URL
+  @Environment(AppModel.self) private var model
+
+  var body: some View {
+    Menu {
+      ForEach(actions) { action in
+        Button {
+          model.runSmartAction(action, in: directory)
+        } label: {
+          Label(action.title, systemImage: "square.and.arrow.up")
+        }
+      }
+    } label: {
+      Label("Distribute", systemImage: "square.and.arrow.up")
+    }
+    .menuIndicator(.hidden)
   }
 }
 #endif

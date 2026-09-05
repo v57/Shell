@@ -5,13 +5,15 @@ public enum IntegrationActionKind: String, Hashable, Sendable, Codable, CaseIter
   case build
   case run
   case test
+  case distribute
 
-  /// Toolbar/display order: Run first, then Build, then Test.
+  /// Toolbar/display order: Run first, then Build, then Test, then Distribute.
   public var toolbarOrder: Int {
     switch self {
     case .run: return 0
     case .build: return 1
     case .test: return 2
+    case .distribute: return 3
     }
   }
 }
