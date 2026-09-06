@@ -185,4 +185,27 @@ struct SmartActionsCoordinatorTests {
     #expect(actions.isEmpty)
     #expect(integration.scanCalls == 0)
   }
+
+  @Test func probeEnablesJSIntegrationOnAnyAvailabilityTool() {
+    // JS/TS is bun-first with an npm fallback (user directive): the integration
+    // must be available when bun OR npm OR node is on PATH — not only when bun
+    // is present — even though its requiredTool is "bun". This is the OR rule
+    // that availabilityTools expresses for an integration whose coordinator
+    // gate would otherwise be a single-tool requiredTool check.
+    func availability(with tools: Set<String>) -> Bool {
+      let integration = JSIntegration(isAvailable: false)
+      let coordinator = SmartActionsCoordinator(
+        integrations: [integration],
+        cacheStore: MemCacheStore(),
+        probe: { EnvironmentProbe(availableTools: tools) }
+      )
+      coordinator.probeEnvironment()
+      return integration.isAvailable
+    }
+    #expect(availability(with: ["bun", "npm", "node"]))
+    #expect(availability(with: ["npm", "node"]))  // bun absent -> npm fallback still on
+    #expect(availability(with: ["node"]))
+    #expect(availability(with: ["bun"]))
+    #expect(!availability(with: []))              // no JS toolchain
+  }
 }

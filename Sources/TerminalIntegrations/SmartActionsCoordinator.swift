@@ -30,8 +30,11 @@ public final class SmartActionsCoordinator {
   public func probeEnvironment() {
     let result = probe()
     for integration in integrations {
-      if let tool = integration.requiredTool {
-        integration.isAvailable = result.toolAvailable(tool)
+      let tools = integration.availabilityTools
+      if !tools.isEmpty {
+        // Available when ANY listed tool is on PATH — an OR rule (e.g. JS/TS:
+        // bun-first with an npm/node fallback when bun is absent).
+        integration.isAvailable = tools.contains(where: result.toolAvailable)
       } else {
         switch integration.id {
         case "xcode": integration.isAvailable = result.xcodebuildAvailable

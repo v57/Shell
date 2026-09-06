@@ -6,18 +6,20 @@ import Foundation
 /// present) it drives npm. The chosen driver is surfaced in each action's
 /// title and command.
 ///
-/// Availability is `bun || npm || node` present. The framework's per-tool
-/// `requiredTool` gate accepts only a single tool, which cannot express that
-/// OR condition, so `requiredTool` is set to the PRIMARY driver "bun" (the
-/// manager gates availability on it at startup — the bun-first path). The
-/// npm fallback is fully implemented and tested in `scan` (reachable on
-/// bun-less machines when `isAvailable` is enabled); `resolveTool` /
-/// `readManifest` are injectable so tests don't need a real project or
-/// toolchain on disk.
+/// Availability is `bun || npm || node` present. `availabilityTools` is set to
+/// ["bun", "npm", "node"] so the coordinator enables the integration when ANY
+/// of them is on PATH; `scan` then picks bun when present (bun-first) and
+/// falls back to npm otherwise. `requiredTool` stays "bun" as documentation of
+/// the primary driver, but the availability gate uses `availabilityTools`.
+/// `resolveTool` / `readManifest` are injectable so tests don't need a real
+/// project or toolchain on disk.
 public final class JSIntegration: TerminalIntegration {
   public let id = "js"
   public let displayName = "JS/TS"
   public let requiredTool: String? = "bun"
+  /// bun-first with an npm/node fallback: available when ANY of these is on
+  /// PATH, so the npm path still runs on machines without bun.
+  public var availabilityTools: [String] { ["bun", "npm", "node"] }
 
   public var isAvailable: Bool
 
