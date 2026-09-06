@@ -117,6 +117,14 @@ final class AppModel {
   /// ContentView/SidebarView re-render when an item is detached or returned.
   var detachedIDs: Set<UUID> = []
 
+  #if os(macOS)
+  /// The app's primary window (the one hosting ContentView). The ⌘W key
+  /// monitor uses it to route Window-close to session-close on the main window
+  /// while letting detached-item windows close normally. Captured in
+  /// ContentView.onAppear; nil until the main window has appeared.
+  weak var mainWindow: NSWindow?
+  #endif
+
   /// App-side kind per session id (the library session is transport-based
   /// and kind-agnostic). Written when a session is created, removed on
   /// removal — every session in `sessions` has an entry.

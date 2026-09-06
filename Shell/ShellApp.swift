@@ -40,23 +40,69 @@ struct ShellApp: App {
 /// Removes the system File > Close (⌘W) so the shortcut closes the
 /// selected terminal (Shell > Close Terminal) instead of the window.
 final class AppDelegate: NSObject, NSApplicationDelegate {
+  /// Retains the ⌘W local key monitor token (nil = not armed).
+  private var cmdWMonitor: Any?
+
   /// Flushes pending note autosaves on quit (the last <5s of typing).
   func applicationWillTerminate(_ notification: Notification) {
     AppModel.shared.flushForTermination()
   }
 
   func applicationDidFinishLaunching(_ notification: Notification) {
-    DispatchQueue.main.async {
-      // ⌘W/⌘N close/open terminals, not windows: drop the system
-      // File > New Window (⌘N) and File > Close (⌘W) items so the
-      // Shell menu's bindings are the only ones for those keys.
-      if let fileMenu = NSApp.mainMenu?.item(withTitle: "File")?.submenu {
-        for title in ["New Window", "Close"] {
-          if let index = fileMenu.items.firstIndex(where: { $0.title == title }) {
-            fileMenu.removeItem(at: index)
-          }
-        }
+    DispatchQueue.main.async { [weak self] in
+      self?.removeSystemCloseItems()
+    }
+    installCmdWMonitor()
+  }
+
+  /// The system File menu provides a ⌘W "Close" that closes the whole window,
+  /// and SwiftUI re-generates it every time a window/scene appears — so the
+  /// one-time removal below cannot reliably win against it. The authoritative
+  /// fix is the ⌘W key monitor (`installCmdWMonitor`), which swallows the key
+  /// before menu dispatch. This removal is kept only so the misleading "Close"
+  /// item isn't shown when it happens not to be regenerated.
+  private func removeSystemCloseItems() {
+    guard let fileMenu = NSApp.mainMenu?.item(withTitle: "File")?.submenu else { return }
+    for title in ["New Window", "Close"] {
+      if let index = fileMenu.items.firstIndex(where: { $0.title == title }) {
+        fileMenu.removeItem(at: index)
       }
+    }
+  }
+
+  /// ⌘W must close the selected session (or note/opened file) and NEVER the
+  /// whole main window — regardless of which subview has focus and regardless
+  /// of how many times SwiftUI regenerates the File menu. A local key monitor
+  /// runs before menu-key-equivalent dispatch, so the system "Close" can never
+  /// win. Modal sheets keep their own ⌘W (they dismiss), and detached-item
+  /// windows still close normally (their ⌘W is passed through).
+  private func installCmdWMonitor() {
+    cmdWMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+      let mods = event.modifierFlags
+      // Only plain ⌘W (no shift/option/control).
+      guard mods.contains(.command),
+            !mods.contains(.shift),
+            !mods.contains(.option),
+            !mods.contains(.control),
+            event.charactersIgnoringModifiers?.lowercased() == "w" else {
+        return event
+      }
+      // A modal sheet owns its ⌘W (dismiss it); don't close a session under it.
+      guard let window = NSApp.keyWindow, window.attachedSheet == nil else {
+        return event
+      }
+      // Route ⌘W to session-close only on the main window; detached-item
+      // windows close normally. Local monitors always fire on the main thread,
+      // so this is safe to assume as the MainActor.
+      let handled = MainActor.assumeIsolated {
+        // In-window overlays (Actions/Settings) are non-modal; don't close a
+        // session beneath one. Swallow the key as a no-op (Esc dismisses them).
+        if AppModel.shared.showingActions || AppModel.shared.showingSettings { return true }
+        if let main = AppModel.shared.mainWindow, window !== main { return false }
+        AppModel.shared.closeSelectedSessionAndSelectNeighbor()
+        return true
+      }
+      return handled ? nil : event
     }
   }
 }

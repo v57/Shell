@@ -325,6 +325,11 @@ struct ContentView: View {
       if FeatureFlagsStore.shared.needsFirstLaunchSelection {
         showFirstLaunchWelcome = true
       }
+      #if os(macOS)
+      // Record the primary window so the ⌘W key monitor can route Window-close
+      // to session-close here while detached-item windows still close normally.
+      if AppModel.shared.mainWindow == nil { AppModel.shared.mainWindow = NSApp.keyWindow }
+      #endif
     }
     .onReceive(directoryTimer) { _ in
       refreshLocalDirectory()
