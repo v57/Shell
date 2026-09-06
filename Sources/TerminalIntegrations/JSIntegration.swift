@@ -8,15 +8,16 @@ import Foundation
 ///
 /// Availability is `bun || npm || node` present. The framework's per-tool
 /// `requiredTool` gate accepts only a single tool, which cannot express that
-/// OR condition, so this integration leaves `requiredTool = nil` and resolves
-/// availability via `resolveTool` — the coordinator leaves `isAvailable` at the
-/// value it was initialized with, so the app gates it on `resolveTool() != nil`
-/// (matching the protocol contract). `resolveTool` / `readManifest` are
-/// injectable so tests don't need a real project or toolchain on disk.
+/// OR condition, so `requiredTool` is set to the PRIMARY driver "bun" (the
+/// manager gates availability on it at startup — the bun-first path). The
+/// npm fallback is fully implemented and tested in `scan` (reachable on
+/// bun-less machines when `isAvailable` is enabled); `resolveTool` /
+/// `readManifest` are injectable so tests don't need a real project or
+/// toolchain on disk.
 public final class JSIntegration: TerminalIntegration {
   public let id = "js"
   public let displayName = "JS/TS"
-  public let requiredTool: String? = nil
+  public let requiredTool: String? = "bun"
 
   public var isAvailable: Bool
 
