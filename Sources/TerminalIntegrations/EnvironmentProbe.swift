@@ -1,58 +1,70 @@
 import Foundation
 
-/// Results of probing the installed developer toolchain once, at startup.
+/// The result of probing which toolchain binaries are available on PATH.
 ///
-/// `smartActions` availability depends on `xcodebuild`/`swift` being present.
-/// Probing spawns `xcrun -f <tool>` subprocesses, so the app does it a single
-/// time at startup and hands the flags to the integrations (see
-/// `TerminalIntegration.isAvailable`).
+/// Previously this probe spawned `xcrun -f <tool>` subprocesses, which is
+/// macOS-only and only knows about the Apple toolchain. It now resolves the
+/// same question with a generic PATH lookup (`FileManager.isExecutableFile`
+/// at each PATH entry) over a FIXED tool set — including cross-language
+/// toolchains (cargo, bun, npm, go, make, python3, cmake, docker, dotnet,
+/// dart, ruby, mix, php, composer, zig, ...) — so any `TerminalIntegration`
+/// can gate on a required tool without Apple-specific plumbing.
 public struct EnvironmentProbe: Sendable, Equatable {
-  public let xcodebuildAvailable: Bool
-  public let swiftAvailable: Bool
+  /// The set of tool names that resolved to an executable on PATH.
+  public let availableTools: Set<String>
 
+  /// Whether `xcodebuild` is on PATH.
+  public var xcodebuildAvailable: Bool { availableTools.contains("xcodebuild") }
+  /// Whether `swift` is on PATH.
+  public var swiftAvailable: Bool { availableTools.contains("swift") }
+
+  /// Builds a probe from an explicit tool set. The primary init.
+  public init(availableTools: Set<String>) {
+    self.availableTools = availableTools
+  }
+
+  /// Convenience init preserved for existing call sites/tests that know only
+  /// the two classic Apple tools. Seeds the tool set with whichever are set.
   public init(xcodebuildAvailable: Bool, swiftAvailable: Bool) {
-    self.xcodebuildAvailable = xcodebuildAvailable
-    self.swiftAvailable = swiftAvailable
+    var tools = Set<String>()
+    if xcodebuildAvailable { tools.insert("xcodebuild") }
+    if swiftAvailable { tools.insert("swift") }
+    self.init(availableTools: tools)
   }
 
-  /// Locates the toolchain binaries via `xcrun -f`. A tool is "available" only
-  /// when xcrun resolves a real path (exit 0, non-empty output). Falls back to
-  /// false on any failure rather than throwing.
-  ///
-  /// `xcrun` is a macOS-only tool, so on iOS/other platforms no tool is ever
-  /// resolvable (smart actions are inherently macOS-only).
+  /// Whether `name` is a tool resolved on PATH.
+  public func toolAvailable(_ name: String) -> Bool {
+    availableTools.contains(name)
+  }
+
+  /// The fixed set of tool names probed on every launch.
+  public static let toolNames: [String] = [
+    "xcodebuild", "swift",
+    "cargo", "bun", "npm", "node", "go", "make",
+    "python3", "uv", "poetry", "gradle", "gradlew", "mvn", "cmake",
+    "docker", "dotnet", "dart", "ruby", "bundle", "mix", "php", "composer", "zig",
+  ]
+
+  /// Probes PATH once and returns the set of available tools.
   public static func probe() -> EnvironmentProbe {
-    #if os(macOS)
-      return EnvironmentProbe(
-        xcodebuildAvailable: locateXCRunTool("xcodebuild") != nil,
-        swiftAvailable: locateXCRunTool("swift") != nil
-      )
-    #else
-      return EnvironmentProbe(xcodebuildAvailable: false, swiftAvailable: false)
-    #endif
+    EnvironmentProbe(availableTools: resolveAvailableTools())
   }
 
-  private static func locateXCRunTool(_ tool: String) -> String? {
-    #if os(macOS)
-      let process = Process()
-      process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
-      process.arguments = ["-f", tool]
-      let pipe = Pipe()
-      process.standardOutput = pipe
-      process.standardError = Pipe()
-      do {
-        try process.run()
-        process.waitUntilExit()
-      } catch {
-        return nil
+  /// Looks each known tool up against every PATH entry without spawning a
+  /// subprocess. A tool is available when any `$PATH/<tool>` is executable.
+  private static func resolveAvailableTools() -> Set<String> {
+    var found = Set<String>()
+    guard let path = ProcessInfo.processInfo.environment["PATH"] else { return found }
+    let fm = FileManager.default
+    for dir in path.split(separator: ":") {
+      let dirString = String(dir)
+      for tool in toolNames where !found.contains(tool) {
+        let candidate = URL(fileURLWithPath: dirString).appendingPathComponent(tool).path
+        if fm.isExecutableFile(atPath: candidate) {
+          found.insert(tool)
+        }
       }
-      guard process.terminationStatus == 0 else { return nil }
-      let data = pipe.fileHandleForReading.readDataToEndOfFile()
-      let output = String(data: data, encoding: .utf8)?
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-      return (output?.isEmpty == false) ? output : nil
-    #else
-      return nil
-    #endif
+    }
+    return found
   }
 }

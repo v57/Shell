@@ -573,6 +573,7 @@ private struct SmartActionMenu: View {
     case .run: return "play.fill"
     case .test: return "play.diamond"
     case .distribute: return "square.and.arrow.up"
+    case .lint: return "checkmark.seal"
     }
   }
 }

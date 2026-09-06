@@ -9,6 +9,8 @@ import Foundation
 public final class XcodeIntegration: TerminalIntegration {
   public let id = "xcode"
   public let displayName = "Xcode"
+  /// Gate: availability requires `xcodebuild` on PATH.
+  public let requiredTool: String? = "xcodebuild"
   public var isAvailable: Bool
 
   /// Runs `xcodebuild -list -json` for a project file URL, returning stdout.

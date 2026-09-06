@@ -11,6 +11,11 @@ public protocol TerminalIntegration: AnyObject {
   var id: String { get }
   /// Human-readable name, e.g. "Xcode", "Swift Package".
   var displayName: String { get }
+  /// Toolchain binary that must be present on PATH for this integration to be
+  /// available (e.g. "xcodebuild", "swift"). The coordinator reads it during
+  /// `probeEnvironment()` to gate `isAvailable`. Default `nil` = not gated on a
+  /// tool (always available when the app chooses to run it).
+  var requiredTool: String? { get }
   /// Set once at startup from `EnvironmentProbe`; when false the integration
   /// is skipped entirely (no `relevance`/`scan` calls).
   var isAvailable: Bool { get set }
@@ -23,4 +28,9 @@ public protocol TerminalIntegration: AnyObject {
   /// Produce the smart actions for a directory. Called only when `isAvailable`
   /// and `relevance(...)` are both true.
   func scan(directory: URL, files: [DirectoryEntry]) -> [IntegrationAction]
+}
+
+extension TerminalIntegration {
+  /// Default: an integration is not gated on a specific toolchain binary.
+  public var requiredTool: String? { nil }
 }

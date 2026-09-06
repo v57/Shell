@@ -22,13 +22,22 @@ public final class SmartActionsCoordinator {
   }
 
   /// Probe installed toolchains ONCE and set each integration's availability.
+  ///
+  /// Each integration declares the tool it needs via `requiredTool`; it is
+  /// available only when that tool resolves on PATH. An integration with no
+  /// `requiredTool` falls back to the legacy id-based gating, keeping
+  /// existing behavior (and test doubles) unchanged.
   public func probeEnvironment() {
     let result = probe()
     for integration in integrations {
-      switch integration.id {
-      case "xcode": integration.isAvailable = result.xcodebuildAvailable
-      case "swift": integration.isAvailable = result.swiftAvailable
-      default: break
+      if let tool = integration.requiredTool {
+        integration.isAvailable = result.toolAvailable(tool)
+      } else {
+        switch integration.id {
+        case "xcode": integration.isAvailable = result.xcodebuildAvailable
+        case "swift": integration.isAvailable = result.swiftAvailable
+        default: break
+        }
       }
     }
   }
@@ -46,8 +55,9 @@ public final class SmartActionsCoordinator {
   /// NOT invalidate a cached scan — folding a version into the fingerprint is
   /// what forces a re-scan when the logic itself changes. (2026-09-05: adding
   /// the `.distribute` kind left every cached Xcode dir showing stale
-  /// run/build/test actions until this was added.)
-  static let cacheVersion = "2"
+  /// run/build/test actions until this was added.) (2026-09-06: PATH-based
+  /// probe + `.lint` kind + ToolIntegrationBase.)
+  static let cacheVersion = "3"
 
   /// Returns the smart actions for `directory`, reading from the encrypted
   /// cache when the fingerprint is unchanged and scanning otherwise.

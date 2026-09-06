@@ -5,6 +5,8 @@ import Foundation
 public final class SwiftIntegration: TerminalIntegration {
   public let id = "swift"
   public let displayName = "Swift Package"
+  /// Gate: availability requires `swift` on PATH.
+  public let requiredTool: String? = "swift"
   public var isAvailable: Bool
 
   public init(isAvailable: Bool) {
