@@ -159,6 +159,21 @@ final class AppModel {
     integrations: [
       XcodeIntegration(isAvailable: false),
       SwiftIntegration(isAvailable: false),
+      CargoIntegration(isAvailable: false),
+      JSIntegration(isAvailable: false),
+      GoIntegration(isAvailable: false),
+      MakeIntegration(isAvailable: false),
+      PythonIntegration(isAvailable: false),
+      GradleIntegration(isAvailable: false),
+      MavenIntegration(isAvailable: false),
+      CMakeIntegration(isAvailable: false),
+      DockerComposeIntegration(isAvailable: false),
+      DotnetIntegration(isAvailable: false),
+      DartIntegration(isAvailable: false),
+      RubyIntegration(isAvailable: false),
+      ElixirIntegration(isAvailable: false),
+      PHPIntegration(isAvailable: false),
+      ZigIntegration(isAvailable: false),
     ],
     cacheStore: SmartActionsStore()
   )
