@@ -66,21 +66,15 @@ public final class XcodeIntegration: TerminalIntegration {
         target: scheme,
         command: "xcodebuild \(flag) \(projectArg) -scheme \(schemeArg) -derivedDataPath \(derivedArg) build && open \(appPath)"
       ))
-      // Distribute actions: Archive (xcodebuild default archive location),
-      // Install (archive + ditto the built .app into /Applications), and
-      // Upload to App Store (archive + exportArchive with a generated
-      // exportOptions.plist using method app-store-connect).
+      // Distribute actions: Install (archive + ditto the built .app into
+      // /Applications) and Upload to App Store (archive + exportArchive with
+      // a generated exportOptions.plist using method app-store-connect). Both
+      // run `xcodebuild ... archive` internally as their first step.
       let archivePath = Self.quote("build/\(scheme)/\(scheme).xcarchive")
       let installAppPath = Self.quote("/Applications/\(scheme).app")
       let installSourcePath = Self.quote("build/\(scheme)/\(scheme).xcarchive/Products/Applications/\(scheme).app")
       let exportPlist = Self.quote("exportOptions.plist")
       let exportPath = Self.quote("build/\(scheme)/Upload")
-      actions.append(IntegrationAction(
-        kind: .distribute,
-        title: "Archive · \(scheme)",
-        target: scheme,
-        command: "xcodebuild \(flag) \(projectArg) -scheme \(schemeArg) archive"
-      ))
       actions.append(IntegrationAction(
         kind: .distribute,
         title: "Install · \(scheme)",

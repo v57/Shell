@@ -25,8 +25,8 @@ struct XcodeIntegrationTests {
       files: files
     )
 
-    #expect(actions.count == 6)
-    #expect(actions.filter { $0.target == "Demo" }.count == 6)
+    #expect(actions.count == 5)
+    #expect(actions.filter { $0.target == "Demo" }.count == 5)
 
     let build = actions.first { $0.kind == .build }
     #expect(build?.command.contains("-project") == true)
@@ -41,12 +41,7 @@ struct XcodeIntegrationTests {
     #expect(run?.command.hasSuffix("Demo.app'") == true)
 
     let distribute = actions.filter { $0.kind == .distribute }
-    #expect(distribute.count == 3)
-
-    let archive = distribute.first { $0.title == "Archive · Demo" }
-    #expect(archive?.command == "xcodebuild -project '/tmp/Demo/Demo.xcodeproj' -scheme 'Demo' archive")
-    #expect(archive?.command.contains("-archivePath") == false)
-    #expect(archive?.command.contains("-derivedDataPath") == false)
+    #expect(distribute.count == 2)
 
     let install = distribute.first { $0.title == "Install · Demo" }
     #expect(install?.command.contains("rm -rf '/Applications/Demo.app'") == true)

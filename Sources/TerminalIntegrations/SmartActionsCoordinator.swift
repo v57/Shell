@@ -40,12 +40,21 @@ public final class SmartActionsCoordinator {
     return refresh(directory: directory)
   }
 
+  /// Bump this whenever integration code changes (a new action kind, a changed
+  /// command, a new integration). The cache fingerprint hashes only VISIBLE
+  /// TOP-LEVEL directory entries, so editing nested integration sources does
+  /// NOT invalidate a cached scan — folding a version into the fingerprint is
+  /// what forces a re-scan when the logic itself changes. (2026-09-05: adding
+  /// the `.distribute` kind left every cached Xcode dir showing stale
+  /// run/build/test actions until this was added.)
+  static let cacheVersion = "2"
+
   /// Returns the smart actions for `directory`, reading from the encrypted
   /// cache when the fingerprint is unchanged and scanning otherwise.
   public func refresh(directory: URL) -> [IntegrationAction] {
     let canonical = directory.standardizedFileURL
     let entries = IntegrationFileLister.list(directory: canonical)
-    let fingerprint = IntegrationFingerprint.hash(entries: entries)
+    let fingerprint = Self.cacheVersion + ":" + IntegrationFingerprint.hash(entries: entries)
 
     if let cached = cacheStore.entry(forDirectory: canonical),
        cached.fingerprint == fingerprint {

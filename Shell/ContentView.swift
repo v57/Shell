@@ -579,7 +579,7 @@ private struct SmartActionMenu: View {
 
 /// A smart-action control for the `.distribute` kind: a plain Menu labeled
 /// "Distribute" whose items each run their action immediately on click.
-/// Distribute actions (Install / Archive / Upload) are one-shot — unlike
+/// Distribute actions (Install / Upload) are one-shot — unlike
 /// build/run/test they never toggle to a stop state.
 private struct DistributeMenu: View {
   let actions: [IntegrationAction]

@@ -111,6 +111,30 @@ struct SmartActionsCoordinatorTests {
     #expect(integration.scanCalls == 2)
   }
 
+  @Test func refreshIgnoresEntryFromOlderCacheVersion() throws {
+    let dir = try makeDir()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let integration = RecordingIntegration(id: "swift")
+    let cache = MemCacheStore()
+    // Seed a cache entry written by an OLD build, whose fingerprint is the
+    // bare top-level hash (no `cacheVersion` prefix). The coordinator now
+    // computes "2:" + hash, so this legacy entry must be treated as a MISS and
+    // re-scanned — the regression that showed stale actions after adding a new
+    // action kind without a directory-content change.
+    let legacy = IntegrationFingerprint.hash(entries: IntegrationFileLister.list(directory: dir))
+    cache.store[dir.standardizedFileURL.path] = IntegrationCacheEntry(
+      fingerprint: legacy,
+      actions: [IntegrationAction(kind: .build, title: "stale", target: nil, command: "old")]
+    )
+    let coordinator = coordinator(integrations: [integration], cache: cache, swiftAvailable: true)
+    coordinator.probeEnvironment()
+
+    let actions = coordinator.refresh(directory: dir)
+    #expect(integration.scanCalls == 1)
+    #expect(actions.count == 1)
+    #expect(cache.store[dir.standardizedFileURL.path]?.fingerprint != legacy)
+  }
+
   @Test func probeDisablesUnavailableIntegration() throws {
     let dir = try makeDir()
     defer { try? FileManager.default.removeItem(at: dir) }
