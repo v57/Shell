@@ -1588,7 +1588,13 @@ final class AppModel {
         output = newScrollback
       }
       if !grid.isEmpty {
-        if !output.isEmpty { output += "\n" }
+        // Glue across the scrollback/grid seam: a grid row 0 that is a
+        // soft-wrap continuation of the last scrollback row does not start
+        // a new captured line (otherwise a long wrapped line gets a spurious
+        // newline when it scrolls off the bottom).
+        if !output.isEmpty && !snapshot.isLineWrapped(snapshot.scrollback.count) {
+          output += "\n"
+        }
         output += grid
       }
       draft.output = output

@@ -116,6 +116,8 @@ public final class TerminalOutputParser {
       columns: active.columns,
       cells: active.cells,
       scrollback: active.scrollback,
+      scrollbackWrapped: active.scrollbackWrapped,
+      gridWrapped: active.rowWrapped,
       cursor: active.cursor,
       showCursor: active.showCursor,
       cursorBackground: active.cursorBackground,
@@ -512,7 +514,17 @@ struct TerminalGrid {
   /// column does not wrap until the next printable character is written.
   /// A CR (or other non-printing cursor movement) cancels the pending wrap.
   var wrapPending: Bool
-  
+
+  /// Per-screen-row flag: `rowWrapped[r]` is true when row `r`'s content
+  /// arrived as a soft-wrap continuation of the row above it (i.e. the row
+  /// above hit the last column and wrapped). This is what distinguishes a
+  /// line broken by autowrap (one long logical line) from a real newline
+  /// (two separate lines). It alone lets resize re-flow wrapped lines and
+  /// lets copy/history re-join them — the grid keeps every other operation
+  /// physical. Maintained in `put`, `scrollUp`/`scrollDown`/`eraseRow`, and
+  /// shift by `insertLines`/`deleteLines`.
+  private(set) var rowWrapped: [Bool]
+
   /// True when lines scrolled off the top should be kept in `scrollback`.
   /// The alternate screen (1049) has no scrollback, so its grid sets false.
   var recordsScrollback = true
@@ -533,13 +545,18 @@ struct TerminalGrid {
   /// Scrollback lines, oldest first. Each row keeps its historical width;
   /// trailing blank/clear-background cells are trimmed to save memory.
   private(set) var scrollback: [[TerminalCell]] = []
+  /// Per-scrollback-row version of `rowWrapped`, kept in sync with
+  /// `scrollback` (same index, either may hold the flag across the
+  /// scrollback/grid seam).
+  private(set) var scrollbackWrapped: [Bool] = []
   /// Matches Terminal.app's default scrollback size.
   static let scrollbackLimit = 10_000
-  
+
   init(rows: Int, columns: Int) {
     self.rows = rows
     self.columns = columns
     self.cells = Array(repeating: TerminalCell.space, count: max(rows, 1) * max(columns, 1))
+    self.rowWrapped = Array(repeating: false, count: max(rows, 1))
     self.cursor = .zero
     self.savedCursor = nil
     self.currentAttributes = TerminalCell.space
@@ -550,31 +567,193 @@ struct TerminalGrid {
     self.wrapPending = false
   }
   
-  mutating func resize(rows: Int, columns: Int) {
-    guard rows > 0, columns > 0 else { return }
+  mutating func resize(rows newRows: Int, columns newColumns: Int) {
+    guard newRows > 0, newColumns > 0 else { return }
     let oldRows = self.rows
     let oldColumns = self.columns
     let oldCells = cells
-    self.rows = rows
-    self.columns = columns
-    self.scrollBottom = rows - 1
-    self.wrapPending = false
-    self.cells = Array(repeating: TerminalCell.space, count: rows * columns)
-    markAllDirty()
-    
-    let copyRows = min(oldRows, rows)
-    let copyColumns = min(oldColumns, columns)
-    for row in 0..<copyRows {
-      for column in 0..<copyColumns {
-        cells[row * columns + column] = oldCells[row * oldColumns + column]
+    let oldRowWrapped = rowWrapped
+    let oldScrollback = scrollback
+    let oldCursor = cursor
+
+    // 1. Gather the old buffer as ONE ordered sequence of physical rows
+    //    (scrollback first, then the grid), each with its wrapped flag.
+    var rowsSeq: [[TerminalCell]] = []
+    rowsSeq.reserveCapacity(oldScrollback.count + oldRows)
+    rowsSeq.append(contentsOf: oldScrollback)
+    for r in 0..<oldRows {
+      rowsSeq.append(Array(oldCells[(r * oldColumns)..<((r + 1) * oldColumns)]))
+    }
+    var wrappedSeq: [Bool] = []
+    wrappedSeq.reserveCapacity(oldScrollback.count + oldRows)
+    wrappedSeq.append(contentsOf: scrollbackWrapped)
+    wrappedSeq.append(contentsOf: oldRowWrapped)
+
+    // 2. Split into logical lines (each a contiguous cell array). The first
+    //    row always starts a line; a row whose wrapped flag is set continues
+    //    the line above it.
+    var lines: [[TerminalCell]] = []
+    var lineStarts: [Int] = []   // index into rowsSeq where each logical line begins
+    var current: [TerminalCell] = []
+    var currentStart = -1
+    for i in 0..<rowsSeq.count {
+      let row = rowsSeq[i]
+      if currentStart == -1 {
+        currentStart = i
+        current = row
+      } else if i < wrappedSeq.count && wrappedSeq[i] {
+        current.append(contentsOf: row)
+      } else {
+        lines.append(trimmedLine(current))
+        lineStarts.append(currentStart)
+        currentStart = i
+        current = row
       }
     }
-    cursor.row = min(cursor.row, rows - 1)
-    cursor.column = min(cursor.column, columns - 1)
+    if currentStart != -1 {
+      lines.append(trimmedLine(current))
+      lineStarts.append(currentStart)
+    }
+
+    // 3. Locate the cursor's logical line and its column offset within it.
+    //    Absolute cell index of the cursor = cells before its physical row +
+    //    the column; the line's absolute start is subtracted to get the
+    //    offset inside the logical line.
+    var prefix: [Int] = [0]
+    prefix.reserveCapacity(rowsSeq.count + 1)
+    var acc = 0
+    for row in rowsSeq { acc += row.count; prefix.append(acc) }
+    let cursorPhysical = oldScrollback.count + oldCursor.row
+    let cursorAbsCell = prefix[cursorPhysical] + oldCursor.column
+    var cursorLine = 0
+    for (idx, start) in lineStarts.enumerated() where start <= cursorPhysical {
+      cursorLine = idx
+    }
+    let cursorOffsetInLine = cursorAbsCell - prefix[lineStarts[cursorLine]]
+
+    // Drop grid filler: trailing EMPTY logical lines below the cursor's line
+    // and the last content line are just unused screen space (the blank rows
+    // a grid holds below the prompt), not real history — they must not
+    // re-wrap into a phantom scrollback on a resize from the default grid.
+    // Keep everything up to and including the last non-empty line and the
+    // cursor's line (the cursor may be sitting on a blank prompt line).
+    var lastNonEmpty = lines.count - 1
+    while lastNonEmpty >= 0 && lines[lastNonEmpty].isEmpty { lastNonEmpty -= 1 }
+    let contentWatermark = max(lastNonEmpty, cursorLine)
+    if contentWatermark < lines.count - 1 {
+      lines = Array(lines[0...contentWatermark])
+      lineStarts = Array(lineStarts[0...contentWatermark])
+    }
+
+    // 4. Re-wrap every logical line at the new width into physical rows,
+    //    remembering where the cursor's line lands (global row index).
+    var newRowsSeq: [[TerminalCell]] = []
+    var newWrapped: [Bool] = []
+    var cursorLineGlobalStart = -1
+    for (li, line) in lines.enumerated() {
+      if li == cursorLine { cursorLineGlobalStart = newRowsSeq.count }
+      let rw = Self.rewrap(line, width: newColumns)
+      newRowsSeq.append(contentsOf: rw)
+      // First row of a logical line is a hard start (false); the rest wrap.
+      for j in 0..<rw.count { newWrapped.append(j > 0) }
+    }
+
+    // 5. Grid = the last newRows physical rows; scrollback = the rest.
+    let gridCount = min(newRows, newRowsSeq.count)
+    let gridStart = newRowsSeq.count - gridCount
+
+    var newCells = Array(repeating: TerminalCell.space, count: newRows * newColumns)
+    var newRowWrapped = Array(repeating: false, count: newRows)
+    for j in 0..<gridCount {
+      let srcRow = newRowsSeq[gridStart + j]
+      for c in 0..<srcRow.count where c < newColumns {
+        newCells[j * newColumns + c] = srcRow[c]
+      }
+      newRowWrapped[j] = newWrapped[gridStart + j]
+    }
+
+    var newScrollback = Array(newRowsSeq[0..<gridStart])
+    var newScrollbackWrapped = Array(newWrapped[0..<gridStart])
+    for i in 0..<newScrollback.count {
+      var row = newScrollback[i]
+      while let last = row.last, last.isBlank, last.background == .clear {
+        row.removeLast()
+      }
+      newScrollback[i] = row
+    }
+    if newScrollback.count > Self.scrollbackLimit {
+      let overflow = newScrollback.count - Self.scrollbackLimit
+      newScrollback.removeFirst(overflow)
+      newScrollbackWrapped.removeFirst(overflow)
+    }
+
+    // 6. Recompute the cursor's position relative to the grid.
+    var newCursorRow: Int
+    var newCursorCol: Int
+    if cursorLineGlobalStart >= 0 {
+      newCursorRow = cursorLineGlobalStart + cursorOffsetInLine / newColumns - gridStart
+      newCursorCol = cursorOffsetInLine % newColumns
+    } else {
+      newCursorRow = gridCount - 1
+      newCursorCol = 0
+    }
+
+    // 7. Commit.
+    self.rows = newRows
+    self.columns = newColumns
+    self.cells = newCells
+    self.rowWrapped = newRowWrapped
+    self.scrollback = newScrollback
+    self.scrollbackWrapped = newScrollbackWrapped
+    self.scrollTop = 0
+    self.scrollBottom = newRows - 1
+    self.wrapPending = false
+    self.cursor = TerminalCursor(
+      row: min(max(0, newCursorRow), newRows - 1),
+      column: min(max(0, newCursorCol), newColumns - 1)
+    )
+    markAllDirty()
+  }
+
+  /// Re-wraps one logical line (a contiguous cell array with no wrap markers)
+  /// into physical rows of `width` columns, reproducing the xenl autowrap
+  /// rule used by `put`. Every row but the last is exactly `width` cells; the
+  /// last row may be shorter. Because a new row is created only when the
+  /// previous row reached the last column, every row after the first of a
+  /// line is a soft-wrap continuation.
+  private static func rewrap(_ line: [TerminalCell], width: Int) -> [[TerminalCell]] {
+    guard width > 0 else { return [[]] }
+    if line.isEmpty {
+      return [[]]
+    }
+    var out: [[TerminalCell]] = []
+    var row: [TerminalCell] = []
+    for cell in line {
+      if row.count == width {
+        out.append(row)
+        row = []
+      }
+      row.append(cell)
+    }
+    out.append(row)
+    return out
+  }
+
+  /// Strips trailing blank cells that carry no background (the padding the
+  /// grid stores to fill a full-width row). A logical line's real content ends
+  /// at its last non-blank (or BCE) cell; the padding must not be re-wrapped
+  /// or it becomes phantom continuation rows.
+  private func trimmedLine(_ cells: [TerminalCell]) -> [TerminalCell] {
+    var out = cells
+    while let last = out.last, last.isBlank, last.background == .clear {
+      out.removeLast()
+    }
+    return out
   }
   
   mutating func reset() {
     cells = Array(repeating: TerminalCell.space, count: rows * columns)
+    rowWrapped = Array(repeating: false, count: rows)
     cursor = .zero
     savedCursor = nil
     currentAttributes = TerminalCell.space
@@ -583,6 +762,7 @@ struct TerminalGrid {
     scrollBottom = max(rows - 1, 0)
     wrapPending = false
     scrollback.removeAll()
+    scrollbackWrapped.removeAll()
     recordsRegionScroll = false
     markAllDirty()
   }
@@ -613,6 +793,7 @@ struct TerminalGrid {
   
   mutating func put(_ character: Character) {
     guard rows > 0, columns > 0 else { return }
+    var byWrap = false
     if wrapPending {
       // The wrap deferred by the previous last-column write happens now.
       wrapPending = false
@@ -622,6 +803,7 @@ struct TerminalGrid {
         scrollUp()
         cursor.row = scrollBottom
       }
+      byWrap = true
     }
     if cursor.column >= columns {
       cursor.column = 0
@@ -630,8 +812,21 @@ struct TerminalGrid {
         scrollUp()
         cursor.row = scrollBottom
       }
+      byWrap = false
     }
-    
+
+    // The row we're about to write on is a soft-wrap continuation when the
+    // cursor arrived here through a deferred wrap; otherwise a write at the
+    // first column (after a newline / CR / explicit move) starts a fresh
+    // logical line. Writing mid-row (col > 0) leaves the row's structure
+    // flag untouched — a wrapped line being partially overwritten is still a
+    // wrapped line.
+    if byWrap {
+      rowWrapped[cursor.row] = true
+    } else if cursor.column == 0 {
+      rowWrapped[cursor.row] = false
+    }
+
     let index = cursor.row * columns + cursor.column
     guard index >= 0, index < cells.count else { return }
     var cell = currentAttributes
@@ -690,6 +885,7 @@ struct TerminalGrid {
     for index in 0..<cells.count {
       cells[index] = erasedCell()
     }
+    rowWrapped = Array(repeating: false, count: rows)
     cursor = .zero
     markAllDirty()
   }
@@ -701,6 +897,7 @@ struct TerminalGrid {
   /// shell.
   mutating func clearStdout() {
     scrollback.removeAll()
+    scrollbackWrapped.removeAll()
     let keepRow = cursor.row
     for row in 0..<rows where row != keepRow {
       eraseRow(row)
@@ -728,6 +925,7 @@ struct TerminalGrid {
       // CSI 3 J: erase the scrollback (xterm). The visible screen is
       // untouched.
       scrollback.removeAll()
+      scrollbackWrapped.removeAll()
     default:
       break
     }
@@ -851,6 +1049,8 @@ struct TerminalGrid {
       for column in 0..<columns {
         cells[row * columns + column] = cells[(row + 1) * columns + column]
       }
+      // The wrapped flag travels with the row's content.
+      rowWrapped[row] = rowWrapped[row + 1]
     }
     eraseRow(scrollBottom)
     if scrollTop > 0 {
@@ -883,6 +1083,8 @@ struct TerminalGrid {
       for column in 0..<columns {
         cells[row * columns + column] = cells[(row - 1) * columns + column]
       }
+      // The wrapped flag travels with the row's content.
+      rowWrapped[row] = rowWrapped[row - 1]
     }
     eraseRow(scrollTop)
     for row in scrollTop...scrollBottom {
@@ -935,6 +1137,7 @@ struct TerminalGrid {
       for column in 0..<columns {
         cells[row * columns + column] = cells[(row - n) * columns + column]
       }
+      rowWrapped[row] = rowWrapped[row - n]
     }
     for row in cursor.row..<(cursor.row + n) {
       eraseRow(row)
@@ -957,6 +1160,7 @@ struct TerminalGrid {
       for column in 0..<columns {
         cells[row * columns + column] = cells[(row + n) * columns + column]
       }
+      rowWrapped[row] = rowWrapped[row + n]
     }
     for row in (scrollBottom - n + 1)...scrollBottom {
       eraseRow(row)
@@ -973,6 +1177,8 @@ struct TerminalGrid {
     for index in start..<end {
       cells[index] = erasedCell()
     }
+    // A blanked row is not a continuation of the row above.
+    rowWrapped[row] = false
     markDirty(row)
   }
   
@@ -1011,8 +1217,12 @@ struct TerminalGrid {
       row.removeLast()
     }
     scrollback.append(row)
+    // The row keeps its wrapped flag with it as it moves off-screen.
+    scrollbackWrapped.append(rowWrapped[0])
     if scrollback.count > Self.scrollbackLimit {
-      scrollback.removeFirst(scrollback.count - Self.scrollbackLimit)
+      let overflow = scrollback.count - Self.scrollbackLimit
+      scrollback.removeFirst(overflow)
+      scrollbackWrapped.removeFirst(overflow)
     }
   }
   

@@ -51,6 +51,16 @@ public struct TerminalSnapshot {
   /// Lines scrolled off the top of the main screen, oldest first. Each row
   /// keeps its historical width. Empty while on the alternate screen.
   public var scrollback: [[TerminalCell]]
+  /// Per-scrollback-row wrapped flag: `scrollbackWrapped[i]` is true when
+  /// scrollback row `i` is a soft-wrap continuation of row `i-1`. Mirrors
+  /// `gridWrapped` across the scrollback/grid seam, so copy/history can
+  /// re-join logical lines instead of treating every physical row as a new
+  /// line.
+  public var scrollbackWrapped: [Bool]
+  /// Per-grid-row wrapped flag (row n continues row n-1). Together with
+  /// `scrollbackWrapped` it records every soft-wrap boundary, which is what
+  /// lets plainText/copy re-join wrapped lines (and resize re-flow them).
+  public var gridWrapped: [Bool]
   public var cursor: TerminalCursor
   public var showCursor: Bool
   public var cursorBackground: Color
@@ -75,11 +85,29 @@ public struct TerminalSnapshot {
   /// Maximum scroll offset (lines above the bottom).
   public var maxOffset: Int { max(0, totalLines - rows) }
 
-  init(rows: Int = 24, columns: Int = 80, cells: [TerminalCell] = [], scrollback: [[TerminalCell]] = [], cursor: TerminalCursor = .zero, showCursor: Bool = true, cursorBackground: Color = TerminalPalette.selectionBackground, message: String? = nil, selectionEpoch: Int = 0, dirtyLines: Set<Int> = []) {
+  /// Whether logical line `line` is a soft-wrap continuation of the line just
+  /// above it. Line 0 (and any out-of-range line) is never a continuation.
+  /// This is the single bit that distinguishes a long line split by autowrap
+  /// from two genuinely separate lines; copy/history use it to re-join the
+  /// former without inserting a spurious newline.
+  public func isLineWrapped(_ line: Int) -> Bool {
+    guard line > 0, line < totalLines else { return false }
+    if line < scrollback.count {
+      guard line < scrollbackWrapped.count else { return false }
+      return scrollbackWrapped[line]
+    }
+    let gridRow = line - scrollback.count
+    guard gridRow < gridWrapped.count else { return false }
+    return gridWrapped[gridRow]
+  }
+
+  init(rows: Int = 24, columns: Int = 80, cells: [TerminalCell] = [], scrollback: [[TerminalCell]] = [], scrollbackWrapped: [Bool] = [], gridWrapped: [Bool] = [], cursor: TerminalCursor = .zero, showCursor: Bool = true, cursorBackground: Color = TerminalPalette.selectionBackground, message: String? = nil, selectionEpoch: Int = 0, dirtyLines: Set<Int> = []) {
     self.rows = rows
     self.columns = columns
     self.cells = cells.isEmpty ? Array(repeating: TerminalCell.space, count: rows * columns) : cells
     self.scrollback = scrollback
+    self.scrollbackWrapped = scrollbackWrapped
+    self.gridWrapped = gridWrapped
     self.cursor = cursor
     self.showCursor = showCursor
     self.cursorBackground = cursorBackground
@@ -113,11 +141,7 @@ public struct TerminalSnapshot {
     guard message == nil else { return message ?? "" }
     let off = min(max(0, offset), maxOffset)
     let firstLine = maxOffset - off
-    var lines: [String] = []
-    for row in 0..<rows {
-      lines.append(lineText(line: firstLine + row, from: 0, to: columns - 1))
-    }
-    return lines.joined(separator: "\n")
+    return gluedLines(first: firstLine, last: firstLine + rows - 1).joined(separator: "\n")
   }
   
   public var plainText: String {
@@ -129,7 +153,7 @@ public struct TerminalSnapshot {
   /// is retained. Alternate-screen snapshots naturally contain no scrollback.
   public var fullPlainText: String {
     guard message == nil else { return message ?? "" }
-    var lines = (0..<totalLines).map { lineText(line: $0) }
+    var lines = gluedLines(first: 0, last: totalLines - 1)
     while lines.last?.isEmpty == true { lines.removeLast() }
     return lines.joined(separator: "\n")
   }
@@ -142,24 +166,24 @@ public struct TerminalSnapshot {
     guard message == nil else { return message ?? "" }
     let off = min(max(0, offset), maxOffset)
     let firstLine = maxOffset - off
-    let top = min(start.row, end.row)
-    let bottom = max(start.row, end.row)
+    let top = min(start.row, end.row) + firstLine
+    let bottom = max(start.row, end.row) + firstLine
     let leftColumn = start.row <= end.row ? start.column : end.column
     let rightColumn = start.row <= end.row ? end.column : start.column
     
-    var lines: [String] = []
+    var segments: [(line: Int, start: Int, end: Int)] = []
     if top == bottom {
-      lines.append(lineText(line: firstLine + top, from: leftColumn, to: rightColumn))
+      segments.append((top, leftColumn, rightColumn))
     } else {
-      lines.append(lineText(line: firstLine + top, from: leftColumn, to: columns - 1))
+      segments.append((top, leftColumn, columns - 1))
       if bottom - top > 1 {
         for row in (top + 1)..<bottom {
-          lines.append(lineText(line: firstLine + row, from: 0, to: columns - 1))
+          segments.append((row, 0, columns - 1))
         }
       }
-      lines.append(lineText(line: firstLine + bottom, from: 0, to: rightColumn))
+      segments.append((bottom, 0, rightColumn))
     }
-    return lines.joined(separator: "\n")
+    return gluedSegments(segments)
   }
   
   /// Stream-wise selection text with LOGICAL line coordinates (rows are
@@ -174,19 +198,19 @@ public struct TerminalSnapshot {
     let leftColumn = start.row <= end.row ? start.column : end.column
     let rightColumn = start.row <= end.row ? end.column : start.column
     
-    var lines: [String] = []
+    var segments: [(line: Int, start: Int, end: Int)] = []
     if top == bottom {
-      lines.append(lineText(line: top, from: leftColumn, to: rightColumn))
+      segments.append((top, leftColumn, rightColumn))
     } else {
-      lines.append(lineText(line: top, from: leftColumn, to: columns - 1))
+      segments.append((top, leftColumn, columns - 1))
       if bottom - top > 1 {
         for line in (top + 1)..<bottom {
-          lines.append(lineText(line: line, from: 0, to: columns - 1))
+          segments.append((line, 0, columns - 1))
         }
       }
-      lines.append(lineText(line: bottom, from: 0, to: rightColumn))
+      segments.append((bottom, 0, rightColumn))
     }
-    return lines.joined(separator: "\n")
+    return gluedSegments(segments)
   }
   
   private func lineText(line: Int, from startColumn: Int, to endColumn: Int) -> String {
@@ -203,6 +227,59 @@ public struct TerminalSnapshot {
     }
     return text
   }
+
+  /// Glues soft-wrap continuation rows into the previous output line, so a
+  /// long logical line split across several physical rows becomes ONE string
+  /// (no spurious newline). A row that is NOT a continuation starts a new
+  /// output line. `first` is always treated as a line-start: a continuation
+  /// of a row OUTSIDE the range is not glued (the caller can't see it), which
+  /// matches how terminals copy a selection that begins mid-line.
+  private func gluedLines(first: Int, last: Int) -> [String] {
+    let lo = max(first, 0)
+    let hi = min(last, totalLines - 1)
+    guard lo <= hi else { return [] }
+    var out: [String] = []
+    var current = ""
+    var started = false
+    for line in lo...hi {
+      let text = lineText(line: line)
+      if !started {
+        current = text
+        started = true
+      } else if isLineWrapped(line) {
+        current += text
+      } else {
+        out.append(current)
+        current = text
+      }
+    }
+    if started { out.append(current) }
+    return out
+  }
+
+  /// The segment-version of `gluedLines` for stream selections: the top row
+  /// starts at `start`, the bottom row ends at `end`, rows in between are
+  /// taken in full, and a row that is a continuation of the one above is
+  /// glued to it (no newline) exactly as the visible highlight implies.
+  private func gluedSegments(_ segments: [(line: Int, start: Int, end: Int)]) -> String {
+    var out: [String] = []
+    var current = ""
+    var started = false
+    for seg in segments {
+      let text = lineText(line: seg.line, from: seg.start, to: seg.end)
+      if !started {
+        current = text
+        started = true
+      } else if isLineWrapped(seg.line) {
+        current += text
+      } else {
+        out.append(current)
+        current = text
+      }
+    }
+    if started { out.append(current) }
+    return out.joined(separator: "\n")
+  }
   
   /// Trimmed text of a logical line (0 = top of scrollback).
   public func lineText(line: Int) -> String {
@@ -216,7 +293,7 @@ public struct TerminalSnapshot {
   /// incremental and swaps THIS segment when the screen changes.
   public var gridText: String {
     guard message == nil else { return message ?? "" }
-    var lines = (scrollback.count..<totalLines).map { lineText(line: $0) }
+    var lines = gluedLines(first: scrollback.count, last: totalLines - 1)
     while lines.last?.isEmpty == true { lines.removeLast() }
     return lines.joined(separator: "\n")
   }
@@ -228,8 +305,7 @@ public struct TerminalSnapshot {
   public func scrollbackText(after from: Int) -> String {
     guard message == nil else { return message ?? "" }
     guard from >= 0, from < scrollback.count else { return "" }
-    let lines = (from..<scrollback.count).map { lineText(line: $0) }
-    return lines.joined(separator: "\n")
+    return gluedLines(first: from, last: scrollback.count - 1).joined(separator: "\n")
   }
   
   /// Column of the last non-blank cell in a logical line, or -1 when the

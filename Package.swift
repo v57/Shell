@@ -72,6 +72,13 @@ let package = Package(
             ]
         ),
         .testTarget(
+            name: "TerminalTests",
+            dependencies: ["Terminal"],
+            swiftSettings: [
+                .swiftLanguageMode(.v5),
+            ]
+        ),
+        .testTarget(
             name: "MonitoringTests",
             dependencies: ["Monitoring"],
             swiftSettings: [
