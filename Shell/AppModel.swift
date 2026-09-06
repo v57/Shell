@@ -1770,12 +1770,24 @@ final class AppModel {
     // focus when the action runs. Only the user-triggered (top-level) action
     // opens a web view; dependencies just run their commands.
     if isTopLevel, !spec.action.webAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-      let web = WebSession(
-        name: spec.action.name,
-        url: SmartAddress.resolve(spec.action.webAddress),
-        sshConfigID: environment.sshConfig?.id
-      )
-      openWebSession(web)
+      let resolved = SmartAddress.resolve(spec.action.webAddress)
+      // Persist the session so it appears in the sidebar (the sidebar renders
+      // only *saved* web pages). Reuse an existing page for the same address +
+      // SSH host so re-running the action focuses the same sidebar row instead
+      // of stacking duplicate bookmarks; a new matched page (a brand-new
+      // action) is saved once and opened.
+      let web: WebSession
+      if let existing = webSessions.all.first(where: { $0.url == resolved && $0.sshConfigID == environment.sshConfig?.id }) {
+        web = existing
+      } else {
+        web = WebSession(
+          name: spec.action.name,
+          url: resolved,
+          sshConfigID: environment.sshConfig?.id
+        )
+        webSessions.save(web)
+      }
+      openOrFocusWebSession(web)
       showingActions = false
     } else if focus {
       selection = newSession.id
