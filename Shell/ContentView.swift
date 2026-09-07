@@ -108,24 +108,6 @@ struct ContentView: View {
                 }
               }
               .toolbar {
-                  // Terminal | Files view toggle: a single button whose icon flips
-                  // between the two. Shows `folder.fill` (open Files) while in the
-                  // terminal and `terminal.fill` (back to the terminal) while Files
-                  // is shown.
-                  // The Files panel is part of the Files feature; hide the
-                  // toggle button entirely when the feature is disabled.
-                  if flags.isEnabled(.files) {
-                    ToolbarItem(placement: .primaryAction) {
-                      Button {
-                        model.directoryBrowser.visible.toggle()
-                      } label: {
-                        Label(
-                          "Files & Terminal",
-                          systemImage: model.directoryBrowser.visible ? "terminal.fill" : "folder.fill")
-                      }
-                      .help(model.directoryBrowser.visible ? "Show Terminal" : "Show Files")
-                    }
-                  }
 #if os(macOS)
                   // Smart actions for the active local directory: a Run button per
                   // action, a Stop button (disabled unless something is running), and a
@@ -157,6 +139,7 @@ struct ContentView: View {
                   if #available(macOS 26.0, *) {
                     ToolbarSpacer()
                   }
+                  files
                   
                   // Open With for the active local directory — trailing secondary
                   // action, showing the available apps' real icons.
@@ -165,6 +148,8 @@ struct ContentView: View {
                       OpenWithMenu(directory: directory, kinds: model.openWithKinds)
                     }
                   }
+#else
+                  files
 #endif
                 }
             }
@@ -365,6 +350,28 @@ struct ContentView: View {
       #if os(macOS)
       updateEscMonitor()
       #endif
+    }
+  }
+  
+  @ContentBuilder
+  var files: some ToolbarContent {
+    // Terminal | Files view toggle: a single button whose icon flips
+    // between the two. Shows `folder.fill` (open Files) while in the
+    // terminal and `terminal.fill` (back to the terminal) while Files
+    // is shown.
+    // The Files panel is part of the Files feature; hide the
+    // toggle button entirely when the feature is disabled.
+    if flags.isEnabled(.files) {
+      ToolbarItem(placement: .primaryAction) {
+        Button {
+          model.directoryBrowser.visible.toggle()
+        } label: {
+          Label(
+            "Files & Terminal",
+            systemImage: model.directoryBrowser.visible ? "terminal.fill" : "folder.fill")
+        }
+        .help(model.directoryBrowser.visible ? "Show Terminal" : "Show Files")
+      }
     }
   }
 
