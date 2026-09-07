@@ -1,5 +1,6 @@
 import SwiftUI
 import Terminal
+import TerminalIntegrations
 
 @main
 struct ShellApp: App {
@@ -53,6 +54,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       self?.removeSystemCloseItems()
     }
     installCmdWMonitor()
+  }
+
+  /// Routes files/directories opened into Shell — from Finder "Open With > Shell"
+  /// or a drop on the Dock icon — to the right pane:
+  /// - a folder opens a new local terminal session running in it,
+  /// - a recognized text file opens the file-content pane (`OpenFilePane`),
+  /// - anything else is dropped silently (`.ignored`).
+  ///
+  /// AppKit delivers this open event both when the app is cold-launched by the
+  /// open and when it is already running, so one handler covers both. The work
+  /// is dispatched to the main actor because `AppModel.shared` is a `@MainActor`
+  /// singleton; `addLocalTerminal(in:)` already selects the new session and
+  /// `openFile(_:)` already selects the opened-file pane.
+  func application(_ sender: NSApplication, openFiles filenames: [String]) {
+    Task { @MainActor in
+      for filename in filenames {
+        let url = URL(fileURLWithPath: filename)
+        switch OpenPathResolver.target(for: url) {
+        case .terminal(folder: let folder):
+          AppModel.shared.addLocalTerminal(in: folder.path)
+        case .textFile(url: let fileURL):
+          AppModel.shared.openFile(fileURL)
+        case .ignored:
+          break
+        }
+      }
+    }
+    sender.reply(toOpenOrPrint: .success)
   }
 
   /// The system File menu provides a ⌘W "Close" that closes the whole window,
