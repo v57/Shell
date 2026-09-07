@@ -37,6 +37,19 @@ final class ScreenSessionsMonitor {
   static func tmuxPath() -> String? {
     LocalPTYTransport.tmuxExecutablePath()
   }
+
+  /// Resolves the `session` binary from PATH (the session-tool multiplexer).
+  /// Returns nil when it isn't installed or isn't executable, in which case
+  /// the local scanner simply contributes no `session` rows.
+  static func sessionPath() -> String? {
+    let env = ProcessInfo.processInfo.environment
+    guard let path = env["PATH"] else { return nil }
+    for dir in path.split(separator: ":") {
+      let candidate = URL(fileURLWithPath: String(dir)).appendingPathComponent("session").path
+      if FileManager.default.isExecutableFile(atPath: candidate) { return candidate }
+    }
+    return nil
+  }
   
   private(set) var sessions: [ScreenSessionInfo] = []
   private(set) var errorMessage: String?
@@ -114,6 +127,14 @@ final class ScreenSessionsMonitor {
       let (screenSessions, screenError) = runScreenList()
       sessions.append(contentsOf: screenSessions)
       if let screenError { messages.append(screenError) }
+    }
+    // session-tool is the new backend; list it alongside tmux and screen so
+    // reattachable local session rows render without removing either. A
+    // non-running daemon resolves to no rows (runSessionList returns `[]` silently).
+    if let session = sessionPath() {
+      let (sessionSessions, sessionError) = runSessionList(session: session)
+      sessions.append(contentsOf: sessionSessions)
+      if let sessionError { messages.append(sessionError) }
     }
     if sessions.isEmpty, !messages.isEmpty {
       return ([], messages.joined(separator: "\n"))
@@ -463,6 +484,35 @@ final class ScreenSessionsMonitor {
     let text = String(data: outData, encoding: .utf8) ?? ""
     return (ScreenSessionsParser.parseScreenOutput(text), nil)
   }
+
+  // MARK: - session list
+
+  /// `session list` — JSON listing of live reattachable sessions. The daemon
+  /// prints `[]` (or nothing, when its socket isn't reachable) when nothing is
+  /// live; both resolve to "no sessions" so a non-running daemon never blanks
+  /// the whole Local section. Only stdout is consumed; stderr details are
+  /// dropped because a down daemon isn't an error worth surfacing here.
+  private static func runSessionList(session: String) -> ([ScreenSessionInfo], String?) {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: session)
+    process.arguments = ["list"]
+    let out = Pipe()
+    let err = Pipe()
+    process.standardOutput = out
+    process.standardError = err
+    do {
+      try process.run()
+    } catch {
+      return ([], "session not available: " + error.localizedDescription)
+    }
+    process.waitUntilExit()
+    let outData = out.fileHandleForReading.readDataToEndOfFile()
+    let text = String(data: outData, encoding: .utf8) ?? ""
+    guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+      return ([], nil)
+    }
+    return (ScreenSessionsParser.parseSessionOutput(text), nil)
+  }
 }
 
 // MARK: - Remote persistent session scanner
@@ -541,6 +591,6 @@ final class RemoteScreenSessionsScanner {
     }
   }
 
-  static var listCommands: [String] { [ScreenSessionsParser.tmuxListCommand, ScreenSessionsParser.screenListCommand] }
+  static var listCommands: [String] { [ScreenSessionsParser.tmuxListCommand, ScreenSessionsParser.screenListCommand, ScreenSessionsParser.sessionListCommand] }
 }
 #endif // os(macOS)

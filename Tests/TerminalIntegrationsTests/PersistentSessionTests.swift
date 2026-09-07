@@ -144,4 +144,114 @@ struct PersistentSessionTests {
     // The algorithm walks up from 1, so it fills the lowest free slot.
     #expect(ScreenSessionsParser.nextSessionName(existing: ["zsh", "zsh-2"]) == "zsh-1")
   }
+
+  // MARK: - session `list` (JSON) parsing
+
+  @Test func sessionParsesJSONRows() {
+    let json = """
+    [
+      {"id": "web", "title": "zsh", "attached": 1},
+      {"id": "api", "title": "vim", "attached": 0}
+    ]
+    """
+    let rows = ScreenSessionsParser.parseSessionOutput(json)
+    #expect(rows.count == 2)
+    #expect(rows[0].name == "web")
+    #expect(rows[0].pid == 0)
+    #expect(rows[0].state == "attached")
+    #expect(rows[0].kind == .session)
+    #expect(rows[0].isAttached)
+    #expect(rows[1].name == "api")
+    #expect(rows[1].state == "detached")
+    #expect(rows[1].kind == .session)
+    #expect(!rows[1].isAttached)
+  }
+
+  @Test func sessionParsesPrettyPrintedDaemonOutput() {
+    // The exact shape emitted by `session list` (pretty-printed, title with
+    // spaces) — captured from a live detached "sleep" session.
+    let json = """
+    [
+      {
+        "id": "hermes-scan-test",
+        "title": "env TERM=xterm-256color sleep 30",
+        "attached": 0
+      }
+    ]
+    """
+    let rows = ScreenSessionsParser.parseSessionOutput(json)
+    #expect(rows.count == 1)
+    #expect(rows[0].name == "hermes-scan-test")
+    #expect(rows[0].kind == .session)
+    #expect(!rows[0].isAttached)
+  }
+
+  @Test func sessionEmptyPayloadYieldsNothing() {
+    #expect(ScreenSessionsParser.parseSessionOutput("").isEmpty)
+    #expect(ScreenSessionsParser.parseSessionOutput("[]").isEmpty)
+    #expect(ScreenSessionsParser.parseSessionOutput("   \n  ").isEmpty)
+  }
+
+  @Test func sessionMalformedPayloadYieldsNothing() {
+    // Non-JSON (a down daemon writes nothing; an error writes a text line)
+    // must never throw — it contributes no rows.
+    #expect(ScreenSessionsParser.parseSessionOutput("not json").isEmpty)
+    #expect(ScreenSessionsParser.parseSessionOutput("session: no such socket").isEmpty)
+  }
+
+  @Test func sessionDerivesStateFromAttachedCount() {
+    // `attached` absent defaults to 0 -> detached; >0 -> attached.
+    #expect(ScreenSessionsParser.parseSessionOutput("[{\"id\":\"solo\"}]")[0].state == "detached")
+    #expect(ScreenSessionsParser.parseSessionOutput("[{\"id\":\"busy\",\"attached\":2}]")[0].state == "attached")
+  }
+
+  @Test func sessionParseTagsRemoteOrigin() {
+    let origin = ScreenRemoteOrigin(sshConfigID: UUID(uuidString: "33333333-3333-3333-3333-333333333333")!, displayName: "prod")
+    let rows = ScreenSessionsParser.parse(command: ScreenSessionsParser.sessionListCommand, text: "[{\"id\":\"web\",\"attached\":0}]", origin: origin)
+    #expect(rows.count == 1)
+    #expect(rows[0].isRemote)
+    #expect(rows[0].remoteOrigin == origin)
+    #expect(rows[0].kind == .session)
+  }
+
+  @Test func sessionModelHelpers() {
+    let info = ScreenSessionInfo(name: "web", pid: 0, state: "detached", kind: .session)
+    // session rows are namespaced by kind (the `id`), so they never collide
+    // with a same-named tmux/screen row in the merged List.
+    #expect(info.id == "session:web")
+    #expect(info.id != ScreenSessionInfo(name: "web", pid: 0, state: "0", kind: .tmux).id)
+    #expect(info.shortName == "web")
+    #expect(!info.isAttached)
+    // tagID is deterministic from the name only (seed unchanged for local rows),
+    // so it is stable across refreshes even though the `id` carries the kind.
+    #expect(info.tagID == ScreenSessionInfo(name: "web", pid: 0, state: "detached", kind: .session).tagID)
+  }
+
+  // Runs the real `session list` binary from PATH and feeds its stdout through
+  // the same parser the app's monitor uses. No-ops (returns early) on machines
+  // where `session` is not installed, so it never fails a clean CI box.
+  @Test func sessionPathBinaryParsesLiveListing() throws {
+    guard let path = Self.sessionBinaryOnPath() else { return }
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: path)
+    process.arguments = ["list"]
+    let out = Pipe()
+    process.standardOutput = out
+    try process.run()
+    process.waitUntilExit()
+    let text = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+    let rows = ScreenSessionsParser.parseSessionOutput(text)
+    #expect(rows.allSatisfy { $0.kind == .session })
+    #expect(rows.isEmpty || rows.allSatisfy { !$0.name.isEmpty })
+  }
+
+  private static func sessionBinaryOnPath() -> String? {
+    let env = ProcessInfo.processInfo.environment
+    guard let path = env["PATH"] else { return nil }
+    for dir in path.split(separator: ":") {
+      let candidate = URL(fileURLWithPath: String(dir)).appendingPathComponent("session").path
+      if FileManager.default.isExecutableFile(atPath: candidate) { return candidate }
+    }
+    return nil
+  }
 }

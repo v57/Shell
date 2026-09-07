@@ -6,6 +6,7 @@ import Foundation
 public enum PersistentSessionKind: Hashable {
   case screen
   case tmux
+  case session
 }
 
 /// The remote SSH origin of a persistent session: which saved SSH
@@ -111,10 +112,25 @@ public enum ScreenSessionsParser {
   /// format matches the local poller so both reuse `parseTmuxOutput`.
   public static let tmuxListCommand = "tmux ls -F '#{session_name} #{session_attached}'"
   public static let screenListCommand = "screen -ls"
+  /// `session list` — the session-tool multiplexer's listing of live
+  /// reattachable sessions. Output is JSON (not the line-oriented text tmux
+  /// and screen emit); spawn the `session` binary from PATH (or the managed
+  /// path once SessionBinaryManager lands) and give the stdout straight to
+  /// `parseSessionOutput`.
+  public static let sessionListCommand = "session list"
 
   private static let lineRegex = try! NSRegularExpression(
     pattern: #"^\s*(\d+)\.(\S+)\s+\(([^)]+)\)\s*$"#
   )
+
+  /// The JSON shape the `session` tool serializes for `session list`. `title`
+  /// and `attached` are emitted with `#[serde(default)]`, so an absent field
+  /// must not fail the decode.
+  private struct SessionListEntry: Decodable {
+    let id: String
+    let title: String?
+    let attached: Int?
+  }
 
   /// Parses `tmux ls -F` output ("name 0"/"name 1" per line) into
   /// session infos with a zero pid.
@@ -146,12 +162,39 @@ public enum ScreenSessionsParser {
     return result
   }
 
+  /// Parses `session list` JSON output into session infos. The session-tool
+  /// daemon reaps finished sessions before listing, so every entry is a
+  /// session the user can actually reattach. `name` is the session's
+  /// caller-supplied id (the `session attach <name>` / `session <name>`
+  /// reattach spec); `state` is derived from the live attached-client count so
+  /// `isAttached` reads "attached"/"detached" the same way screen does. Any
+  /// non-JSON or empty payload yields no rows (the daemon was down or not
+  /// installed), never a throw.
+  public static func parseSessionOutput(_ text: String) -> [ScreenSessionInfo] {
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return [] }
+    guard let data = trimmed.data(using: .utf8),
+          let entries = try? JSONDecoder().decode([SessionListEntry].self, from: data)
+    else { return [] }
+    return entries.map { entry in
+      let attached = entry.attached ?? 0
+      return ScreenSessionInfo(
+        name: entry.id,
+        pid: 0,
+        state: attached > 0 ? "attached" : "detached",
+        kind: .session
+      )
+    }
+  }
+
   /// Reuses the same parsers as the local poller, tagging every parsed row
   /// with the SSH origin the command was run against.
   public static func parse(command: String, text: String, origin: ScreenRemoteOrigin) -> [ScreenSessionInfo] {
     let base: [ScreenSessionInfo]
     if command == tmuxListCommand {
       base = parseTmuxOutput(text)
+    } else if command == sessionListCommand {
+      base = parseSessionOutput(text)
     } else {
       base = parseScreenOutput(text)
     }
