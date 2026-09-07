@@ -42,6 +42,33 @@ enum TerminalKeyMapper {
       return Data([0x0d])
     case 53:
       return Data([0x1b])
+    // F1-F12 (xterm CSI sequences). The macOS .onKeyPress path never
+    // produces these keyCodes (KeyEquivalent has no F-key cases), so these
+    // only fire for the iOS special-keys bar's F-row.
+    case 122:
+      return Data("\u{1b}[11~".utf8)  // F1
+    case 120:
+      return Data("\u{1b}[12~".utf8)  // F2
+    case 99:
+      return Data("\u{1b}[13~".utf8)  // F3
+    case 118:
+      return Data("\u{1b}[14~".utf8)  // F4
+    case 96:
+      return Data("\u{1b}[15~".utf8)  // F5
+    case 97:
+      return Data("\u{1b}[17~".utf8)  // F6
+    case 98:
+      return Data("\u{1b}[18~".utf8)  // F7
+    case 100:
+      return Data("\u{1b}[19~".utf8)  // F8
+    case 101:
+      return Data("\u{1b}[20~".utf8)  // F9
+    case 109:
+      return Data("\u{1b}[21~".utf8)  // F10
+    case 103:
+      return Data("\u{1b}[23~".utf8)  // F11
+    case 111:
+      return Data("\u{1b}[24~".utf8)  // F12
     default:
       break
     }

@@ -1133,6 +1133,7 @@ extension TerminalScreenView {
 
 #if os(iOS)
 import UIKit
+import Observation
 
 // MARK: - iOS software-keyboard proxy
 //
@@ -1144,6 +1145,181 @@ import UIKit
 // follows SwiftUI focus and forwards the keystrokes through the SAME
 // TerminalSession.handleKey(...) path the macOS keyboard uses.
 
+// MARK: - iOS special-keys bar (compressed modifier / function / arrow keys)
+//
+// The software keyboard has no Tab, Esc, arrow, function or modifier keys that
+// a terminal needs, so this bar is presented above it (as the keyboard's
+// inputAccessoryView). It compresses alt/ctrl/shift into LATCHING ONE-SHOT
+// toggles: tap to latch one or more, then the NEXT key SENT — tapped on the bar
+// or typed on the system keyboard — carries them in its modifierFlags and then
+// clears every toggle. Tab/Esc are one-shot keys; the arrows and F1-F12 rows
+// are revealed behind their own toggle markers.
+
+/// Shared state between the SwiftUI special-keys bar (hosted in the accessory
+/// view) and the TerminalKeyInput proxy (which must consume the latch when a
+/// key is typed on the system keyboard).
+@MainActor
+@Observable
+private final class TerminalKeyBarModel {
+  /// Modifiers currently latched. One-shot: cleared after the next injected
+  /// or typed key.
+  var latchedModifiers: TerminalModifierFlags = []
+  /// Whether the ↑ ↓ ← → row is expanded.
+  var showArrows = false
+  /// Whether the horizontally scrollable F1-F12 row is expanded.
+  var showFunction = false
+
+  func toggle(modifier: TerminalModifierFlags) {
+    if latchedModifiers.contains(modifier) {
+      latchedModifiers.remove(modifier)
+    } else {
+      latchedModifiers.insert(modifier)
+    }
+  }
+
+  /// Returns the latched modifiers and resets every toggle (the one-shot).
+  func consumeLatched() -> TerminalModifierFlags {
+    let latched = latchedModifiers
+    latchedModifiers = []
+    return latched
+  }
+
+  /// The accessory view's content height for the current expansion state
+  /// (matches `.frame(minHeight:maxHeight:)` on the bar so the hosted view
+  /// grows/shrinks with the reveal rows).
+  var contentHeight: CGFloat {
+    let base: CGFloat = 30
+    let row: CGFloat = 30
+    let spacing: CGFloat = 6
+    let padding: CGFloat = 6
+    let shownRows = (showArrows ? 1 : 0) + (showFunction ? 1 : 0)
+    return padding + base + CGFloat(shownRows) * (row + spacing)
+  }
+}
+
+/// SwiftUI content of the iOS special-keys bar. Hosted in a UIHostingController
+/// and set as TerminalKeyInput.inputAccessoryView, so it renders directly above
+/// the on-screen keyboard.
+private struct TerminalKeyBar: View {
+  let model: TerminalKeyBarModel
+  /// Routes a structured key to the session through the SAME handleKey path the
+  /// macOS keyboard uses (see InputModifier.handleKeyPress). Mirrors
+  /// TerminalSession.handleKey parameters.
+  let inject: (String?, String?, UInt16, TerminalModifierFlags) -> Void
+  /// Reports the content height so the accessory host can resize.
+  let onHeightChange: (CGFloat) -> Void
+
+  private static let fKeyCodes: [(code: UInt16, label: String)] = [
+    (122, "F1"), (120, "F2"), (99, "F3"), (118, "F4"),
+    (96, "F5"), (97, "F6"), (98, "F7"), (100, "F8"),
+    (101, "F9"), (109, "F10"), (103, "F11"), (111, "F12"),
+  ]
+
+  private static let arrowCodes: [(label: String, code: UInt16)] = [
+    ("\u{2191}", 126), ("\u{2193}", 125), ("\u{2190}", 123), ("\u{2192}", 124),
+  ]
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 6) {
+      baseRow
+      if model.showArrows { arrowRow }
+      if model.showFunction { functionRow }
+    }
+    .padding(.vertical, 3)
+    .frame(maxWidth: .infinity, minHeight: model.contentHeight, maxHeight: model.contentHeight, alignment: .top)
+    .background(Color(uiColor: .systemBackground))
+    .onAppear { onHeightChange(model.contentHeight) }
+    .onChange(of: model.showArrows) { _, _ in onHeightChange(model.contentHeight) }
+    .onChange(of: model.showFunction) { _, _ in onHeightChange(model.contentHeight) }
+  }
+
+  private var baseRow: some View {
+    HStack(spacing: 4) {
+      modifierToggle("⌃", modifier: .control)
+      modifierToggle("⌥", modifier: .option)
+      modifierToggle("⇧", modifier: .shift)
+      barButton(width: 38) { keyLabel("⇥", 15, .semibold) } action: { sendKey("\t", nil, 48) }
+      barButton(width: 38) { keyLabel("esc", 12, .semibold) } action: { sendKey(nil, nil, 53) }
+      markerButton(width: 40, active: model.showArrows) {
+        Image(systemName: "arrow.up.and.down")
+          .font(.system(size: 14, weight: .medium))
+      } action: { model.showArrows.toggle() }
+      markerButton(width: 34, active: model.showFunction) {
+        keyLabel("F", 14, .semibold)
+      } action: { model.showFunction.toggle() }
+    }
+  }
+
+  private var arrowRow: some View {
+    HStack(spacing: 4) {
+      ForEach(Self.arrowCodes, id: \.code) { arrow in
+        barButton(width: 52) { keyLabel(arrow.label, 16, .medium) } action: {
+          sendKey(nil, nil, arrow.code)
+        }
+      }
+    }
+  }
+
+  private var functionRow: some View {
+    ScrollView(.horizontal, showsIndicators: false) {
+      HStack(spacing: 4) {
+        ForEach(Self.fKeyCodes, id: \.code) { fkey in
+          barButton(width: 44) { keyLabel(fkey.label, 12, .medium) } action: {
+            sendKey(nil, nil, fkey.code)
+          }
+        }
+      }
+    }
+  }
+
+  // MARK: Buttons
+
+  private func modifierToggle(_ symbol: String, modifier: TerminalModifierFlags) -> some View {
+    let active = model.latchedModifiers.contains(modifier)
+    return barButton(width: 30, active: active) {
+      keyLabel(symbol, 15, .medium)
+    } action: {
+      model.toggle(modifier: modifier)
+    }
+  }
+
+  private func markerButton<Label: View>(
+    width: CGFloat,
+    active: Bool,
+    @ViewBuilder label: () -> Label,
+    action: @escaping () -> Void
+  ) -> some View {
+    barButton(width: width, active: active, label: label, action: action)
+  }
+
+  private func barButton<Label: View>(
+    width: CGFloat,
+    height: CGFloat = 30,
+    active: Bool = false,
+    @ViewBuilder label: () -> Label,
+    action: @escaping () -> Void
+  ) -> some View {
+    Button(action: action) {
+      label()
+        .foregroundStyle(active ? Color.white : Color(uiColor: .label))
+        .frame(width: width, height: height)
+        .background(active ? Color.accentColor : Color(uiColor: .secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+    .buttonStyle(.plain)
+  }
+
+  private func keyLabel(_ text: String, _ size: CGFloat, _ weight: Font.Weight) -> some View {
+    Text(text).font(.system(size: size, weight: weight))
+  }
+
+  /// Inject a special key, carrying (and clearing) any latched modifiers.
+  private func sendKey(_ characters: String?, _ charactersIgnoringModifiers: String?, _ keyCode: UInt16) {
+    let flags = model.consumeLatched()
+    inject(characters, charactersIgnoringModifiers, keyCode, flags)
+  }
+}
+
 /// The terminal's invisible software-keyboard proxy. A real UITextView (rather
 /// than a bare UIView conforming to UIKeyInput) because UIKit reliably summons
 /// the on-screen keyboard for a UITextView first responder; a plain UIKeyInput
@@ -1154,6 +1330,57 @@ private final class TerminalKeyInput: UITextView {
   /// The session the typed characters are forwarded to (weak: the session is
   /// owned by the app model, not by this input view).
   weak var session: TerminalSession?
+
+  /// Shared one-shot modifier / reveal state for the special-keys bar; also
+  /// consumed when a key is typed on the system keyboard (so latching a
+  /// modifier then typing a letter produces the modified sequence).
+  let barModel = TerminalKeyBarModel()
+  /// Hosts the SwiftUI special-keys bar in the keyboard accessory view.
+  private var barHost: UIHostingController<TerminalKeyBar>?
+
+  /// The special-keys bar, shown directly above the on-screen keyboard.
+  /// SwiftUI's `.toolbar(.keyboard)` binds to a SwiftUI-focus-aware text input
+  /// and does NOT reach this hidden UIKit proxy (which is the sole first
+  /// responder and deliberately owns no SwiftUI focus), so the bar is presented
+  /// as the proxy's `inputAccessoryView` instead.
+  override var inputAccessoryView: UIView? {
+    get {
+      if barHost == nil {
+        let host = UIHostingController(
+          rootView: TerminalKeyBar(
+            model: barModel,
+            inject: { [weak self] characters, charactersIgnoringModifiers, keyCode, modifierFlags in
+              self?.session?.handleKey(
+                characters: characters,
+                charactersIgnoringModifiers: charactersIgnoringModifiers,
+                keyCode: keyCode,
+                modifierFlags: modifierFlags
+              )
+            },
+            onHeightChange: { [weak self] height in
+              self?.resizeAccessory(height: height)
+            }
+          )
+        )
+        host.view.backgroundColor = .clear
+        host.view.frame = CGRect(x: 0, y: 0, width: UIScreen.main.bounds.width, height: barModel.contentHeight)
+        barHost = host
+      }
+      return barHost?.view
+    }
+    set {
+      // UIKit may set inputAccessoryView on this responder (e.g. during focus
+      // or teardown). The special-keys bar is owned/rebuildable via barHost, so
+      // an incoming value is deliberately ignored to keep it single-sourced.
+    }
+  }
+
+  private func resizeAccessory(height: CGFloat) {
+    guard let view = barHost?.view else { return }
+    var frame = view.frame
+    frame.size.height = height
+    view.frame = frame
+  }
 
   override init(frame: CGRect, textContainer: NSTextContainer?) {
     super.init(frame: frame, textContainer: textContainer)
@@ -1214,16 +1441,23 @@ private final class TerminalKeyInput: UITextView {
     // The software keyboard may deliver several characters in one call, and the
     // return key delivers "\n". Route each so newline -> CR (keyCode .return)
     // as the macOS onKeyPress path does, and everything else goes down the
-    // printable-character path (keyCode 0). Never call super: the terminal
-    // buffer is owned by the session, not by this text view.
+    // printable-character path (keyCode 0). Any latched modifier is applied to
+    // each key (and cleared) so latching, say, ctrl then typing "c" on the
+    // system keyboard sends Ctrl+C — mirroring the macOS handleKeyPress path.
+    // Never call super: the terminal buffer is owned by the session, not by
+    // this text view.
     guard let session else { return }
     for char in text {
+      let flags = barModel.consumeLatched()
       if char == "\n" || char == "\r" {
+        // keyCode 36 -> CR. charactersIgnoringModifiers is nil so a latched
+        // ctrl can't map the enter to a nil control-sequence; the latch still
+        // gets consumed and reset above.
         session.handleKey(
           characters: "\n",
-          charactersIgnoringModifiers: "\n",
+          charactersIgnoringModifiers: nil,
           keyCode: 36,
-          modifierFlags: []
+          modifierFlags: flags
         )
       } else {
         let value = String(char)
@@ -1231,7 +1465,7 @@ private final class TerminalKeyInput: UITextView {
           characters: value,
           charactersIgnoringModifiers: value,
           keyCode: 0,
-          modifierFlags: []
+          modifierFlags: flags
         )
       }
     }
@@ -1242,7 +1476,7 @@ private final class TerminalKeyInput: UITextView {
       characters: "\u{7f}",
       charactersIgnoringModifiers: nil,
       keyCode: 51,
-      modifierFlags: []
+      modifierFlags: barModel.consumeLatched()
     )
   }
 
