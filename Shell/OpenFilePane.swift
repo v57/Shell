@@ -11,7 +11,9 @@ import Md
 /// cleared on app restart and when the file is closed via ⌘W — and it is kept
 /// completely separate from `NotesStore` (an opened file is a scratch view,
 /// not a Notes item). Read-write: content is loaded off the main thread,
-/// edited, and written back to the same path on Save.
+/// edited, and written back to the same path with the same autosave behavior
+/// as the Notes editor (5s after the last keystroke, written through to the
+/// file — no explicit Save/⌘S).
 struct OpenedFile: Identifiable, Equatable {
   let id = UUID()
   /// The on-disk path the file was opened from (the save/write-back target).
@@ -25,7 +27,7 @@ struct OpenedFile: Identifiable, Equatable {
   /// True once the initial load has completed (successfully or with a notice).
   var isLoaded = false
   /// A visible notice for a non-UTF8 or oversized file; nil == editable.
-  /// When set, the pane is read-only and Save is disabled.
+  /// When set, the pane is read-only and no write-back happens.
   var loadNotice: String?
   /// The monotonic generation this file's content was loaded under; a stale
   /// off-main load is discarded when it no longer matches the current value.
@@ -40,8 +42,8 @@ struct OpenedFile: Identifiable, Equatable {
   var displayName: String { url.lastPathComponent }
 
   /// Whether the file may be edited and saved. Non-UTF8 and oversized files
-  /// are shown with a notice and kept read-only so a Save can never truncate
-  /// or corrupt the on-disk file.
+  /// are shown with a notice and kept read-only so a write-back can never
+  /// truncate or corrupt the on-disk file.
   var canEdit: Bool { loadNotice == nil }
 }
 
@@ -52,8 +54,9 @@ struct OpenedFile: Identifiable, Equatable {
 /// - Other text extensions render in a monospaced `TextEditor` with smart
 ///   quotes/dashes disabled (plain-text files must be stored verbatim).
 /// - A non-UTF8 or oversized file shows a notice and is read-only.
-/// - Dirty files surface a Save confirmation on close (⌘W); Save (⌘S) writes
-///   the buffer back to `url`.
+/// - Edits are autosaved: every change is written through to the file 5s
+///   after the last keystroke (the same debounce the Notes editor uses), so
+///   there is no explicit Save button or ⌘S.
 struct OpenFilePane: View {
   @Environment(AppModel.self) private var model
   let file: OpenedFile
@@ -69,7 +72,7 @@ struct OpenFilePane: View {
         ProgressView()
           .frame(maxWidth: .infinity, maxHeight: .infinity)
       } else if let notice = file.loadNotice {
-        // Non-UTF8 / oversized: visible notice, read-only, no save.
+        // Non-UTF8 / oversized: visible notice, read-only, no write-back.
         readOnlyNotice(notice)
       } else if isMarkdown {
         MarkdownEditorView(text: file.text, onChange: { newText in
@@ -78,46 +81,6 @@ struct OpenFilePane: View {
       } else {
         monospacedEditor
       }
-    }
-    .toolbar {
-      if file.isLoaded && file.canEdit && file.isDirty {
-        ToolbarItem(placement: .primaryAction) {
-          Button {
-            model.saveOpenedFile(file.id)
-          } label: {
-            Label("Save", systemImage: "square.and.arrow.down")
-          }
-          .help("Save (⌘S)")
-        }
-      }
-    }
-    // ⌘S while the pane is shown: a hidden button in the view tree registers
-    // the key equivalent without adding a menu command (toolbar buttons don't
-    // take key equivalents here). Menu key equivalents dispatch before the
-    // terminal's onKeyPress, and this only fires while the file pane is up.
-    .overlay {
-      if file.isLoaded && file.canEdit {
-        Button("Save") { model.saveOpenedFile(file.id) }
-          .keyboardShortcut("s", modifiers: .command)
-          .frame(width: 0, height: 0)
-          .opacity(0)
-          .accessibilityHidden(true)
-          .allowsHitTesting(false)
-      }
-    }
-    .confirmationDialog(
-      "Save changes to \(file.displayName)?",
-      isPresented: Binding(
-        get: { model.pendingCloseOpenedFile == file.id },
-        set: { if !$0 { model.clearPendingClose() } }
-      ),
-      titleVisibility: .visible
-    ) {
-      Button("Save & Close") { model.commitCloseOpenedFile(file.id) }
-      Button("Close Without Saving", role: .destructive) {
-        model.discardCloseOpenedFile(file.id)
-      }
-      Button("Cancel", role: .cancel) { model.clearPendingClose() }
     }
   }
 

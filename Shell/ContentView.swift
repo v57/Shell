@@ -281,6 +281,9 @@ struct ContentView: View {
           hasActivatedOnce = true
         } else {
           model.notes.flush()
+          #if os(macOS)
+          model.flushOpenedFiles()
+          #endif
         }
       }
       .alert("Encrypted Storage Error", isPresented: Binding(

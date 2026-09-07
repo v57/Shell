@@ -61,9 +61,15 @@ final class AppModel {
   /// Monotonic guard so a stale off-main load can never overwrite newer
   /// content (bumped on every `openFile` call, including clears).
   private var openFileGeneration = 0
-  /// A dirty file awaiting a Save / Don't-Save decision on close (⌘W). The
-  /// selected dirty `OpenFilePane` surfaces it as a confirmation dialog.
-  var pendingCloseOpenedFile: UUID?
+  /// Autosave bookkeeping: a deduped, debounced (5s, matching the Notes
+  /// editor) write-through task per opened-file id. `updateOpenedFileText`
+  /// schedules one; any pending write is flushed on close, scene-change, and
+  /// app quit so the last keystrokes land on disk.
+  private var openedFileSaveTasks: [UUID: Task<Void, Never>] = [:]
+  /// The same debounce the Notes editor uses, so a file auto-saves 5s after
+  /// the last keystroke (autosave, written through to the file — not a manual
+  /// Save). Replaces the pane's original explicit Save (⌘S) UI.
+  private static let openedFileSaveDelay: Duration = .seconds(5)
   #endif
 
   /// The sidebar's saved Actions (UserDefaults-backed).
@@ -1097,43 +1103,59 @@ final class AppModel {
     guard openedFiles[idx].text != text else { return }
     openedFiles[idx].text = text
     openedFiles[idx].isDirty = true
+    scheduleOpenedFileSave(id, text: text)
   }
 
-  func saveOpenedFile(_ id: UUID) {
+  /// Notes-style autosave: writes the edit buffer through to the file 5s
+  /// after the last keystroke (the same debounce the Notes editor uses),
+  /// cancelling any earlier pending write so rapid typing doesn't thrash
+  /// the disk. The pane no longer exposes an explicit Save — the user asked
+  /// for write-through autosave, not manual Save.
+  private func scheduleOpenedFileSave(_ id: UUID, text: String) {
+    openedFileSaveTasks[id]?.cancel()
+    openedFileSaveTasks[id] = Task { [weak self] in
+      try? await Task.sleep(for: Self.openedFileSaveDelay)
+      guard !Task.isCancelled else { return }
+      self?.writeOpenedFile(id, text: text)
+    }
+  }
+
+  private func writeOpenedFile(_ id: UUID, text: String) {
     guard let idx = openedFiles.firstIndex(where: { $0.id == id }) else { return }
     let file = openedFiles[idx]
     guard file.canEdit else { return }
     do {
-      try file.text.write(to: file.url, atomically: true, encoding: .utf8)
+      try text.write(to: file.url, atomically: true, encoding: .utf8)
       openedFiles[idx].isDirty = false
     } catch {
       openedFiles[idx].loadNotice = "Could not save: \(error.localizedDescription)"
     }
   }
 
-  func closeOpenedFile(_ id: UUID) {
-    guard let idx = openedFiles.firstIndex(where: { $0.id == id }) else { return }
-    openedFiles.remove(at: idx)
-    if openedFiles.isEmpty {
-      selection = nil
-    } else {
-      selection = openedFiles.indices.contains(idx) ? openedFiles[idx].id : openedFiles.last?.id
+  /// Flushes every pending opened-file autosave immediately (scene change,
+  /// app quit). Mirrors `NotesStore.flush()`.
+  func flushOpenedFiles() {
+    for (id, task) in openedFileSaveTasks {
+      task.cancel()
+      if let file = openedFiles.first(where: { $0.id == id }) {
+        writeOpenedFile(id, text: file.text)
+      }
     }
+    openedFileSaveTasks.removeAll()
   }
 
-  func commitCloseOpenedFile(_ id: UUID) {
-    saveOpenedFile(id)
-    closeOpenedFile(id)
-    pendingCloseOpenedFile = nil
-  }
-
-  func discardCloseOpenedFile(_ id: UUID) {
-    closeOpenedFile(id)
-    pendingCloseOpenedFile = nil
-  }
-
-  func clearPendingClose() {
-    pendingCloseOpenedFile = nil
+  /// Closes a file, flushing any pending autosave so the final edits land on
+  /// disk before the pane goes away.
+  func closeOpenedFile(_ id: UUID) {
+    openedFileSaveTasks[id]?.cancel()
+    openedFileSaveTasks[id] = nil
+    guard let idx = openedFiles.firstIndex(where: { $0.id == id }) else { return }
+    let file = openedFiles[idx]
+    if file.canEdit {
+      try? file.text.write(to: file.url, atomically: true, encoding: .utf8)
+    }
+    openedFiles.remove(at: idx)
+    selection = openedFiles.isEmpty ? nil : (openedFiles.indices.contains(idx) ? openedFiles[idx].id : openedFiles.last?.id)
   }
   #endif
 
@@ -1154,14 +1176,10 @@ final class AppModel {
       return
     }
     #if os(macOS)
-    // ⌘W with an opened file focused closes it. A dirty, editable file asks
-    // (Save / Don't Save / Cancel) instead of silently discarding edits.
+    // ⌘W with an opened file focused closes it, flushing any pending
+    // autosave first (the file is write-through, so nothing is lost).
     if let file = selectedOpenedFile {
-      if file.isDirty && file.canEdit {
-        pendingCloseOpenedFile = file.id
-      } else {
-        closeOpenedFile(file.id)
-      }
+      closeOpenedFile(file.id)
       return
     }
     #endif
@@ -1551,6 +1569,9 @@ final class AppModel {
 
   func flushForTermination() {
     notes.flush()
+    #if os(macOS)
+    flushOpenedFiles()
+    #endif
     let localIDs = sessions.filter { kind(of: $0) == .local }.map(\.id)
     for id in localIDs { archiveLocalSession(id) }
     history.flush()
