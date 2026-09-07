@@ -393,5 +393,34 @@ public extension LocalPTYTransport {
     }
     return nil
   }
+
+  /// Attach-or-create a named persistent `session`-tool session
+  /// (`session <name>`, create-or-attach): attaches when a session of that
+  /// name is already live, else creates one running the default shell and
+  /// attaches. Returns nil when `session` is not on PATH — callers fall back
+  /// to `.tmux(name)` / `.screen(name)`, keeping screen/tmux as the
+  /// persistent-session backends. Use via `TerminalSession(session:
+  /// .session(name))`. Spawned from PATH; managed-path resolution
+  /// (SessionBinaryManager) is a separate card.
+  static func session(_ name: String) -> LocalPTYTransport? {
+    guard let executable = sessionExecutablePath() else { return nil }
+    return LocalPTYTransport(executable: executable, argv: ["session", name])
+  }
+
+  /// Resolves the `session` tool executable from PATH. Returns nil when it is
+  /// not installed. (The SessionBinaryManager card later resolves the managed
+  /// path; PATH is the contract for now.) Unlike tmux there is no fixed
+  /// install location — the tool ships via the app or a user PATH, so PATH is
+  /// the only reliable probe.
+  static func sessionExecutablePath() -> String? {
+    guard let path = ProcessInfo.processInfo.environment["PATH"] else { return nil }
+    for dir in path.split(separator: ":") {
+      let candidate = URL(fileURLWithPath: String(dir)).appendingPathComponent("session").path
+      if FileManager.default.isExecutableFile(atPath: candidate) {
+        return candidate
+      }
+    }
+    return nil
+  }
 }
 #endif // os(macOS)
