@@ -182,31 +182,42 @@ final class DirectoryContext: Identifiable {
   // MARK: - Internals
 
   /// Seeded synchronously. Local sessions expose the cwd directly; remote
-  /// kinds need a `pwd` command, so they start as the empty sentinel and are
-  /// populated by `refresh()`/`seed()`.
+  /// kinds prefer the live cwd already published by the session's transport
+  /// (`remoteCurrentDirectory`), and otherwise start as the empty sentinel to
+  /// be populated by `refresh()`/`seed()` (which runs a login-dir `pwd`).
   private static func staticSeed(for kind: ConnectionKind, session: TerminalSession) -> String {
     switch kind {
     case .local:
       return session.currentDirectory?.path ?? NSHomeDirectory()
     default:
-      return ""
+      return session.remoteCurrentDirectory?.path ?? ""
     }
   }
 
-  /// The current absolute cwd: local from the session, remote via `pwd`.
+  /// The current absolute cwd: local from the session, remote from the
+  /// session's live transport cwd (so the browser follows the terminal's `cd`
+  /// on the host), falling back to a login-dir `pwd` until the first poll.
   private func liveCWD() async -> String? {
     switch kind {
     case .local:
       return session.currentDirectory?.path
     default:
+      // Prefer the live cwd already published by the session's transport
+      // (follows the terminal's `cd` on the host); otherwise ask the remote
+      // login directory via `pwd` (a fresh SSH exec channel starts in home).
+      if let remote = session.remoteCurrentDirectory?.path { return remote }
       return (try? await runPWD()) ?? nil
     }
   }
 
   /// Runs `pwd` through the runner and returns the first non-empty output
   /// line. Falls back to the current path (or `/`) if `pwd` fails or is empty.
+  /// During the initial seed the path is unknown, so `pwd` runs in `.` (the
+  /// remote SSH exec channel's login directory = the user's home) rather than
+  /// drilling into `/` — the history of the file browser always opening at
+  /// root for a fresh remote session.
   private func runPWD() async throws -> String {
-    let target = path.isEmpty ? "/" : path
+    let target = path.isEmpty ? "." : path
     let result = try await runner.run(inDirectory: target, "pwd")
     guard result.exitCode == 0 else { return path.isEmpty ? "/" : path }
     let line = result.output

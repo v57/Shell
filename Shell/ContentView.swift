@@ -395,13 +395,29 @@ struct ContentView: View {
   }
   #endif
 
-  /// Re-queries the selected local session's cwd so the window subtitle
-  /// follows the shell's `cd`. Non-local sessions clear the subtitle.
-  /// The home-directory prefix is shortened to `~` for display.
+  /// Re-queries the selected session's cwd so the window subtitle follows
+  /// the shell's `cd`. Local sessions read the child's live cwd via libproc;
+  /// ssh-backed sessions run a throttled `pwd` over the live transport and
+  /// read the published cwd. Non-selected/cleared sessions hide the subtitle.
+  /// The home-directory prefix is shortened to `~` for display — LOCAL only
+  /// (the remote home is on another host, so remote paths are shown in full).
   private func refreshLocalDirectory() {
-    guard let session = model.mainSelectedSession,
-          case .local = model.kind(of: session),
-          let path = session.currentDirectory?.path else {
+    let session = model.mainSelectedSession
+    let kind = session.map { model.kind(of: $0) }
+    let path: String?
+    switch kind {
+    case .local?:
+      path = session?.currentDirectory?.path
+    case .ssh?, .action?:
+      // ssh-backed: refresh the live remote cwd from the transport
+      // (throttled), then read it. A local action session (no sshTransport)
+      // clears it — no remote cwd to show.
+      session?.refreshRemoteDirectory()
+      path = session?.remoteCurrentDirectory?.path
+    default:
+      path = nil
+    }
+    guard let path, !path.isEmpty else {
       localDirectoryText = ""
       if activeDirectoryURL != nil {
         activeDirectoryURL = nil
@@ -411,21 +427,27 @@ struct ContentView: View {
       }
       return
     }
-    let home = NSHomeDirectory()
-    if path == home {
-      localDirectoryText = "~"
-    } else if path.hasPrefix(home + "/") {
-      localDirectoryText = "~" + path.dropFirst(home.count)
+    // Only a LOCAL session drives the smart-action directory. Remote sessions
+    // get the subtitle but never refresh smart actions (no local directory).
+    if case .local? = kind {
+      let home = NSHomeDirectory()
+      if path == home {
+        localDirectoryText = "~"
+      } else if path.hasPrefix(home + "/") {
+        localDirectoryText = "~" + path.dropFirst(home.count)
+      } else {
+        localDirectoryText = path
+      }
+      let url = URL(fileURLWithPath: path)
+      if activeDirectoryURL != url {
+        activeDirectoryURL = url
+        smartActionsTarget = nil   // don't carry a stale target across projects
+        #if os(macOS)
+          model.refreshSmartActions(for: url)
+        #endif
+      }
     } else {
       localDirectoryText = path
-    }
-    let url = URL(fileURLWithPath: path)
-    if activeDirectoryURL != url {
-      activeDirectoryURL = url
-      smartActionsTarget = nil   // don't carry a stale target across projects
-      #if os(macOS)
-        model.refreshSmartActions(for: url)
-      #endif
     }
   }
 

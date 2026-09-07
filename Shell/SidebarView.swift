@@ -111,6 +111,15 @@ struct SidebarView: View {
               onCancelRename: { renamingSessionID = nil }
             )
             .tag(session.id)
+            .dropDestination(for: ShellFile.self) { files, _ in
+              // A file dropped on this session cell — from Finder (decoded as a
+              // ShellFile via the FileRepresentation importing closure) or dragged
+              // from the Files panel (custom-UTType Codable payload). Each is
+              // materialized (a remote row is SFTP-downloaded) then copied into
+              // the session's cwd.
+              model.dropFiles(files, on: session)
+              return true
+            }
             .contextMenu {
               Button("Rename…") { renamingSessionID = session.id }
               Button("Authorized Keys", systemImage: "key.2.on.ring.fill") {
@@ -703,6 +712,12 @@ private struct SSHConfigGroup: View {
   var body: some View {
     SSHConfigRow(config: config)
       .tag(config.id)
+      .dropDestination(for: ShellFile.self) { files, _ in
+        // A file dropped on the saved connection — no terminal cwd to follow,
+        // so it lands in the server's home directory (~).
+        model.dropFiles(files, toSSH: config)
+        return true
+      }
       .contextMenu {
         Button("Connect") { model.connect(to: config) }
         Button("Edit…") { onEdit(config) }
@@ -710,9 +725,12 @@ private struct SSHConfigGroup: View {
         Button("Authorized Keys", systemImage: "key.2.on.ring") {
           model.showAuthorizedKeys(for: .ssh(config))
         }.buttonStyle(.borderless).help("Manage the selected connection's authorized keys")
+          .accessibilityIdentifier("ssh-cell-\(config.host)")
         if flags.isEnabled(.screen) {
           Button {
+            #if os(macOS)
             model.screenMonitor.refresh()
+            #endif
           } label: {
             Image(systemName: "arrow.clockwise")
           }.buttonStyle(.borderless).help("Refresh persistent sessions")
@@ -733,6 +751,13 @@ private struct SSHConfigGroup: View {
       )
       .padding(.leading, 14)
       .tag(session.id)
+      .dropDestination(for: ShellFile.self) { files, _ in
+        // A file dropped on a running SSH session's row: materialize it locally
+        // (a remote row is SFTP-downloaded) then upload to the session's remote
+        // cwd — the same semantics as a local cell, but over the SFTP subsystem.
+        model.dropFiles(files, on: session)
+        return true
+      }
       .contextMenu {
         Button("Rename…") { onBeginRename(session.id) }
         Divider()

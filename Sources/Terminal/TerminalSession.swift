@@ -102,6 +102,55 @@ public final class TerminalSession: Identifiable {
     #endif
   }
 
+  /// The current working directory of a REMOTE (SSH-backed) child process,
+  /// read by running `pwd` over the already-connected transport — no new
+  /// SSH dial, unlike `currentDirectory` which is local-only (libproc).
+  /// Follows the shell's `cd` on the remote host. Nil for local sessions
+  /// (use `currentDirectory`), for non-SSH transports, and while the SSH
+  /// channel isn't connected. Polled on a throttle (see `refreshRemoteDirectory`)
+  /// so the sidebar subtitle and file browser can show/follow the remote cwd,
+  /// which is otherwise unknown from outside the host.
+  public var remoteCurrentDirectory: URL?
+
+  @ObservationIgnored
+  private var lastRemoteCWDReadAt: Date?
+
+  /// Seconds between remote `pwd` polls. A `pwd` opens a second exec channel
+  /// over the live connection (same mechanism as the persistent-session
+  /// scanner), so it must not run every frame — the subtitle's 1s timer drives
+  /// `refreshRemoteDirectory`, and this tradeoff mirrors `DirectoryBrowserModel`'s
+  /// remote tick cadence.
+  public static let remoteCWDThrottle: TimeInterval = 3
+
+  /// Re-reads the remote shell's cwd via a throttled `pwd` on the live
+  /// transport and publishes it to `remoteCurrentDirectory`. No-op (and clears
+  /// the value) for non-SSH sessions and while not connected.
+  public func refreshRemoteDirectory() {
+    guard case .connected = connectionState, let ssh = sshTransport else {
+      remoteCurrentDirectory = nil
+      return
+    }
+    if let last = lastRemoteCWDReadAt,
+       Date().timeIntervalSince(last) < Self.remoteCWDThrottle { return }
+    lastRemoteCWDReadAt = Date()
+    ssh.runCommand("pwd") { [weak self] result in
+      guard case .success(let remote) = result, remote.exitStatus == 0 else { return }
+      // `pwd` on a remote shell returns an absolute path; ignore anything else
+      // (e.g. a bare "~" or an empty reply) so we never publish a bogus URL.
+      let line = remote.stdout
+        .split(whereSeparator: { $0.isNewline })
+        .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+        .first(where: { !$0.isEmpty })
+      guard let line, line.hasPrefix("/") else { return }
+      // The engine delivers the completion on the main thread, so assume the
+      // actor and publish directly — avoids a captured-var warning that a
+      // `Task { @MainActor in self?... }` would otherwise trip.
+      MainActor.assumeIsolated {
+        self?.remoteCurrentDirectory = URL(fileURLWithPath: line)
+      }
+    }
+  }
+
   /// Called once when an action session completes (process exit or
   /// remote exec exit status). AppModel decides keep-vs-remove.
   public var actionCompletionHandler: (() -> Void)?

@@ -42,6 +42,19 @@ enum ConnectionKind: Hashable {
     }
   }
 
+  /// The SSH connection config behind a remote kind, nil for local runs. Used
+  /// to thread the host into a drag payload so a remote file can be downloaded.
+  var sshConfig: SSHConfig? {
+    switch self {
+    case .local, .screen, .web, .database:
+      return nil
+    case .ssh(let config):
+      return config
+    case .action(let spec):
+      return spec.config
+    }
+  }
+
   var displayName: String {
     switch self {
     case .local:

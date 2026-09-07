@@ -28,7 +28,7 @@ struct FilesPanelView: View {
     DirectoryBrowserView(
       rows: model.rows, path: model.path, selection: $model.selection,
       sortOrder: $model.sortOrder, isLoading: model.busy, errorMessage: model.lastError,
-      onNavigate: { model.navigate(into: $0) }, onOpen: { model.open($0) },
+      sshConfig: model.context?.kind.sshConfig, onNavigate: { model.navigate(into: $0) }, onOpen: { model.open($0) },
       onNavigateUp: { model.navigateUp() }, onRetry: { Task { await model.refresh() } },
       onDelete: { names in
         deleteCandidates = names

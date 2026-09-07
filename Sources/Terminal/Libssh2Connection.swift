@@ -255,18 +255,42 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
     }
   }
 
+  /// Downloads a remote file's raw bytes via the SFTP subsystem over this
+  /// ALREADY-AUTHENTICATED connection — no new SSH dial. The bytes are delivered
+  /// to `completion` on the main thread. Used to materialize a remote file so it
+  /// can be dragged out (Finder) or copied into a session's cwd. Only meaningful
+  /// after `start()` has authenticated (callers gate on the connection state);
+  /// the server must expose the SFTP subsystem (openssh does by default).
+  func downloadFile(remotePath: String, completion: @escaping @Sendable (Result<Data, Error>) -> Void) {
+    queue.async { [weak self] in
+      guard let self, let sess = self.session else {
+        DispatchQueue.main.async { completion(.failure(EngineError.notConnected)) }
+        return
+      }
+      self.runSFTPDownload(sess, remotePath: remotePath, completion: completion)
+    }
+  }
+
+  /// Uploads a LOCAL file's bytes to `remotePath` via the SFTP subsystem over
+  /// this ALREADY-AUTHENTICATED connection — no new SSH dial. Streams the local
+  /// file out with the same EAGAIN/poll loop as every other channel op. Only
+  /// meaningful after `start()` has authenticated; the server must expose the
+  /// SFTP subsystem (openssh does by default).
+  func uploadFile(localURL: URL, remotePath: String, completion: @escaping @Sendable (Result<Void, Error>) -> Void) {
+    queue.async { [weak self] in
+      guard let self, let sess = self.session else {
+        DispatchQueue.main.async { completion(.failure(EngineError.notConnected)) }
+        return
+      }
+      self.runSFTPUpload(sess, localURL: localURL, remotePath: remotePath, completion: completion)
+    }
+  }
+
   // MARK: - Connection lifecycle (running on `queue`)
 
   /// The full TCP + handshake + hostkey + auth + channel setup, on `queue`.
   private func runConnect() {
     running = true
-    defer {
-      if running {
-        // A failure above that didn't explicitly close left the socket/session
-        // up; tear down so we never leak.
-        teardownSession()
-      }
-    }
 
     do {
       let fd = try openSocket(host: config.host, port: config.port, timeout: 20)
@@ -301,6 +325,13 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
       }
       startPump()
     } catch {
+      // The connection never became fully usable (setup threw), or an attempt
+      // to drive it failed. Tear down any partially-allocated socket/session so
+      // we never leak. This MUST NOT run on the SUCCESS path: the cooperative
+      // pumps (watchSocket / startPump) return after one iteration and
+      // re-schedule themselves, so the connection is still alive after
+      // `runConnect` returns — it must stay up for one-shot SFTP/exec ops.
+      teardownSession()
       DispatchQueue.main.async { [weak self] in
         self?.onTerminated?(Self.describe(error))
       }
@@ -609,23 +640,30 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
   /// a remote close / hangup surfaces as `onTerminated`. Also drives the local
   /// port-forward's tunnel I/O every tick (on this owner thread, since libssh2
   /// requires a single owning thread). There is no shell/exec channel to read.
+  ///
+  /// One iteration per call, then re-dispatches itself. Without this the
+  /// `while running {}` loop monopolises the serial queue and every later
+  /// `queue.async` one-shot op (the drop's `remoteHomeDirectory()` exec +
+  /// `uploadFile` SFTP, `downloadFile`, `close()`) deadlocks forever — the
+  /// connection would sit connected with the drop stuck at `remoteHomeDirectory`.
   private func watchSocket() {
-    while running {
-      pumpPortForward()
-      let ready = waitForSocket(socketFD, events: Int16(POLLIN | POLLHUP), timeoutMs: 100)
-      if ready {
-        var pfd = pollfd(fd: socketFD, events: Int16(POLLIN | POLLHUP), revents: 0)
-        _ = poll(&pfd, 1, 0)
-        if pfd.revents & Int16(POLLHUP | POLLERR | POLLNVAL) != 0 {
-          finishOnMain("Connection closed.")
-          return
-        }
-        // Drain any pending session packets so the SSH session stays healthy.
-        _ = libssh2_session_block_directions(session!)
-        pumpPortForward()
+    guard running else { return }
+    pumpPortForward()
+    let ready = waitForSocket(socketFD, events: Int16(POLLIN | POLLHUP), timeoutMs: 100)
+    if ready {
+      var pfd = pollfd(fd: socketFD, events: Int16(POLLIN | POLLHUP), revents: 0)
+      _ = poll(&pfd, 1, 0)
+      if pfd.revents & Int16(POLLHUP | POLLERR | POLLNVAL) != 0 {
+        running = false
+        finishOnMain("Connection closed.")
+        return
       }
+      // Drain any pending session packets so the SSH session stays healthy.
+      _ = libssh2_session_block_directions(session!)
       pumpPortForward()
     }
+    pumpPortForward()
+    queue.async { [weak self] in self?.watchSocket() }
   }
 
   /// Drives the active local port-forward on the session's owner thread. This is
@@ -643,38 +681,50 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
   /// readiness via `poll()`, drains stdout into `onOutput` (main thread), and
   /// flushes pending writes. A short poll so the loop also re-checks for
   /// channel EOF and live-close without ever blocking the owning thread.
+  ///
+  /// One iteration per call, then re-dispatches itself. Without this the
+  /// `while running {}` loop monopolises the serial queue and every later
+  /// `queue.async` one-shot op (runCommand for the live SSH cwd refresh, SFTP
+  /// upload/download, `close()`) deadlocks forever.
   private func startPump() {
-    guard running, let ch = channel else { return }
+    guard running, !channelGone, let ch = channel else { return }
+    pumpOnce(ch)
+    if running && !channelGone { queue.async { [weak self] in self?.startPump() } }
+  }
 
-    while running, !channelGone {
-      // Drive any active local port-forward on this owner thread first, so
-      // tunnel I/O is serviced even when the shell channel stays quiet.
-      pumpPortForward()
+  /// A single pump iteration (the old `while running {}` body). May set
+  /// `running = false` / `channelGone = true` on terminal conditions; never
+  /// loops, so it can run interleaved with one-shot ops on the same queue.
+  private func pumpOnce(_ ch: OpaquePointer) {
+    guard running, !channelGone else { return }
+    // Drive any active local port-forward on this owner thread first, so
+    // tunnel I/O is serviced even when the shell channel stays quiet.
+    pumpPortForward()
 
-      let socketReady = waitForSocket(socketFD, events: Int16(POLLIN | POLLHUP), timeoutMs: 100)
-      let channelReady = libssh2_poll_channel_read(ch, 0) == 1
+    let socketReady = waitForSocket(socketFD, events: Int16(POLLIN | POLLHUP), timeoutMs: 100)
+    let channelReady = libssh2_poll_channel_read(ch, 0) == 1
 
-      if channelReady || socketReady {
-        drainOutput(ch)
+    if channelReady || socketReady {
+      drainOutput(ch)
+    }
+
+    if socketReady {
+      // POLLHUP/POLLERR means the TCP socket went away.
+      var pfd = pollfd(fd: socketFD, events: Int16(POLLIN | POLLHUP), revents: 0)
+      _ = poll(&pfd, 1, 0)
+      if pfd.revents & Int16(POLLHUP | POLLERR | POLLNVAL) != 0, !channelGone {
+        running = false
+        finishOnMain("Connection closed.")
+        return
       }
+    }
 
-      if socketReady {
-        // POLLHUP/POLLERR means the TCP socket went away.
-        var pfd = pollfd(fd: socketFD, events: Int16(POLLIN | POLLHUP), revents: 0)
-        _ = poll(&pfd, 1, 0)
-        if pfd.revents & Int16(POLLHUP | POLLERR | POLLNVAL) != 0, !channelGone {
-          finishOnMain("Connection closed.")
-          return
-        }
-      }
-
-      flushWrites(ch)
-      pumpPortForward()
-      if libssh2_channel_eof(ch) != 0 {
-        handleChannelEOF(ch)
-      } else {
-        checkLiveClose(ch)
-      }
+    flushWrites(ch)
+    pumpPortForward()
+    if libssh2_channel_eof(ch) != 0 {
+      handleChannelEOF(ch)
+    } else {
+      checkLiveClose(ch)
     }
   }
 
@@ -842,6 +892,190 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
     }
   }
 
+  /// Runs on `queue`. Initializes the SFTP subsystem with the same EAGAIN/poll
+  /// retry as every other channel op. In non-blocking mode
+  /// `libssh2_sftp_init` opens the "sftp" subsystem channel and can return NULL
+  /// with `LIBSSH2_ERROR_EAGAIN` when the channel-open request needs the socket
+  /// pumped — especially right after another channel (e.g. the exec used by
+  /// `remoteHomeDirectory`) has just opened the same connection. Without the
+  /// retry, an SFTP upload right after a remote-home exec fails spuriously with
+  /// "Would block starting up channel".
+  private func initSFTP(_ sess: OpaquePointer) -> OpaquePointer? {
+    var sftp = libssh2_sftp_init(sess)
+    let deadline = DispatchTime.now() + .seconds(20)
+    while sftp == nil && libssh2_session_last_errno(sess) == Self.EAGAIN && DispatchTime.now() < deadline {
+      let dirs = libssh2_session_block_directions(sess)
+      var pfd = pollfd(fd: socketFD, events: polevents(dirs), revents: 0)
+      _ = poll(&pfd, 1, 50)
+      sftp = libssh2_sftp_init(sess)
+    }
+    return sftp
+  }
+
+  /// Runs on `queue`. Opens a remote file for read/write with the EAGAIN/poll
+  /// retry. `libssh2_sftp_open_ex` is non-blocking: it can return NULL with a
+  /// SESSION-level `LIBSSH2_ERROR_EAGAIN` while the open requests the socket
+  /// pumped (this surfaces as `libssh2_sftp_last_error == 0`, which the old code
+  /// mis-reported as "SFTP 0"). The EAGAIN is on the session, so retry on
+  /// `libssh2_session_last_errno`, not the SFTP error code.
+  private func openSFTPFile(_ sftp: OpaquePointer, sess: OpaquePointer, path: String, forWrite: Bool) -> OpaquePointer? {
+    let flags: UInt = forWrite
+      ? UInt(LIBSSH2_FXF_WRITE) | UInt(LIBSSH2_FXF_CREAT) | UInt(LIBSSH2_FXF_TRUNC)
+      : UInt(LIBSSH2_FXF_READ)
+    // A mode of 0 would create the file with no permission bits (mode 0000),
+    // which then can't be reopened for write on the next drop — a source of
+    // spurious LIBSSH2_FX_PERMISSION_DENIED. Use a sane default for creates.
+    let mode: Int = forWrite ? 0o644 : 0
+    func call() -> OpaquePointer? {
+      path.withCString { cstr in
+        libssh2_sftp_open_ex(sftp, cstr, UInt32(path.utf8.count), flags, mode, 0)
+      }
+    }
+    var handle = call()
+    let deadline = DispatchTime.now() + .seconds(20)
+    while handle == nil && libssh2_session_last_errno(sess) == Self.EAGAIN && DispatchTime.now() < deadline {
+      let dirs = libssh2_session_block_directions(sess)
+      var pfd = pollfd(fd: socketFD, events: polevents(dirs), revents: 0)
+      _ = poll(&pfd, 1, 50)
+      handle = call()
+    }
+    return handle
+  }
+
+  /// Runs on `queue`. Opens the SFTP subsystem on the authenticated session,
+  /// opens `remotePath` for read, streams its bytes with the same EAGAIN/poll
+  /// loop every other channel op uses, and delivers the raw bytes on the main
+  /// thread. A non-zero libssh2 result is a failure here (unlike one-shot exec,
+  /// where a non-zero remote exit status is a normal result).
+  private func runSFTPDownload(
+    _ sess: OpaquePointer,
+    remotePath: String,
+    completion: @escaping @Sendable (Result<Data, Error>) -> Void
+  ) {
+    guard let sftp = initSFTP(sess) else {
+      DispatchQueue.main.async {
+        completion(.failure(EngineError.remoteCommandFailed(self.lastErrorText(sess))))
+      }
+      return
+    }
+    defer { _ = libssh2_sftp_shutdown(sftp) }
+
+    let handle = openSFTPFile(sftp, sess: sess, path: remotePath, forWrite: false)
+    guard let handle else {
+      let code = libssh2_sftp_last_error(sftp)
+      DispatchQueue.main.async {
+        completion(.failure(EngineError.remoteCommandFailed("Could not open \(remotePath) (SFTP \(code))")))
+      }
+      return
+    }
+    defer { _ = libssh2_sftp_close_handle(handle) }
+
+    var collected = Data()
+    var buffer = [UInt8](repeating: 0, count: 32768)
+    let deadline = DispatchTime.now() + .seconds(60)
+    while DispatchTime.now() < deadline {
+      let n = libssh2_sftp_read(handle, &buffer, buffer.count)
+      if n > 0 {
+        collected.append(Data(buffer.prefix(Int(n))))
+        continue
+      }
+      if n == 0 { break }  // EOF
+      if n == Self.EAGAIN {
+        // EAGAIN (LIBSSH2_ERROR_EAGAIN = -37). The session is non-blocking and
+        // needs a poll before the read can make progress, exactly like the
+        // one-shot exec loop above.
+        let dirs = libssh2_session_block_directions(sess)
+        var pfd = pollfd(fd: socketFD, events: polevents(dirs), revents: 0)
+        _ = poll(&pfd, 1, 50)
+        continue
+      }
+      // A negative ssize_t that isn't EAGAIN is a real libssh2 error.
+      if n < 0 {
+        let code = libssh2_sftp_last_error(sftp)
+        DispatchQueue.main.async {
+          completion(.failure(EngineError.remoteCommandFailed("SFTP read failed (\(code))")))
+        }
+        return
+      }
+      // n is positive but wasn't handled? Treat as unexpected EOF.
+      break
+    }
+
+    DispatchQueue.main.async { completion(.success(collected)) }
+  }
+
+  /// Runs on `queue`. Opens the SFTP subsystem on the authenticated session,
+  /// opens `remotePath` for write (create + truncate), streams the local file's
+  /// bytes out with the same EAGAIN/poll loop, and completes on the main thread.
+  /// A non-zero libssh2 result is a failure here, as in the download path.
+  private func runSFTPUpload(
+    _ sess: OpaquePointer,
+    localURL: URL,
+    remotePath: String,
+    completion: @escaping @Sendable (Result<Void, Error>) -> Void
+  ) {
+    guard let sftp = initSFTP(sess) else {
+      DispatchQueue.main.async {
+        completion(.failure(EngineError.remoteCommandFailed(self.lastErrorText(sess))))
+      }
+      return
+    }
+    defer { _ = libssh2_sftp_shutdown(sftp) }
+
+    let handle = openSFTPFile(sftp, sess: sess, path: remotePath, forWrite: true)
+    guard let handle else {
+      let code = libssh2_sftp_last_error(sftp)
+      DispatchQueue.main.async {
+        completion(.failure(EngineError.remoteCommandFailed("Could not open \(remotePath) (SFTP \(code))")))
+      }
+      return
+    }
+    defer { _ = libssh2_sftp_close_handle(handle) }
+
+    let data: Data
+    do {
+      data = try Data(contentsOf: localURL)
+    } catch {
+      DispatchQueue.main.async { completion(.failure(error)) }
+      return
+    }
+    let bytes = [UInt8](data)
+    var offset = 0
+    let deadline = DispatchTime.now() + .seconds(60)
+    while offset < bytes.count && DispatchTime.now() < deadline {
+      let written = bytes.withUnsafeBufferPointer { buf -> ssize_t in
+        let remaining = bytes.count - offset
+        let chunk = Swift.min(32768, remaining)
+        return libssh2_sftp_write(handle, buf.baseAddress!.advanced(by: offset), chunk)
+      }
+      if written > 0 {
+        offset += Int(written)
+        continue
+      }
+      if written == Self.EAGAIN {
+        let dirs = libssh2_session_block_directions(sess)
+        var pfd = pollfd(fd: socketFD, events: polevents(dirs), revents: 0)
+        _ = poll(&pfd, 1, 50)
+        continue
+      }
+      if written < 0 {
+        let code = libssh2_sftp_last_error(sftp)
+        DispatchQueue.main.async {
+          completion(.failure(EngineError.remoteCommandFailed("SFTP write failed (\(code))")))
+        }
+        return
+      }
+    }
+
+    if offset < bytes.count {
+      DispatchQueue.main.async {
+        completion(.failure(EngineError.remoteCommandFailed("SFTP write timed out")))
+      }
+      return
+    }
+    DispatchQueue.main.async { completion(.success(())) }
+  }
+
   // MARK: Teardown
 
   /// Idempotent full teardown; must be called on `queue`.
@@ -969,12 +1203,21 @@ private func sshString(_ data: Data) -> Data {
 /// SSH mpint (RFC 4251): big-endian two's-complement, minimal length, with a
 /// leading 0x00 when the high bit is set so the value stays positive.
 private func sshMpint(_ bytes: Data) -> Data {
-  var stripped = bytes
-  while stripped.count > 1 && stripped.first == 0x00 {
-    stripped.removeFirst()
+  // Strip redundant leading zero bytes (keep at least one), then prepend a
+  // zero byte when the high bit is set so the signed two's-complement mpint
+  // stays positive (RFC 4251 §5). Build the result front-to-back with subdata
+  // + an Array — NOT `removeFirst()` + `insert(_:at: 0)` on `Data`: after a
+  // `removeFirst()` front-shift, `Data.insert(_, at: 0)` traps in Foundation's
+  // `replaceSubrange` (a known Data bug in this SDK), and the Secure Enclave
+  // sign callback hits it whenever a stripped ECDSA r/s has its high bit set.
+  var start = bytes.startIndex
+  let end = bytes.endIndex
+  while start < end - 1 && bytes[start] == 0 {
+    start += 1
   }
-  if let f = stripped.first, f & 0x80 != 0 {
-    stripped.insert(0x00, at: 0)
+  var payload = [UInt8](bytes.subdata(in: start..<end))
+  if let first = payload.first, first & 0x80 != 0 {
+    payload.insert(0x00, at: 0)
   }
-  return sshString(stripped)
+  return sshString(Data(payload))
 }
