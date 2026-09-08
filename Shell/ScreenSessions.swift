@@ -20,10 +20,13 @@ struct ScreenActionError: Identifiable, Equatable {
 @MainActor
 @Observable
 final class ScreenSessionsMonitor {
-  /// The multiplexer backend to use for new sessions. tmux wins when
-  /// installed; otherwise GNU screen (which macOS ships with).
+  /// The multiplexer backend to use for new sessions. session-tool is the
+  /// new backend: when installed, it wins so ⌘⇧N creates a reattachable
+  /// `session`-tool session. tmux wins over screen otherwise, and screen
+  /// (which macOS ships with) is the last resort. Rows from all backends
+  /// keep working side-by-side.
   static var preferredKind: PersistentSessionKind {
-    tmuxInstalled() ? .tmux : .screen
+    sessionPath() != nil ? .session : (tmuxInstalled() ? .tmux : .screen)
   }
   
   /// Resolves the tmux executable, checking common install locations and
@@ -151,6 +154,17 @@ final class ScreenSessionsMonitor {
     guard featureEnabled else { return }
     let kind = Self.preferredKind
     let name = ScreenSessionsParser.nextSessionName(existing: Set(sessions.map(\.shortName)))
+    // session-tool has no detached create: `session <name>` is create-or-
+    // attach, and the daemon auto-starts + creates the session when a
+    // terminal attaches via `.session(name)`. So instead of running a
+    // detached create then re-listing (as tmux/screen need), hand the fresh
+    // name straight back — the caller's attach(toScreen:) opens the
+    // create-or-attach terminal, which makes the session appear in
+    // `session list`.
+    if kind == .session, Self.sessionPath() != nil {
+      onCreated?(ScreenSessionInfo(name: name, pid: 0, state: "detached", kind: .session))
+      return
+    }
     queue.async { [weak self] in
       let message: String?
       if kind == .tmux, let tmux = Self.tmuxPath() {
@@ -209,6 +223,10 @@ final class ScreenSessionsMonitor {
       let message: String?
       if kind == .tmux, let tmux = Self.tmuxPath() {
         message = Self.runTmuxQuit(tmux: tmux, name: name)
+      } else if kind == .session, let session = Self.sessionPath() {
+        // session-tool sessions are keyed by their caller-supplied name, so
+        // `session kill <name>` terminates one (and its clients).
+        message = Self.runSessionKill(session: session, name: name)
       } else {
         message = Self.runQuit(name: name)
       }
@@ -364,6 +382,30 @@ final class ScreenSessionsMonitor {
     // Closing is idempotent from the UI's perspective. A stale row may be
     // acted on after the shell already ended and took down the tmux server.
     if isTmuxMissingTarget(message) { return nil }
+    return message
+  }
+
+  /// `session kill <name>` — terminate a session-tool session by its
+  /// caller-supplied name. Exits 0 on success (the daemon acks via an
+  /// informational Error{\"killed <name>\"} frame, which is success; see the
+  /// CLI's kill-all handling), 1 on failure.
+  private static func runSessionKill(session: String, name: String) -> String? {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: session)
+    process.arguments = ["kill", name]
+    let out = Pipe()
+    let err = Pipe()
+    process.standardOutput = out
+    process.standardError = err
+    do {
+      try process.run()
+    } catch {
+      return "session not available: \(error.localizedDescription)"
+    }
+    process.waitUntilExit()
+    guard process.terminationStatus != 0 else { return nil }
+    let message = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+      .trimmingCharacters(in: .whitespacesAndNewlines) ?? "Failed to close session (exit \(process.terminationStatus))"
     return message
   }
 
