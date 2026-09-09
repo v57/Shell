@@ -220,7 +220,8 @@ struct ContentView: View {
           NewDatabaseConnectionView(connection: editing,
                                    savedPassword: model.passwordForDatabase(editing))
         } else {
-          NewDatabaseConnectionView(connection: nil)
+          NewDatabaseConnectionView(connection: nil,
+                                   presetSSHConfigID: model.databasePresetSSHConfigID)
         }
       }
       .sheet(isPresented: $model.showingNewAction) {

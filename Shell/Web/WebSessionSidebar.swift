@@ -64,6 +64,9 @@ struct NewWebSessionView: View {
 
   /// Non-nil when editing a saved web session.
   private let editing: WebSession?
+  /// Whether a fresh add should open the session immediately (true when the
+  /// view was opened from a connected Remote host's per-config + menu).
+  private let autoOpenOnSave: Bool
 
   @State private var name: String
   @State private var url: String
@@ -71,9 +74,21 @@ struct NewWebSessionView: View {
 
   init(web: WebSession? = nil) {
     editing = web
+    autoOpenOnSave = false
     _name = State(initialValue: web?.name ?? "")
     _url = State(initialValue: web?.url ?? "")
     _sshConfigID = State(initialValue: web?.sshConfigID)
+  }
+
+  /// Create-a-new-web-session entry point preset to an SSH host (the + menu on
+  /// a connected Remote host). Seeds the SSH picker so the saved WebSession
+  /// carries sshConfigID = config.id, and opens the session on save.
+  init(presetSSHConfigID: UUID?) {
+    editing = nil
+    autoOpenOnSave = presetSSHConfigID != nil
+    _name = State(initialValue: "")
+    _url = State(initialValue: "")
+    _sshConfigID = State(initialValue: presetSSHConfigID)
   }
 
   private var canSave: Bool {
@@ -131,6 +146,9 @@ struct NewWebSessionView: View {
       sshConfigID: sshConfigID
     )
     model.webSessions.save(web)
+    if autoOpenOnSave {
+      model.openOrFocusWebSession(web)
+    }
     dismiss()
   }
 }

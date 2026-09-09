@@ -308,21 +308,6 @@ struct SidebarView: View {
             Image(systemName: "plus")
           }.buttonStyle(.borderless).help("New SSH connection")
           }
-          if flags.isEnabled(.web) {
-          Button {
-            model.openEmptyWebSession()
-          } label: {
-            Image(systemName: "globe")
-          }.buttonStyle(.borderless).help("New web session")
-          }
-          if flags.isEnabled(.database) {
-          Button {
-            model.editingDatabaseConnection = nil
-            model.showingNewDatabaseConnection = true
-          } label: {
-            Image(systemName: "cylinder.split.1x2")
-          }.buttonStyle(.borderless).help("New database connection")
-          }
         }.padding(.trailing, 4)
       }
       } // end if (ssh section gate)
@@ -457,9 +442,10 @@ struct SidebarView: View {
     .sheet(item: $editingConfig) { config in
       NewConnectionView(config: config)
     }
-    // The New Web Session sheet (Local/Remote header "+").
+    // The New Web Session sheet (Local/Remote header "+" and a connected
+    // Remote host's per-config + menu, which presets the SSH host).
     .sheet(isPresented: $model.showingNewWebSession) {
-      NewWebSessionView()
+      NewWebSessionView(presetSSHConfigID: model.webSessionPresetSSHConfigID)
     }
     // The Edit… action on a saved web session: the same form as new,
     // prefilled, saving in place (same id).
@@ -802,7 +788,8 @@ private struct SSHConfigGroup: View {
 private struct SSHConfigRow: View {
   @Environment(AppModel.self) private var model
   let config: SSHConfig
-  
+  private var flags: FeatureFlagsStore { .shared }
+
   var body: some View {
     HStack(spacing: 8) {
       Image(systemName: "network")
@@ -814,6 +801,35 @@ private struct SSHConfigRow: View {
           .fill(.green)
           .frame(width: 7, height: 7)
           .accessibilityLabel("Connected")
+        // Trailing + menu: create an ssh-tunnelled Web/Database session for
+        // this connected host. Visible only while connected, items gated by
+        // their feature flag.
+        if flags.isEnabled(.web) || flags.isEnabled(.database) {
+          Menu {
+            if flags.isEnabled(.web) {
+              Button {
+                model.webSessionPresetSSHConfigID = config.id
+                model.showingNewWebSession = true
+              } label: {
+                Label("Web Session", systemImage: "globe")
+              }
+            }
+            if flags.isEnabled(.database) {
+              Button {
+                model.databasePresetSSHConfigID = config.id
+                model.editingDatabaseConnection = nil
+                model.showingNewDatabaseConnection = true
+              } label: {
+                Label("Database", systemImage: "cylinder.split.1x2")
+              }
+            }
+          } label: {
+            Image(systemName: "plus")
+          }
+          .buttonStyle(.borderless)
+          .menuIndicator(.hidden)
+          .help("New session for this host")
+        }
       }
     }
     .contentShape(Rectangle())

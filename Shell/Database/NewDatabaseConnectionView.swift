@@ -25,7 +25,7 @@ struct NewDatabaseConnectionView: View {
   private let savedPassword: String?
   private let isEditing: Bool
 
-  init(connection: DatabaseConnection?, savedPassword: String? = nil) {
+  init(connection: DatabaseConnection?, savedPassword: String? = nil, presetSSHConfigID: UUID? = nil) {
     self.connection = connection
     self.savedPassword = savedPassword
     self.isEditing = connection != nil
@@ -42,7 +42,7 @@ struct NewDatabaseConnectionView: View {
     _authSource = State(initialValue: c?.authSource ?? "")
     _directConnection = State(initialValue: c?.directConnection ?? false)
     _authorizationEnabled = State(initialValue: Self.hasAnyAuth(c, savedPassword: savedPassword))
-    _sshConfigID = State(initialValue: c?.sshConfigID)
+    _sshConfigID = State(initialValue: c?.sshConfigID ?? presetSSHConfigID)
   }
 
   /// Whether an existing connection carries any configured auth (a non-empty

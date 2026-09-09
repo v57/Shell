@@ -37,6 +37,12 @@ final class AppModel {
   var showingNewDatabaseConnection = false
   /// The database connection being edited in the sheet (nil = creating).
   var editingDatabaseConnection: DatabaseConnection?
+  /// The SSH host to preset in the New Web Session sheet when it is opened
+  /// from a connected Remote host's per-config + menu (nil = a plain page).
+  var webSessionPresetSSHConfigID: UUID?
+  /// The SSH tunnel to preset in the New Database Connection sheet when it is
+  /// opened from a connected Remote host's per-config + menu (nil = no tunnel).
+  var databasePresetSSHConfigID: UUID?
   var publicKeyError: String?
   
   #if os(macOS)
