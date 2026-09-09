@@ -41,17 +41,12 @@ final class ScreenSessionsMonitor {
     LocalPTYTransport.tmuxExecutablePath()
   }
 
-  /// Resolves the `session` binary from PATH (the session-tool multiplexer).
+  /// Resolves the `session` binary (the session-tool multiplexer), delegating
+  /// to the Terminal library's resolver: common install locations, then PATH.
   /// Returns nil when it isn't installed or isn't executable, in which case
   /// the local scanner simply contributes no `session` rows.
   static func sessionPath() -> String? {
-    let env = ProcessInfo.processInfo.environment
-    guard let path = env["PATH"] else { return nil }
-    for dir in path.split(separator: ":") {
-      let candidate = URL(fileURLWithPath: String(dir)).appendingPathComponent("session").path
-      if FileManager.default.isExecutableFile(atPath: candidate) { return candidate }
-    }
-    return nil
+    LocalPTYTransport.sessionExecutablePath()
   }
   
   private(set) var sessions: [ScreenSessionInfo] = []

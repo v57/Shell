@@ -378,7 +378,11 @@ public extension LocalPTYTransport {
   /// PATH. Returns nil when tmux is not installed. (tmux has no fixed
   /// macOS location — Homebrew installs it under /opt/homebrew or
   /// /usr/local, and GUI launches inherit a minimal PATH.)
-  static func tmuxExecutablePath() -> String? {
+  /// Resolved once and cached: an executable's install path can't change
+  /// mid-run, so the ScreenSessions monitor's 5s refresh (and the attach
+  /// path) reuse the first answer instead of re-probing the filesystem
+  /// every tick.
+  private static let tmuxExecutable: String? = {
     for candidate in ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux"] {
       if FileManager.default.isExecutableFile(atPath: candidate) {
         return candidate
@@ -392,7 +396,8 @@ public extension LocalPTYTransport {
       }
     }
     return nil
-  }
+  }()
+  static func tmuxExecutablePath() -> String? { tmuxExecutable }
 
   /// Attach-or-create a named persistent `session`-tool session
   /// (`session <name>`, create-or-attach): attaches when a session of that
@@ -407,12 +412,25 @@ public extension LocalPTYTransport {
     return LocalPTYTransport(executable: executable, argv: ["session", name])
   }
 
-  /// Resolves the `session` tool executable from PATH. Returns nil when it is
-  /// not installed. (The SessionBinaryManager card later resolves the managed
-  /// path; PATH is the contract for now.) Unlike tmux there is no fixed
-  /// install location — the tool ships via the app or a user PATH, so PATH is
-  /// the only reliable probe.
-  static func sessionExecutablePath() -> String? {
+  /// Resolves the `session` tool executable: common install locations first,
+  /// then PATH. Returns nil when it is not installed. (The SessionBinaryManager
+  /// card later resolves the managed path; common locations + PATH is the
+  /// contract for now.) Unlike tmux there is no fixed macOS location, so the
+  /// probe mirrors tmuxExecutablePath() — GUI launches inherit a minimal PATH
+  /// that omits ~/.local/bin and the Homebrew dirs, so the common install
+  /// locations are checked first.
+  /// Resolved once and cached: an executable's install path can't change
+  /// mid-run, so the ScreenSessions monitor's 5s refresh (and the attach
+  /// path) reuse the first answer instead of re-probing the filesystem
+  /// every tick.
+  private static let sessionExecutable: String? = {
+    let home = FileManager.default.homeDirectoryForCurrentUser.path
+    for candidate in ["\(home)/.local/bin/session", "\(home)/.cargo/bin/session",
+                      "/usr/local/bin/session", "/opt/homebrew/bin/session"] {
+      if FileManager.default.isExecutableFile(atPath: candidate) {
+        return candidate
+      }
+    }
     guard let path = ProcessInfo.processInfo.environment["PATH"] else { return nil }
     for dir in path.split(separator: ":") {
       let candidate = URL(fileURLWithPath: String(dir)).appendingPathComponent("session").path
@@ -421,6 +439,7 @@ public extension LocalPTYTransport {
       }
     }
     return nil
-  }
+  }()
+  static func sessionExecutablePath() -> String? { sessionExecutable }
 }
 #endif // os(macOS)
