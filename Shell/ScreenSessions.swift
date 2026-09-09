@@ -10,10 +10,12 @@ struct ScreenActionError: Identifiable, Equatable {
 }
 
 #if os(macOS)
-/// Polls the local multiplexers (`tmux ls` and `screen -ls`) and publishes
-/// the merged list of persistent sessions. When tmux is installed, tmux is
-/// the preferred backend for creating/renaming; screen sessions created by
-/// the older backend still appear and keep working.
+/// Lists the local multiplexers (`tmux ls`, `screen -ls`, `session list`) and
+/// publishes the merged list of persistent sessions. When tmux is installed,
+/// tmux is the preferred backend for creating/renaming; screen sessions
+/// created by the older backend still appear and keep working. Listing is
+/// event-driven (start / attach / close / create / rename / explicit refresh)
+/// — the 5s auto-poll was removed (2026-09-10), see `start()`.
 ///
 /// macOS only: persistent local sessions (screen/tmux) need local process
 /// management; the iOS app ships SSH + notes only.
@@ -55,7 +57,6 @@ final class ScreenSessionsMonitor {
   var actionError: ScreenActionError?
   
   private let queue = DispatchQueue(label: "ScreenSessionsMonitor.list")
-  private var timer: Timer?
   /// The feature-flag source of truth. Injected so tests can gate on a
   /// hermetic store; production uses the shared store.
   private let features: FeatureFlagsStore
@@ -70,25 +71,20 @@ final class ScreenSessionsMonitor {
     features.isEnabled(.screen)
   }
 
-  /// Whether the 5s poller is currently armed.
-  var isPolling: Bool { timer != nil }
-
-  /// Starts the poller (immediate refresh + 5s repeats). Idempotent; no-op
-  /// when the Screen feature is disabled.
+  /// Starts the monitor: an immediate one-shot refresh, then nothing. The
+  /// historical 5s auto-poll is DISABLED (2026-09-10) — the persistent-session
+  /// lists now update on explicit refresh (the SSH config context menu's
+  /// "Refresh Sessions"), on attach/close events, and on create/rename, so no
+  /// hidden subprocess churn races the session daemon or keeps the scanner
+  /// alive after the feature is turned off. Idempotent; no-op when the Screen
+  /// feature is disabled.
   func start() {
-    guard featureEnabled, timer == nil else { return }
+    guard featureEnabled else { return }
     refresh()
-    timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
-      Task { @MainActor [weak self] in
-        self?.refresh()
-      }
-    }
   }
 
-  /// Stops the poller and clears the published rows. Idempotent.
+  /// Stops the monitor and clears the published rows. Idempotent.
   func stop() {
-    timer?.invalidate()
-    timer = nil
     sessions = []
     errorMessage = nil
   }
@@ -296,9 +292,20 @@ final class ScreenSessionsMonitor {
     let kind = info.kind
     queue.async { [weak self] in
       let message: String?
-      if kind == .tmux, let tmux = Self.tmuxPath() {
-        message = Self.runTmuxRename(tmux: tmux, oldName: oldName, newName: trimmed)
-      } else {
+      switch kind {
+      case .tmux:
+        if let tmux = Self.tmuxPath() {
+          message = Self.runTmuxRename(tmux: tmux, oldName: oldName, newName: trimmed)
+        } else {
+          message = "tmux not available"
+        }
+      case .session:
+        if let session = Self.sessionPath() {
+          message = Self.runSessionRename(session: session, oldName: oldName, newName: trimmed)
+        } else {
+          message = "session not available"
+        }
+      case .screen:
         message = Self.runRename(oldName: oldName, newName: trimmed)
       }
       DispatchQueue.main.async {
@@ -382,7 +389,7 @@ final class ScreenSessionsMonitor {
 
   /// `session kill <name>` — terminate a session-tool session by its
   /// caller-supplied name. Exits 0 on success (the daemon acks via an
-  /// informational Error{\"killed <name>\"} frame, which is success; see the
+  /// informational Error{"killed <name>"} frame, which is success; see the
   /// CLI's kill-all handling), 1 on failure.
   private static func runSessionKill(session: String, name: String) -> String? {
     let process = Process()
@@ -402,6 +409,33 @@ final class ScreenSessionsMonitor {
     let message = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
       .trimmingCharacters(in: .whitespacesAndNewlines) ?? "Failed to close session (exit \(process.terminationStatus))"
     return message
+  }
+
+  /// `session rename <old> <new>` — rename a session-tool session. The daemon
+  /// moves the registry key (and the session's stored id) and refuses when the
+  /// source is unknown, the target name is taken, or the session has attached
+  /// clients — its reason is printed on stderr and exit is 1. Exit 0 means the
+  /// session now lives under the new name (the list refresh picks it up).
+  private static func runSessionRename(session: String, oldName: String, newName: String) -> String? {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: session)
+    process.arguments = ["rename", oldName, newName]
+    let out = Pipe()
+    let err = Pipe()
+    process.standardOutput = out
+    process.standardError = err
+    do {
+      try process.run()
+    } catch {
+      return "session not available: \(error.localizedDescription)"
+    }
+    process.waitUntilExit()
+    guard process.terminationStatus != 0 else { return nil }
+    let message = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    let stdout = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    return message ?? stdout ?? "Rename failed (exit \(process.terminationStatus))"
   }
 
   /// `tmux ls -F '#{session_name} #{session_attached}'` — one line per

@@ -446,30 +446,28 @@ struct FeatureTests {
     #expect(fresh.isEnabled(.web))       // all features still default on
   }
 
-  /// The Screen feature's poller is gated: disabling the feature stops (and
-  /// prevents arming) the 5s poller, so a disabled feature holds no running
-  /// timer and its state stays empty. Uses an injected hermetic store so the
+  /// The Screen feature's background refresh is gated: with the 5s auto-poll
+  /// removed (2026-09-10) `start()` performs a one-shot refresh only — there
+  /// is no poller to arm — and a disabled feature starts nothing, so its
+  /// published state stays empty. Uses an injected hermetic store so the
   /// shared `AppModel`/store are untouched.
-  @Test @MainActor func screenMonitorPollerGatedByFeatureFlag() throws {
+  @Test @MainActor func screenMonitorRefreshGatedByFeatureFlag() throws {
     let suite = "ShellScreenGateTests-\(UUID().uuidString)"
     let defaults = try #require(UserDefaults(suiteName: suite))
     defer { defaults.removePersistentDomain(forName: suite) }
 
     let features = FeatureFlagsStore(defaults: defaults)
 
-    // Feature ON: start() arms the 5s poller; stop() tears it down.
+    // Feature ON: start() runs the one-shot refresh; stop() clears state.
     features.setEnabled(true, for: .screen)
     let monitor = ScreenSessionsMonitor(features: features)
     monitor.start()
-    #expect(monitor.isPolling)
     monitor.stop()
-    #expect(!monitor.isPolling)
 
-    // Feature OFF: start() is a no-op — no poller, empty published state.
+    // Feature OFF: start() is a no-op — no refresh, empty published state.
     features.setEnabled(false, for: .screen)
     let off = ScreenSessionsMonitor(features: features)
     off.start()
-    #expect(!off.isPolling)
     #expect(off.sessions.isEmpty)
   }
 }
