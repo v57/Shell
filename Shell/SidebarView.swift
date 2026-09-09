@@ -74,8 +74,11 @@ struct SidebarView: View {
                 if isRunning(session) {
                   Button("Cancel (Ctrl+C)") { session.send(Data([0x03])) }
                 }
-                Button("Remove", role: .destructive) {
+                Button("Close", role: .destructive) {
                   model.removeSession(session.id)
+                }
+                Button("Close All", role: .destructive) {
+                  model.closeAllActionSessions()
                 }
               }
           }

@@ -1051,6 +1051,15 @@ final class AppModel {
       selection = sessions.last?.id
     }
   }
+
+  /// Terminates every running action session shown in the sidebar's Running
+  /// section. Iterates only over `actionSessions`, so local/ssh/screen/web/
+  /// database sessions are left untouched.
+  func closeAllActionSessions() {
+    for id in actionSessions.map(\.id) {
+      removeSession(id)
+    }
+  }
   
   // MARK: - Section navigation (⌘W / ⌘N)
   
