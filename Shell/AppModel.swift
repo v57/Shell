@@ -913,6 +913,129 @@ final class AppModel {
     refreshRemoteScreenSessions()  // the session just flipped to Attached
     return session
   }
+
+  /// The live SSH transport for `config`, if one of its terminals is
+  /// connected. One-shot execs (remote persistent create/close) reuse this
+  /// authenticated channel — the scanner never dials a throwaway connection.
+  private func liveSSHTransport(for config: SSHConfig) -> SSHSession? {
+    connectedSSHSessions
+      .first { $0.sshTransport?.config.id == config.id }?
+      .sshTransport
+  }
+
+  /// True when `config` has a live, connected SSH terminal whose exec channel
+  /// can run one-shot commands. Gates the context menu's Persistent Session
+  /// item (a remote create must run on an already-connected host).
+  func hasLiveSSHConnection(to config: SSHConfig) -> Bool {
+    liveSSHTransport(for: config) != nil
+  }
+
+  /// Manual refresh of every persistent-session list: the local multiplexers
+  /// AND the connected SSH hosts' screen/tmux sessions. With the 5s auto-poll
+  /// disabled this is the sidebar's "Refresh Sessions" action; attach/close
+  /// events still refresh their own lists on top of this.
+  func refreshPersistentSessions() {
+    guard features.isEnabled(.screen) else { return }
+    screenMonitor.refresh()
+    refreshRemoteScreenSessions()
+  }
+
+  /// Creates a NEW persistent session on a connected SSH host and opens a
+  /// terminal attached to it — the remote analogue of `createScreenSession()`.
+  /// The create runs as one-shot execs over the live connection (never a
+  /// throwaway dial): tmux when the host has it, falling back to screen when
+  /// tmux is absent (exec exit 127). The name is auto-generated from the
+  /// sessions last scanned on that host; failures surface as a screen-action
+  /// alert.
+  func createRemoteScreenSession(on config: SSHConfig) {
+    guard features.isEnabled(.screen),
+          let transport = liveSSHTransport(for: config) else { return }
+    let origin = ScreenRemoteOrigin(sshConfigID: config.id, displayName: config.displayName)
+    let existing = Set(
+      remoteScreenSessions
+        .filter { $0.remoteOrigin?.sshConfigID == config.id }
+        .map(\.shortName)
+    )
+    let name = ScreenSessionsParser.nextSessionName(existing: existing)
+    // tmux first; exit 127 = command not found -> screen fallback below.
+    transport.runCommand("tmux new-session -d -s \(name)") { [weak self] result in
+      Task { @MainActor [weak self] in
+        guard let self else { return }
+        switch result {
+        case .failure(let error):
+          self.screenSessionActionError("tmux new-session failed: \(error.localizedDescription)")
+        case .success(let run):
+          if run.exitStatus == 0 {
+            self.attachAfterRemoteCreate(name: name, kind: .tmux, config: config, origin: origin)
+          } else if run.exitStatus == 127, let transport = self.liveSSHTransport(for: config) {
+            transport.runCommand("screen -dmS \(name)") { [weak self] result in
+              Task { @MainActor [weak self] in
+                guard let self else { return }
+                switch result {
+                case .failure(let error):
+                  self.screenSessionActionError("screen -dm failed: \(error.localizedDescription)")
+                case .success(let run):
+                  if run.exitStatus == 0 {
+                    self.attachAfterRemoteCreate(name: name, kind: .screen, config: config, origin: origin)
+                  } else {
+                    self.screenSessionActionError(
+                      "tmux is not installed on \(config.displayName) and screen exited \(run.exitStatus)."
+                    )
+                  }
+                }
+              }
+            }
+          } else {
+            self.screenSessionActionError(
+              "Creating a persistent session on \(config.displayName) failed: tmux exited \(run.exitStatus)."
+            )
+          }
+        }
+      }
+    }
+  }
+
+  /// Refreshes the remote list and attaches to the just-created session. The
+  /// scanner can lag the create by a beat (exec + re-list round-trips), so
+  /// poll briefly; once the window is exhausted the attach runs against a
+  /// constructed row (by then the host's screen/tmux socket is up).
+  private func attachAfterRemoteCreate(
+    name: String,
+    kind: PersistentSessionKind,
+    config: SSHConfig,
+    origin: ScreenRemoteOrigin,
+    attempts: Int = 6
+  ) {
+    refreshRemoteScreenSessions()
+    if let info = remoteScreenSessions.first(where: {
+      $0.remoteOrigin?.sshConfigID == config.id && $0.shortName == name && $0.kind == kind
+    }) {
+      attach(toRemoteScreen: info, on: config)
+      return
+    }
+    guard attempts > 0 else {
+      attach(
+        toRemoteScreen: ScreenSessionInfo(name: name, pid: 0, state: "detached", kind: kind, remoteOrigin: origin),
+        on: config
+      )
+      return
+    }
+    Task { @MainActor [weak self] in
+      try? await Task.sleep(nanoseconds: 250_000_000)
+      self?.attachAfterRemoteCreate(
+        name: name, kind: kind, config: config, origin: origin, attempts: attempts - 1
+      )
+    }
+  }
+
+  /// Surfaces a remote persistent-session failure through the monitor's alert
+  /// (the sidebar already presents `screenMonitor.actionError`).
+  private func screenSessionActionError(_ message: String) {
+    screenMonitor.actionError = ScreenActionError(
+      title: "Could not create persistent session",
+      message: message
+    )
+  }
   #endif
   
   /// All running sessions for a connection, in creation order.
@@ -1406,9 +1529,8 @@ final class AppModel {
   /// already gone, the exec is a no-op and we only remove our own attachment.
   func closeRemoteScreenSession(_ info: ScreenSessionInfo) {
     if let origin = info.remoteOrigin,
-       let transport = connectedSSHSessions
-         .first(where: { $0.sshTransport?.config.id == origin.sshConfigID })?
-         .sshTransport {
+       let config = connections.first(where: { $0.id == origin.sshConfigID }),
+       let transport = liveSSHTransport(for: config) {
       let command: String
       if info.kind == .tmux {
         command = "tmux kill-session -t \(info.name)"

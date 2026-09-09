@@ -719,21 +719,52 @@ private struct SSHConfigGroup: View {
 #endif
       .contextMenu {
         Button("Connect") { model.connect(to: config) }
+        Divider()
+        // New-session entries bound to this host: the same preset actions the
+        // row's trailing + menu offers while connected, but reachable from the
+        // right-click menu even when the connection is closed (the sheets just
+        // save a host-bound entry that opens on demand).
+        if flags.isEnabled(.web) {
+          Button {
+            model.webSessionPresetSSHConfigID = config.id
+            model.showingNewWebSession = true
+          } label: {
+            Label("Web Session", systemImage: "globe")
+          }
+        }
+        if flags.isEnabled(.database) {
+          Button {
+            model.databasePresetSSHConfigID = config.id
+            model.editingDatabaseConnection = nil
+            model.showingNewDatabaseConnection = true
+          } label: {
+            Label("Database", systemImage: "cylinder.split.1x2")
+          }
+        }
+        #if os(macOS)
+        if flags.isEnabled(.screen) {
+          Button {
+            model.createRemoteScreenSession(on: config)
+          } label: {
+            Label("Persistent Session", systemImage: "shield.fill")
+          }
+          // A remote create must exec on the host's LIVE connection; it is
+          // the only entry here that requires the host to be connected.
+          .disabled(!model.hasLiveSSHConnection(to: config))
+          Button {
+            model.refreshPersistentSessions()
+          } label: {
+            Label("Refresh Sessions", systemImage: "arrow.clockwise")
+          }
+        }
+        #endif
+        Divider()
         Button("Edit…") { onEdit(config) }
         Button("Copy Public Key") { model.copyPublicKey() }
         Button("Authorized Keys", systemImage: "key.2.on.ring") {
           model.showAuthorizedKeys(for: .ssh(config))
         }.buttonStyle(.borderless).help("Manage the selected connection's authorized keys")
           .accessibilityIdentifier("ssh-cell-\(config.host)")
-        if flags.isEnabled(.screen) {
-          Button {
-            #if os(macOS)
-            model.screenMonitor.refresh()
-            #endif
-          } label: {
-            Image(systemName: "arrow.clockwise")
-          }.buttonStyle(.borderless).help("Refresh persistent sessions")
-        }
         Divider()
         Button("Delete Connection", role: .destructive) {
           model.deleteConnection(config)
