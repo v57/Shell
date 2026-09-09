@@ -251,27 +251,35 @@ struct SidebarView: View {
             .help(model.historyMode ? "Show local terminals" : "Show local history")
             .transition(.blurReplace)
           }
-          if flags.isEnabled(.sessions) {
-          Button {
-            model.addLocalTerminal()
+          if flags.isEnabled(.sessions) || flags.isEnabled(.web) || flags.isEnabled(.database) {
+          Menu {
+            if flags.isEnabled(.sessions) {
+              Button {
+                model.addLocalTerminal()
+              } label: {
+                Label("New Session", systemImage: "terminal")
+              }
+            }
+            if flags.isEnabled(.web) {
+              Button {
+                model.openEmptyWebSession()
+              } label: {
+                Label("Web Session", systemImage: "globe")
+              }
+            }
+            if flags.isEnabled(.database) {
+              Button {
+                model.editingDatabaseConnection = nil
+                model.showingNewDatabaseConnection = true
+              } label: {
+                Label("Database", systemImage: "cylinder.split.1x2")
+              }
+            }
           } label: {
             Image(systemName: "plus")
-          }.buttonStyle(.borderless).help("New local terminal")
           }
-          if flags.isEnabled(.web) {
-          Button {
-            model.openEmptyWebSession()
-          } label: {
-            Image(systemName: "globe")
-          }.buttonStyle(.borderless).help("New web session")
-          }
-          if flags.isEnabled(.database) {
-          Button {
-            model.editingDatabaseConnection = nil
-            model.showingNewDatabaseConnection = true
-          } label: {
-            Image(systemName: "cylinder.split.1x2")
-          }.buttonStyle(.borderless).help("New database connection")
+          .buttonStyle(.borderless)
+          .menuIndicator(.hidden)
           }
         }.padding(.trailing, 4)
       }
