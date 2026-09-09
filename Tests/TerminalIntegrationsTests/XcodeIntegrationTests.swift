@@ -45,6 +45,7 @@ struct XcodeIntegrationTests {
 
     let install = distribute.first { $0.title == "Install · Demo" }
     #expect(install?.command.contains("rm -rf '/Applications/Demo.app'") == true)
+    #expect(install?.command.contains("-destination 'generic/platform=macOS'") == true)
     #expect(install?.command.contains("ditto 'build/Demo/Demo.xcarchive/Products/Applications/Demo.app' '/Applications/Demo.app'") == true)
     #expect(install?.command.contains("-archivePath 'build/Demo/Demo.xcarchive'") == true)
 

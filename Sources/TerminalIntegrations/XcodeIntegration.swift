@@ -72,6 +72,11 @@ public final class XcodeIntegration: TerminalIntegration {
       // /Applications) and Upload to App Store (archive + exportArchive with
       // a generated exportOptions.plist using method app-store-connect). Both
       // run `xcodebuild ... archive` internally as their first step.
+      // Install MUST pin -destination 'generic/platform=macOS': a MULTIPLATFORM
+      // app target (SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx",
+      // e.g. the sibling Database project) archives for iOS by default when no
+      // destination is given, and ditto would copy that iOS .app into
+      // /Applications. macOS-only targets are unaffected by the pin.
       let archivePath = Self.quote("build/\(scheme)/\(scheme).xcarchive")
       let installAppPath = Self.quote("/Applications/\(scheme).app")
       let installSourcePath = Self.quote("build/\(scheme)/\(scheme).xcarchive/Products/Applications/\(scheme).app")
@@ -81,7 +86,7 @@ public final class XcodeIntegration: TerminalIntegration {
         kind: .distribute,
         title: "Install · \(scheme)",
         target: scheme,
-        command: "xcodebuild \(flag) \(projectArg) -scheme \(schemeArg) -archivePath \(archivePath) archive && rm -rf \(installAppPath) && ditto \(installSourcePath) \(installAppPath)"
+        command: "xcodebuild \(flag) \(projectArg) -scheme \(schemeArg) -destination 'generic/platform=macOS' -archivePath \(archivePath) archive && rm -rf \(installAppPath) && ditto \(installSourcePath) \(installAppPath)"
       ))
       actions.append(IntegrationAction(
         kind: .distribute,
