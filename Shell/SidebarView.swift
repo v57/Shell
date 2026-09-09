@@ -709,12 +709,14 @@ private struct SSHConfigGroup: View {
   var body: some View {
     SSHConfigRow(config: config)
       .tag(config.id)
+#if os(macOS)
       .dropDestination(for: ShellFile.self) { files, _ in
         // A file dropped on the saved connection — no terminal cwd to follow,
         // so it lands in the server's home directory (~).
         model.dropFiles(files, toSSH: config)
         return true
       }
+#endif
       .contextMenu {
         Button("Connect") { model.connect(to: config) }
         Button("Edit…") { onEdit(config) }
@@ -748,6 +750,7 @@ private struct SSHConfigGroup: View {
       )
       .padding(.leading, 14)
       .tag(session.id)
+#if os(macOS)
       .dropDestination(for: ShellFile.self) { files, _ in
         // A file dropped on a running SSH session's row: materialize it locally
         // (a remote row is SFTP-downloaded) then upload to the session's remote
@@ -755,6 +758,7 @@ private struct SSHConfigGroup: View {
         model.dropFiles(files, on: session)
         return true
       }
+#endif
       .contextMenu {
         Button("Rename…") { onBeginRename(session.id) }
         Divider()

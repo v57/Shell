@@ -920,6 +920,7 @@ final class AppModel {
     sessions.filter { kind(of: $0).sshConfigID == config.id }
   }
 
+#if os(macOS)
   /// Copies files dropped onto a sidebar session row into that session's
   /// current directory. Each `ShellFile` is materialized first — a LOCAL row's
   /// own URL, or a freshly SFTP-downloaded temp copy of a REMOTE (SSH) row's
@@ -1029,7 +1030,9 @@ final class AppModel {
       }
     }
   }
-  
+
+#endif
+
   /// Sets a session's sidebar name; empty input restores the default.
   func renameSession(_ id: UUID, to name: String) {
     guard let session = sessions.first(where: { $0.id == id }) else { return }
