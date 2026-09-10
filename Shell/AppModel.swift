@@ -29,17 +29,12 @@ final class AppModel {
   /// session. Shared so both ContentView and ShellCommands can drive it.
   let directoryBrowser = DirectoryBrowserModel()
   var showingNewConnection = false
-  /// The New Web Session sheet (Local/Remote header "+").
-  var showingNewWebSession = false
   /// The web session being edited in the sheet (nil = creating a new one).
   var editingWebSession: WebSession?
   /// The New Database Connection sheet (Database section header "+").
   var showingNewDatabaseConnection = false
   /// The database connection being edited in the sheet (nil = creating).
   var editingDatabaseConnection: DatabaseConnection?
-  /// The SSH host to preset in the New Web Session sheet when it is opened
-  /// from a connected Remote host's per-config + menu (nil = a plain page).
-  var webSessionPresetSSHConfigID: UUID?
   /// The SSH tunnel to preset in the New Database Connection sheet when it is
   /// opened from a connected Remote host's per-config + menu (nil = no tunnel).
   var databasePresetSSHConfigID: UUID?
@@ -607,10 +602,45 @@ final class AppModel {
       let number = (sessions(for: config).firstIndex { $0.id == session.id } ?? 0) + 1
       return "\(config.displayName) #\(number)"
     case .web(let web):
-      return web.name
+      return webDisplayName(for: web)
     case .database(let connection):
       return connection.displayName
     }
+  }
+
+  /// The name shown for a web page (window title and sidebar row): the saved
+  /// name, else the page's URL, else a generic label while the address field is
+  /// still empty (a page started from a host's "Web Session" item has neither
+  /// until the first load). The STORE is the source of truth rather than the
+  /// open session's `.web` snapshot: an auto-name derived from the page's HTML
+  /// `<title>` (`autoNameWebSession`) lands in the store after load, while the
+  /// snapshot was captured at open time.
+  func webDisplayName(for web: WebSession) -> String {
+    let saved = webSessions.all.first { $0.id == web.id } ?? web
+    if !saved.name.isEmpty { return saved.name }
+    return saved.url.isEmpty ? "Web Session" : saved.url
+  }
+
+  /// Names a web page from the loaded page's HTML `<title>` — the naming hook
+  /// for a page that was opened with no name prompt. Only a SAVED page with a
+  /// URL and no name yet is named, and a user-given name (the Edit… sheet) is
+  /// never overwritten, so renaming a page stops the auto-naming for it.
+  func autoNameWebSession(_ web: WebSession, pageTitle: String) {
+    let title = pageTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !title.isEmpty else { return }
+    guard let saved = webSessions.all.first(where: { $0.id == web.id }),
+          !saved.url.isEmpty, saved.name.isEmpty
+    else { return }
+    var updated = saved
+    updated.name = title
+    webSessions.save(updated)
+  }
+
+  /// Whether a saved web page is still blank — no URL and no name, i.e. it was
+  /// started from a host's "Web Session" item and never used.
+  func isBlankWebSession(_ web: WebSession) -> Bool {
+    guard let saved = webSessions.all.first(where: { $0.id == web.id }) else { return false }
+    return saved.url.isEmpty && saved.name.isEmpty
   }
 
   /// Default name for a local terminal: the basename of the directory the
@@ -715,8 +745,11 @@ final class AppModel {
     // An ssh-owned web page is reachable only through a local port-forward to
     // the SSH host's localhost. Create + start the runtime here (the connect
     // path) so the tunnel lifecycle is tied to the session's connect/disconnect
-    // behavior; removeSession stops it. A plain web page needs no runtime.
-    if web.sshConfigID != nil {
+    // behavior; removeSession stops it. A plain web page needs no runtime, and
+    // neither does an ssh-owned page with no URL yet — there is nothing to
+    // tunnel to, so the runtime starts on the first URL commit (the reconnect
+    // in `updateWebSessionURL` routes back through here).
+    if web.sshConfigID != nil, !web.url.isEmpty {
       let config = connections.first { $0.id == web.sshConfigID }
       let runtime = WebSessionRuntime(web: web, config: config)
       webSessionRuntimes[web.id] = runtime
@@ -729,17 +762,30 @@ final class AppModel {
     return session
   }
 
-  /// Opens a blank web session with no URL configured: creates an empty
-  /// `WebSession`, opens it like any saved page (so it lands in the sidebar
-  /// and is selected), and leaves the address bar focused so the user can
-  /// type a URL immediately. Unlike the New-Web sheet this does NOT persist
-  /// a saved session up front — the user types a URL and presses Return to
-  /// navigate, and `updateWebSessionURL` persists on the first commit. Used
-  /// by the Web menu item to open an empty page with the address bar focused
-  /// instead of showing the New-Web sheet.
+  /// Opens a blank local web session with no URL configured: creates an empty
+  /// `WebSession`, opens it like any saved page (so it is selected), and leaves
+  /// the address bar empty for the user to type into. Unlike a host-bound page
+  /// this does NOT persist a saved session up front — the user types a URL and
+  /// presses Return to navigate, and `updateWebSessionURL` persists on the first
+  /// commit (which is also what names the row, from the page's title). Used by
+  /// the Local section's "Web Session" menu item.
   @discardableResult
   func openEmptyWebSession() -> TerminalSession {
     openWebSession(WebSession())
+  }
+
+  /// Opens a NEW ssh-owned web page immediately — no setup sheet: saves a blank
+  /// `WebSession` bound to `config` (so its row appears under that host straight
+  /// away) and opens it, focused, with the URL field still empty. The user types
+  /// the page's address into the toolbar's URL field; committing it persists the
+  /// URL and starts the SSH local port-forward, and the loaded page then names
+  /// the row from its HTML `<title>` (`autoNameWebSession`). Used by the SSH
+  /// config row's "Web Session" menu items.
+  @discardableResult
+  func openNewWebSession(on config: SSHConfig) -> TerminalSession {
+    let web = WebSession(sshConfigID: config.id)
+    webSessions.save(web)
+    return openWebSession(web)
   }
 
   /// The live SSH-tunnel runtime for `web`, if the page is open and ssh-owned.
@@ -1439,6 +1485,13 @@ final class AppModel {
     }
     #endif
     guard let session = selectedSession else { return }
+    // ⌘W on a web page that never got a URL (started from an SSH host's
+    // "Web Session" item and left blank) drops its saved entry too, so it
+    // doesn't linger as an unnamed row. A page that got a URL is kept — by then
+    // it has an auto-name from its title, or the user's own name.
+    if case .web(let web) = kind(of: session), isBlankWebSession(web) {
+      webSessions.remove(web.id)
+    }
     let section = sectionSessions(containing: session)
     let index = section.firstIndex { $0.id == session.id } ?? 0
     let wasOnly = section.count == 1

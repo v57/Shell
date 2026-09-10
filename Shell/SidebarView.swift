@@ -450,13 +450,9 @@ struct SidebarView: View {
     .sheet(item: $editingConfig) { config in
       NewConnectionView(config: config)
     }
-    // The New Web Session sheet (Local/Remote header "+" and a connected
-    // Remote host's per-config + menu, which presets the SSH host).
-    .sheet(isPresented: $model.showingNewWebSession) {
-      NewWebSessionView(presetSSHConfigID: model.webSessionPresetSSHConfigID)
-    }
     // The Edit… action on a saved web session: the same form as new,
-    // prefilled, saving in place (same id).
+    // prefilled, saving in place (same id). Creating a page has no sheet — the
+    // SSH host menu items open one immediately (openNewWebSession).
     .sheet(item: $model.editingWebSession) { web in
       NewWebSessionView(web: web)
     }
@@ -722,12 +718,12 @@ private struct SSHConfigGroup: View {
         Divider()
         // New-session entries bound to this host: the same preset actions the
         // row's trailing + menu offers while connected, but reachable from the
-        // right-click menu even when the connection is closed (the sheets just
-        // save a host-bound entry that opens on demand).
+        // right-click menu even when the connection is closed. A web session
+        // opens IMMEDIATELY (no setup sheet) with the URL field empty — the
+        // user types the host's address and the page names itself.
         if flags.isEnabled(.web) {
           Button {
-            model.webSessionPresetSSHConfigID = config.id
-            model.showingNewWebSession = true
+            model.openNewWebSession(on: config)
           } label: {
             Label("Web Session", systemImage: "globe")
           }
@@ -846,13 +842,12 @@ private struct SSHConfigRow: View {
           .accessibilityLabel("Connected")
         // Trailing + menu: create an ssh-tunnelled Web/Database session for
         // this connected host. Visible only while connected, items gated by
-        // their feature flag.
+        // their feature flag. A web session opens immediately (no sheet).
         if flags.isEnabled(.web) || flags.isEnabled(.database) {
           Menu {
             if flags.isEnabled(.web) {
               Button {
-                model.webSessionPresetSSHConfigID = config.id
-                model.showingNewWebSession = true
+                model.openNewWebSession(on: config)
               } label: {
                 Label("Web Session", systemImage: "globe")
               }

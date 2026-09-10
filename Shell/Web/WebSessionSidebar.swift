@@ -19,7 +19,7 @@ struct WebSessionRow: View {
       HStack(spacing: 8) {
         Image(systemName: "globe")
           .foregroundStyle(.secondary)
-        Text(web.name.isEmpty ? web.url : web.name)
+        Text(web.name.isEmpty ? (web.url.isEmpty ? "Web Session" : web.url) : web.name)
           .lineLimit(1)
           .truncationMode(.middle)
         Spacer()
@@ -55,40 +55,26 @@ struct WebSessionRow: View {
   }
 }
 
-/// Sheet for creating a NEW web session, or EDITING a saved one (when
-/// initialized with a `web`): fields prefill and the toolbar button saves in
-/// place (same id) — mirrors NewConnectionView.
+/// Sheet for EDITING a saved web session: fields prefill and the toolbar button
+/// saves in place (same id) — mirrors NewConnectionView. Creating a page has no
+/// sheet: the SSH host menu items open one immediately (openNewWebSession), and
+/// the page names itself from its HTML title.
 struct NewWebSessionView: View {
   @Environment(AppModel.self) private var model
   @Environment(\.dismiss) private var dismiss
 
-  /// Non-nil when editing a saved web session.
-  private let editing: WebSession?
-  /// Whether a fresh add should open the session immediately (true when the
-  /// view was opened from a connected Remote host's per-config + menu).
-  private let autoOpenOnSave: Bool
+  /// The saved web session being edited.
+  private let editing: WebSession
 
   @State private var name: String
   @State private var url: String
   @State private var sshConfigID: UUID?
 
-  init(web: WebSession? = nil) {
+  init(web: WebSession) {
     editing = web
-    autoOpenOnSave = false
-    _name = State(initialValue: web?.name ?? "")
-    _url = State(initialValue: web?.url ?? "")
-    _sshConfigID = State(initialValue: web?.sshConfigID)
-  }
-
-  /// Create-a-new-web-session entry point preset to an SSH host (the + menu on
-  /// a connected Remote host). Seeds the SSH picker so the saved WebSession
-  /// carries sshConfigID = config.id, and opens the session on save.
-  init(presetSSHConfigID: UUID?) {
-    editing = nil
-    autoOpenOnSave = presetSSHConfigID != nil
-    _name = State(initialValue: "")
-    _url = State(initialValue: "")
-    _sshConfigID = State(initialValue: presetSSHConfigID)
+    _name = State(initialValue: web.name)
+    _url = State(initialValue: web.url)
+    _sshConfigID = State(initialValue: web.sshConfigID)
   }
 
   private var canSave: Bool {
@@ -124,14 +110,14 @@ struct NewWebSessionView: View {
       .formStyle(.grouped)
       .toolbar {
         ToolbarItem(placement: .confirmationAction) {
-          Button(editing == nil ? "Create" : "Save", systemImage: "checkmark") {
+          Button("Save", systemImage: "checkmark") {
             submit()
           }
           .keyboardShortcut(.defaultAction)
           .disabled(!canSave)
         }
       }
-      .navigationTitle(editing == nil ? "New Web Session" : "Edit Web Session")
+      .navigationTitle("Edit Web Session")
       #if os(iOS)
       .navigationBarTitleDisplayMode(.inline)
       #endif
@@ -140,15 +126,12 @@ struct NewWebSessionView: View {
 
   private func submit() {
     let web = WebSession(
-      id: editing?.id ?? UUID(),
+      id: editing.id,
       name: name.trimmingCharacters(in: .whitespaces),
       url: url.trimmingCharacters(in: .whitespaces),
       sshConfigID: sshConfigID
     )
     model.webSessions.save(web)
-    if autoOpenOnSave {
-      model.openOrFocusWebSession(web)
-    }
     dismiss()
   }
 }
