@@ -29,6 +29,12 @@ struct ContentView: View {
   @State private var activeDirectoryURL: URL?
   /// The picker's currently selected smart-action target (nil = all/project).
   @State private var smartActionsTarget: String?
+  /// A `.web` session's address bar: the text of the toolbar search field
+  /// (`.searchable` is applied to the web session's detail pane).
+  @State private var webAddressText = ""
+  /// Whether the address search field currently holds focus, so an in-flight
+  /// tunnel update never clobbers the user's typing.
+  @FocusState private var webAddressFocused: Bool
   /// Presents the first-launch "choose your features" welcome sheet on a fresh
   /// install, when the feature-flags store has never been configured.
   @State private var showFirstLaunchWelcome = false
@@ -59,23 +65,59 @@ struct ContentView: View {
               // session once the tunnel is up, otherwise the stored web URL —
               // so the displayed value matches what the WebView actually loads.
               let effectiveURLText: String = tunnel?.tunnelURL?.absoluteString ?? web.url
-              VStack(spacing: 0) {
-                WebAddressBar(urlText: effectiveURLText) { newURL in
-                  model.updateWebSessionURL(web, to: newURL)
+              WebSessionDetailView(web: web, tunnel: tunnel)
+                .id(session.id)
+                // The address bar is the window toolbar's search field: the
+                // `searchable` modifier hands the field to the toolbar (a
+                // plain TextField stacked above the WebView cannot sit there),
+                // and Return — via `.onSubmit(of: .search)` — commits the
+                // edited text to navigate the WebView.
+                .searchable(text: $webAddressText, prompt: "URL")
+                .searchFocused($webAddressFocused)
+                .onSubmit(of: .search) {
+                  // Only navigate when the edited text actually differs from
+                  // what's displayed — submitting an unchanged address is a
+                  // no-op (avoids an unnecessary reconnect/reload).
+                  guard webAddressText != effectiveURLText else { return }
+                  model.updateWebSessionURL(web, to: webAddressText)
                 }
-                WebSessionDetailView(web: web, tunnel: tunnel)
-                  .id(session.id)
-              }
-              .toolbar {
-                // The SSH-tunnel picker is a web-session-only control: it
-                // lets the user switch which host the open page is tunnelled
-                // through (or clear the tunnel). See webSSHTunnelPicker.
-                #if os(macOS)
-                ToolbarItem(placement: .primaryAction) {
-                  webSSHTunnelPicker(web: web)
+                .onChange(of: effectiveURLText) { _, newText in
+                  // Keep the field in sync with the effective URL — an
+                  // ssh-owned page's bar follows the tunnel's local URL as it
+                  // comes up. While the user is editing, never overwrite
+                  // their keystrokes.
+                  if !webAddressFocused { webAddressText = newText }
                 }
-                #endif
-              }
+                // `webAddressText` is ContentView state (not the pane's), so
+                // re-seed it when a different web session is selected.
+                .onChange(of: session.id) { _, _ in
+                  webAddressText = effectiveURLText
+                }
+                .onAppear {
+                  webAddressText = effectiveURLText
+                  // Focus the address bar so the user can immediately type a
+                  // new URL (empty for a freshly-opened web session; the
+                  // current address is selected for an existing page). SwiftUI
+                  // can drop a focus request issued during the same run-loop
+                  // pass that inserts the view, so the select-all is deferred
+                  // one tick — on macOS the field's editor is first responder
+                  // once the focus request lands.
+                  webAddressFocused = true
+                  #if os(macOS)
+                  DispatchQueue.main.async { webAddressSelectAll() }
+                  #endif
+                }
+                .onDisappear { webAddressFocused = false }
+                .toolbar {
+                  // The SSH-tunnel picker is a web-session-only control: it
+                  // lets the user switch which host the open page is tunnelled
+                  // through (or clear the tunnel). See webSSHTunnelPicker.
+                  #if os(macOS)
+                  ToolbarItem(placement: .primaryAction) {
+                    webSSHTunnelPicker(web: web)
+                  }
+                  #endif
+                }
             } else if case .database(let connection) = kind {
               // A database session renders the per-engine documents/tables
               // browser (no terminal, no Files panel). The live engine
@@ -401,6 +443,17 @@ struct ContentView: View {
       self.escMonitor = nil
     }
   }
+
+  /// Selects the web address search field's contents once it holds focus, so
+  /// typing over an existing page's URL replaces it. After the focus request
+  /// lands, the field's field editor — an `NSTextView` — is the key window's
+  /// first responder, so this selects all text in that editor without having
+  /// to reach into the toolbar's search field itself.
+  private func webAddressSelectAll() {
+    guard let window = NSApp.keyWindow,
+          let editor = window.firstResponder as? NSTextView else { return }
+    editor.selectAll(nil)
+  }
   #endif
 
   /// Re-queries the selected session's cwd so the window subtitle follows
@@ -683,77 +736,3 @@ private struct OpenWithMenu: View {
   }
 }
 #endif // os(macOS)
-
-/// A one-line URL address bar shown above the WebView for `.web` sessions.
-/// Displays the current effective URL (the tunneled local URL for an ssh-owned
-/// session, or the stored web URL) and, on Return, commits the edited text to
-/// navigate the WebView at the new address.
-struct WebAddressBar: View {
-  /// The current URL text to display. Re-renders as the tunnel comes up so an
-  /// ssh-owned session's bar reflects the reachable local URL.
-  let urlText: String
-  /// Called with the user's edited text when they press Return.
-  let onSubmit: (String) -> Void
-
-  @State private var editing = ""
-  /// Whether the field is currently being edited (so we don't clobber the
-  /// user's typing when the tunnel transitions an in-flight update).
-  @State private var isEditing = false
-  /// True while the user has typed text that differs from `urlText`; used to
-  /// decide whether a Return should be ignored (nothing changed).
-  @FocusState private var focused: Bool
-
-  var body: some View {
-    HStack(spacing: 6) {
-      TextField("URL", text: $editing)
-        .textFieldStyle(.roundedBorder)
-        .focused($focused)
-        .onSubmit {
-          // Only navigate when the edited text actually differs from what's
-          // currently displayed — pressing Return on an unchanged bar is a
-          // no-op (avoids an unnecessary reconnect/reload).
-          guard editing != urlText else { return }
-          onSubmit(editing)
-        }
-        .onChange(of: urlText) { _, newText in
-          // Keep the field in sync with the effective URL. While the user is
-          // actively editing, don't overwrite their keystrokes.
-          if !isEditing { editing = newText }
-        }
-        .onChange(of: focused) { _, nowFocused in
-          isEditing = nowFocused
-          if !nowFocused { editing = urlText }
-        }
-    }
-    .padding(.horizontal, 10)
-    .padding(.vertical, 6)
-    .frame(maxWidth: .infinity)
-    .onAppear {
-      editing = urlText
-      // Focus the address bar so the user can immediately type a new URL
-      // (for a freshly-opened empty web session the bar is empty; for an
-      // existing page the current URL is selected so typing overwrites it).
-      // SwiftUI can drop a FocusState request issued during the same
-      // run-loop pass that inserts the view, so the request is deferred one
-      // tick; on macOS a second tick selects all once focus lands.
-      DispatchQueue.main.async {
-        focused = true
-        #if os(macOS)
-        DispatchQueue.main.async { addressBarSelectAll() }
-        #endif
-      }
-    }
-  }
-
-  #if os(macOS)
-  /// Selects the address bar's contents once it holds focus. After the
-  /// `@FocusState` request lands, the TextField's field editor — an
-  /// `NSTextView` — becomes the window's first responder, so this selects all
-  /// text in that editor without guessing which field is the address bar.
-  private func addressBarSelectAll() {
-    guard let window = NSApp.keyWindow,
-          let editor = window.firstResponder as? NSTextView else { return }
-    editor.selectAll(nil)
-  }
-  #endif
-}
