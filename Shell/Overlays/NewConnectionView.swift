@@ -84,6 +84,10 @@ struct NewConnectionView: View {
           }
         }.formStyle(.grouped)
       }.toolbar {
+        ToolbarItem(placement: .cancellationAction) {
+          Button("Cancel", systemImage: "xmark") { dismiss() }
+            .keyboardShortcut(.cancelAction)
+        }
         ToolbarItem(placement: .confirmationAction) {
           Button(editing == nil ? "Connect" : "Save", systemImage: "checkmark") {
             submit()
