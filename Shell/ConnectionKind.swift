@@ -42,6 +42,19 @@ enum ConnectionKind: Hashable {
     }
   }
 
+  /// The config id when this kind is an SSH **shell** session — the only kind
+  /// that gets a terminal row under its host in the Remote section.
+  ///
+  /// Deliberately narrower than `sshConfigID`: a host-bound web page and a
+  /// tunneled database connection ALSO answer `sshConfigID` (they belong to the
+  /// host's section and share its tunnel) but render their own row views.
+  /// Filtering rows on `sshConfigID` therefore rendered an open page twice —
+  /// once with a terminal icon, once with its globe row and the same name.
+  var shellConfigID: UUID? {
+    if case .ssh(let config) = self { return config.id }
+    return nil
+  }
+
   /// The SSH connection config behind a remote kind, nil for local runs. Used
   /// to thread the host into a drag payload so a remote file can be downloaded.
   var sshConfig: SSHConfig? {

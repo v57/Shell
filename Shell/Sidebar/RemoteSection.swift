@@ -156,7 +156,10 @@ private struct SSHConfigGroup: View {
           model.deleteConnection(config)
         }
       }
-    ForEach(model.sessions(for: config)) { session in
+    // Only SSH SHELL sessions get a terminal row here. A host-bound web page or
+    // database connection has its own row view in the loops below; emitting one
+    // here too would render its name twice (once with a terminal icon).
+    ForEach(model.shellSessions(for: config)) { session in
       SessionRow(
         session: session,
         defaultLabel: model.displayName(for: session),

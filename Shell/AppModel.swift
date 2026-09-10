@@ -599,7 +599,7 @@ final class AppModel {
     case .action(let spec):
       return spec.action.name
     case .ssh(let config):
-      let number = (sessions(for: config).firstIndex { $0.id == session.id } ?? 0) + 1
+      let number = (shellSessions(for: config).firstIndex { $0.id == session.id } ?? 0) + 1
       return "\(config.displayName) #\(number)"
     case .web(let web):
       return webDisplayName(for: web)
@@ -1084,9 +1084,24 @@ final class AppModel {
   }
   #endif
   
-  /// All running sessions for a connection, in creation order.
+  /// Every running session bound to a connection, in creation order — SHELL
+  /// sessions AND the host-bound web pages / database connections tunnelled
+  /// through it (`ConnectionKind.sshConfigID` is non-nil for all three). This is
+  /// the sidebar SECTION grouping, used to pick ⌘W/⌘N neighbors. To emit the
+  /// host's terminal rows use `shellSessions(for:)` instead: rendering this set
+  /// as rows duplicates every web page and database connection, which have their
+  /// own row views.
   func sessions(for config: SSHConfig) -> [TerminalSession] {
     sessions.filter { kind(of: $0).sshConfigID == config.id }
+  }
+
+  /// The SSH SHELL sessions for a connection, in creation order — the rows the
+  /// Remote section emits under the host, and the basis for the `#N` numbering
+  /// in `displayName`. Uses `shellConfigID`, not `sshConfigID`, so an open
+  /// host-bound web page or database connection neither adds a duplicate row nor
+  /// shifts the numbering.
+  func shellSessions(for config: SSHConfig) -> [TerminalSession] {
+    sessions.filter { kind(of: $0).shellConfigID == config.id }
   }
 
 #if os(macOS)
