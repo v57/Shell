@@ -101,18 +101,13 @@ struct ContentView: View {
                   webAddressText = effectiveURLText
                 }
                 .onAppear {
+                  // Seed the field with the effective URL. The field is NOT
+                  // focused on appear — a toolbar search field that grabs
+                  // focus on open would immediately engage search (and, on
+                  // iOS, raise the keyboard over the page), which is not what
+                  // opening a saved page should do. The user taps the field
+                  // when they want to type an address.
                   webAddressText = effectiveURLText
-                  // Focus the address bar so the user can immediately type a
-                  // new URL (empty for a freshly-opened web session; the
-                  // current address is selected for an existing page). SwiftUI
-                  // can drop a focus request issued during the same run-loop
-                  // pass that inserts the view, so the select-all is deferred
-                  // one tick — on macOS the field's editor is first responder
-                  // once the focus request lands.
-                  webAddressFocused = true
-                  #if os(macOS)
-                  DispatchQueue.main.async { webAddressSelectAll() }
-                  #endif
                 }
                 .onDisappear { webAddressFocused = false }
                 .toolbar {
@@ -449,17 +444,6 @@ struct ContentView: View {
       NSEvent.removeMonitor(escMonitor)
       self.escMonitor = nil
     }
-  }
-
-  /// Selects the web address search field's contents once it holds focus, so
-  /// typing over an existing page's URL replaces it. After the focus request
-  /// lands, the field's field editor — an `NSTextView` — is the key window's
-  /// first responder, so this selects all text in that editor without having
-  /// to reach into the toolbar's search field itself.
-  private func webAddressSelectAll() {
-    guard let window = NSApp.keyWindow,
-          let editor = window.firstResponder as? NSTextView else { return }
-    editor.selectAll(nil)
   }
   #endif
 
