@@ -74,6 +74,13 @@ struct ContentView: View {
                 // edited text to navigate the WebView.
                 .searchable(text: $webAddressText, prompt: "URL")
                 .searchFocused($webAddressFocused)
+                // By default the search field hides the rest of the toolbar
+                // while it is active (on iOS the navigation bar's back button
+                // disappears until the field is cleared). Keep the toolbar's
+                // other controls visible so the user can always navigate away
+                // without cancelling the search first. Must come AFTER
+                // `.searchable` to apply to the toolbar search field.
+                .searchPresentationToolbarBehavior(.avoidHidingContent)
                 .onSubmit(of: .search) {
                   // Only navigate when the edited text actually differs from
                   // what's displayed — submitting an unchanged address is a
