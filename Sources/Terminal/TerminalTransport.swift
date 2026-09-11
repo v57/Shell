@@ -60,6 +60,15 @@ public protocol TerminalTransport: AnyObject {
   func resize(columns: Int, rows: Int)
   func close()
 
+  /// The pty/channel size the transport STARTS with, before the view's first
+  /// layout resizes it. The session seeds its parser grid with this so the
+  /// first bytes are parsed at the SAME width the child believes it has —
+  /// the two must never disagree, or every width-sensitive escape breaks:
+  /// zsh's PROMPT_SP padding then wraps on a different row than the CR that
+  /// is supposed to erase it, stranding its reverse-video "%" marker above
+  /// the first prompt.
+  var initialGridSize: TerminalGridSize { get }
+
   /// The OS process id of the transport's child process, when it owns one
   /// (local pty). Nil for network transports (SSH) and test doubles. Lets
   /// the session read live child state — e.g. the current working
@@ -70,6 +79,12 @@ public protocol TerminalTransport: AnyObject {
 /// Non-SSH transports never produce auth prompts — default no-ops so
 /// conformance only needs the four I/O callbacks.
 public extension TerminalTransport {
+  /// Default start size: the classic 80x24. SSH requests exactly this from
+  /// the server at channel open (`libssh2_channel_request_pty_ex`), so its
+  /// parser grid starts here too — the child's size and the parser's must
+  /// always agree (see `initialGridSize`).
+  var initialGridSize: TerminalGridSize { TerminalGridSize(rows: 24, columns: 80) }
+
   var onHostKeyPrompt: ((TerminalHostKeyPrompt) -> Void)? {
     get { nil }
     set {}
@@ -107,6 +122,16 @@ public final class LocalPTYTransport: TerminalTransport {
   /// exit/close). The session uses it to read live child state such as
   /// the current working directory.
   public var childProcessID: pid_t? { childPID >= 0 ? childPID : nil }
+
+  /// The pty's size at spawn. WIDE (not 80 cols): output can arrive before
+  /// the view lays out and resizes the pty to the real size, and a wider
+  /// start keeps that first output from wrapping early. The parser grid
+  /// starts at this SAME size (`initialGridSize`) — zsh's startup blanking
+  /// is width-sensitive, and a grid narrower than the pty strands its
+  /// reverse-video "%" marker above the erase. The view resizes the pty
+  /// and the grid together to the real size on first layout.
+  static let spawnSize = TerminalGridSize(rows: 24, columns: 200)
+  public var initialGridSize: TerminalGridSize { Self.spawnSize }
 
   private let executable: String
   private let argv: [String]
@@ -153,11 +178,17 @@ public final class LocalPTYTransport: TerminalTransport {
     envp.append(nil)
     let launchCString = launchDirectory.withCString { strdup($0) }
 
-    // Start WIDE (not 80 cols): zsh's startup blanking writes a fixed
-    // 92-space run; at <93 cols it wraps and strands its reverse-video
-    // "%" marker above the erase, so it shows on the first screen.
+    // The pty starts at the SAME size the parser grid starts at (see
+    // `spawnSize` / `initialGridSize`): a grid narrower than the pty makes
+    // zsh's width-sensitive startup blanking wrap on the wrong row and
+    // strand its reverse-video "%" marker on the first screen.
     // The view resizes the pty to the real size on first layout.
-    var windowSize = winsize(ws_row: 24, ws_col: 200, ws_xpixel: 0, ws_ypixel: 0)
+    var windowSize = winsize(
+      ws_row: UInt16(Self.spawnSize.rows),
+      ws_col: UInt16(Self.spawnSize.columns),
+      ws_xpixel: 0,
+      ws_ypixel: 0
+    )
 
     var master: Int32 = -1
     let pid = forkpty(&master, nil, nil, &windowSize)

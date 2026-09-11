@@ -180,6 +180,11 @@ public final class TerminalSession: Identifiable {
   private var inputFallback = ""
   @ObservationIgnored
   private var didCloseTransport = false
+  /// The size the parser grid currently has. `resize` compares against it to
+  /// decide the order of the child/grid resizes (see the comment there); it
+  /// is seeded from the transport's start size in `init`.
+  @ObservationIgnored
+  private var lastGridSize = TerminalGridSize(rows: 24, columns: 80)
 
   // MARK: Coalesced snapshot publishing
   //
@@ -238,6 +243,16 @@ public final class TerminalSession: Identifiable {
   /// host…"); nil starts in `.starting` (local pty).
   public init(transport: any TerminalTransport, startupMessage: String? = nil) {
     self.transport = transport
+    // Seed the parser grid with the size the transport STARTS the child at
+    // (`initialGridSize`). The child's first output can beat the view's
+    // first layout, and that is exactly what happens for a session created
+    // before its view exists (the launch-time default terminal): parsing
+    // those bytes at a different width wraps every width-sensitive escape
+    // on the wrong row. zsh's PROMPT_SP padding then fails to erase its
+    // reverse-video "%" marker, which stays stranded on the first screen.
+    let initialGrid = transport.initialGridSize
+    parser.resize(columns: initialGrid.columns, rows: initialGrid.rows)
+    lastGridSize = initialGrid
     if let startupMessage {
       connectionState = .connecting(startupMessage)
       snapshot = TerminalSnapshot(message: startupMessage)
@@ -308,14 +323,34 @@ public final class TerminalSession: Identifiable {
 
     // resize/clearStdout run on the main thread but mutate the parser;
     // the parser's internal lock serializes them against the parse queue.
+    //
+    // The grid must never be NARROWER than the width the child still
+    // believes it has: a child picks up the new winsize at its NEXT prompt,
+    // not at the ioctl, so mid-resize it can still emit output laid out for
+    // the old width. If the grid has already shrunk, that output wraps a row
+    // early — zsh's PROMPT_SP padding then misses the CR that erases its
+    // "%" marker and leaves it stranded on screen (the launch-time default
+    // terminal is the resize that hits this: it shrinks 200 -> real width
+    // while the first prompt is still being drawn). So shrink the child
+    // first, and grow the grid first.
+    let size = TerminalGridSize(rows: rows, columns: columns)
+    let shrinking = size.columns < lastGridSize.columns
+
+    if shrinking {
+      transport.resize(columns: columns, rows: rows)
+    }
     parser.resize(columns: columns, rows: rows)
     parser.drainParseQueue()
+    if !shrinking {
+      transport.resize(columns: columns, rows: rows)
+    }
+    lastGridSize = size
+
     if connectionState == .connected {
       // Interactive: publish immediately so the reflow is visible now
       // (force: the reflow can be pure cursor/geometry change).
       publishNow(force: true)
     }
-    transport.resize(columns: columns, rows: rows)
   }
 
   /// Keyboard input from the pure-SwiftUI view (onKeyPress). Structured
