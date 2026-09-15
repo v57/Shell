@@ -16,7 +16,7 @@ struct NotesSectionView: View {
       Section {
         ForEach(notesCollapsed || !flags.isEnabled(.notes) ? [] : model.notes.notes) { note in
           NoteRow(note: note)
-            .tag(note.id)
+            .tag(AppModel.Selection.note(note.id))
             .contextMenu {
               Button("Delete Note", role: .destructive) {
                 model.deleteNote(note.id)
@@ -59,7 +59,7 @@ private struct NoteRow: View {
           .lineLimit(1)
           .truncationMode(.tail)
         Spacer()
-        DetachReturnBadge(itemID: note.id)
+        DetachReturnBadge(selection: .note(note.id))
         if note.storedInICloud {
           Image(systemName: "icloud.fill")
             .font(.caption2)

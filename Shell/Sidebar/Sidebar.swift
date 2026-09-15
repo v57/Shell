@@ -90,51 +90,12 @@ struct SidebarView: View {
       TextFilesSectionView()
       #endif
     }
-    // Clicking an SSH row selects its config id; turn that into an
-    // actual connection (select the existing session or create one).
-    // Screen rows select a deterministic tagID; attach a local terminal
-    // to that screen session.
+    // Clicking a row writes its `Selection`; AppModel routes it to the item
+    // (connect / attach / open / focus) — the section views only tag rows.
     .onChange(of: model.selection) { _, newValue in
       if renamingSessionID != nil { renamingSessionID = nil }
-      guard let id = newValue else { return }
-      if let config = model.connections.first(where: { $0.id == id }) {
-        model.connect(to: config)
-        return
-      }
-      // A web-session row id: open (or focus) its page. A closed row tags
-      // with the web id; an open row tags with the live session id (which is
-      // already selected). Mirrors the screen rows' attach/focus behavior.
-      if let web = model.webSessions.all.first(where: { $0.id == id }) {
-        model.openOrFocusWebSession(web)
-        return
-      }
-      // A database-connection row id: open (or focus) its browser. A closed
-      // row tags with the connection id; an open row tags with the live
-      // session id (already selected).
-      if let connection = model.databaseConnections.first(where: { $0.id == id }) {
-        model.openOrFocusDatabaseConnection(connection)
-        return
-      }
-      #if os(macOS)
-      if let info = model.screenMonitor.sessions.first(where: { $0.tagID == id }) {
-        if let existing = model.attachedSession(toScreen: info) {
-          // Already attached: just focus the open terminal instead of
-          // spawning a second client (multi-attach would leave the
-          // session "Attached" even after one terminal closes).
-          model.selection = existing.id
-        } else {
-          model.attach(toScreen: info)
-        }
-      } else if let info = model.remoteScreenSessions.first(where: { $0.tagID == id }) {
-        // Remote persistent row: attach a local terminal to it over SSH.
-        if let existing = model.attachedSession(toScreen: info) {
-          // Already attached: focus the open terminal (see above).
-          model.selection = existing.id
-        } else if let config = model.connections.first(where: { $0.id == info.remoteOrigin?.sshConfigID }) {
-          model.attach(toRemoteScreen: info, on: config)
-        }
-      }
-      #endif
+      guard let selection = newValue else { return }
+      model.activate(selection)
     }
     .navigationTitle("Terminals")
     // Drive the history-mode → terminals swap with a blur-replace transition
@@ -242,7 +203,7 @@ private struct RunningSectionView: View {
       Section {
         ForEach(runningCollapsed || !flags.isEnabled(.actions) ? [] : model.actionSessions) { session in
           ActionRunRow(session: session, spec: model.actionSpec(for: session))
-            .tag(session.id)   // mandatory: untagged rows write nil into selection
+            .tag(AppModel.Selection.session(session.id))   // mandatory: untagged rows write nil into selection
             .contextMenu {
               if isRunning(session) {
                 Button("Cancel (Ctrl+C)") { session.send(Data([0x03])) }
@@ -300,7 +261,7 @@ private struct ActionRunRow: View {
           .lineLimit(1)
           .truncationMode(.middle)
         Spacer()
-        DetachReturnBadge(itemID: session.id)
+        DetachReturnBadge(selection: .session(session.id))
         Text(environmentLabel)
           .font(.caption2)
           .foregroundStyle(.secondary)
@@ -372,7 +333,7 @@ private struct TextFilesSectionView: View {
       Section {
         ForEach(filesCollapsed ? [] : model.openedFiles) { file in
           OpenedFileRow(file: file)
-            .tag(file.id)
+            .tag(AppModel.Selection.openedFile(file.id))
             .contextMenu {
               Button("Close", role: .destructive) {
                 model.closeOpenedFile(file.id)
@@ -474,7 +435,7 @@ struct SessionRow: View {
           Text(currentLabel)
         }
         Spacer()
-        DetachReturnBadge(itemID: session.id)
+        DetachReturnBadge(selection: .session(session.id))
         stateDot
       }
       // Second line: the session's status (n-th non-empty terminal line
@@ -665,14 +626,16 @@ extension TerminalSession {
 struct DetachReturnBadge: View {
   @Environment(AppModel.self) private var model
   @Environment(\.dismissWindow) private var dismissWindow
-  let itemID: UUID
+  /// The row's own selection, so the item comes back SELECTED as the right
+  /// kind (a session vs a note) without a lookup.
+  let selection: AppModel.Selection
 
   var body: some View {
-    if model.isDetached(itemID) {
+    if model.isDetached(selection.itemID) {
       Button {
-        model.markAttached(itemID)
-        model.selection = itemID
-        dismissWindow(id: "detach", value: itemID)
+        model.markAttached(selection.itemID)
+        model.selection = selection
+        dismissWindow(id: "detach", value: selection.itemID)
       } label: {
         Image(systemName: "arrowshape.turn.up.left.fill")
           .font(.caption2)

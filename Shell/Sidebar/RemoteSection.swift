@@ -94,7 +94,7 @@ private struct SSHConfigGroup: View {
   
   var body: some View {
     SSHConfigRow(config: config)
-      .tag(config.id)
+      .tag(AppModel.Selection.ssh(config.id))
 #if os(macOS)
       .dropDestination(for: ShellFile.self) { files, _ in
         // A file dropped on the saved connection — no terminal cwd to follow,
@@ -169,7 +169,7 @@ private struct SSHConfigGroup: View {
         onCancelRename: onCancelRename
       )
       .padding(.leading, 14)
-      .tag(session.id)
+      .tag(AppModel.Selection.session(session.id))
 #if os(macOS)
       .dropDestination(for: ShellFile.self) { files, _ in
         // A file dropped on a running SSH session's row: materialize it locally
@@ -197,7 +197,7 @@ private struct SSHConfigGroup: View {
     ForEach(model.webSessions.all.filter { $0.sshConfigID == config.id }) { web in
       WebSessionRow(web: web, environmentName: config.displayName)
         .padding(.leading, 14)
-        .tag(model.liveWebSession(for: web)?.id ?? web.id)
+        .tag(model.rowSelection(for: web))
     }
     }
     // Database connections tunneled through this host render as SSH-section
@@ -208,7 +208,7 @@ private struct SSHConfigGroup: View {
     ForEach(model.databaseConnections.filter { $0.sshConfigID == config.id }) { connection in
       DatabaseConnectionRow(connection: connection)
         .padding(.leading, 14)
-        .tag(model.liveDatabaseSession(for: connection)?.id ?? connection.id)
+        .tag(model.rowSelection(for: connection))
         .contextMenu { DatabaseConnectionActions(connection: connection) { onRenameDatabase($0) } }
     }
     }

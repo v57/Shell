@@ -52,209 +52,7 @@ struct ContentView: View {
         SidebarView()
           .navigationSplitViewColumnWidth(min: 190, ideal: 230)
       } detail: {
-        if let session = model.mainSelectedSession {
-          let kind = model.kind(of: session)
-          Group {
-            if case .web(let web) = kind {
-              // A web session renders its URL in the system SwiftUI WebView
-              // (no terminal, no Files panel, no terminal toolbar). For an
-              // ssh-owned session the tunnel runtime supplies the reachable
-              // local URL (or a connecting/error state) instead of the raw URL.
-              let tunnel = model.webSessionRuntime(for: web)
-              // The address bar value: the tunneled local URL for an ssh-owned
-              // session once the tunnel is up, otherwise the stored web URL —
-              // so the displayed value matches what the WebView actually loads.
-              let effectiveURLText: String = tunnel?.tunnelURL?.absoluteString ?? web.url
-              WebSessionDetailView(web: web, tunnel: tunnel)
-                .id(session.id)
-                // The address bar is the window toolbar's search field: the
-                // `searchable` modifier hands the field to the toolbar (a
-                // plain TextField stacked above the WebView cannot sit there),
-                // and Return — via `.onSubmit(of: .search)` — commits the
-                // edited text to navigate the WebView.
-                .searchable(text: $webAddressText, prompt: "URL")
-                .searchFocused($webAddressFocused)
-                // By default the search field hides the rest of the toolbar
-                // while it is active (on iOS the navigation bar's back button
-                // disappears until the field is cleared). Keep the toolbar's
-                // other controls visible so the user can always navigate away
-                // without cancelling the search first. Must come AFTER
-                // `.searchable` to apply to the toolbar search field.
-                .searchPresentationToolbarBehavior(.avoidHidingContent)
-                .onSubmit(of: .search) {
-                  // Only navigate when the edited text actually differs from
-                  // what's displayed — submitting an unchanged address is a
-                  // no-op (avoids an unnecessary reconnect/reload).
-                  guard webAddressText != effectiveURLText else { return }
-                  model.updateWebSessionURL(web, to: webAddressText)
-                }
-                .onChange(of: effectiveURLText) { _, newText in
-                  // Keep the field in sync with the effective URL — an
-                  // ssh-owned page's bar follows the tunnel's local URL as it
-                  // comes up. While the user is editing, never overwrite
-                  // their keystrokes.
-                  if !webAddressFocused { webAddressText = newText }
-                }
-                // `webAddressText` is ContentView state (not the pane's), so
-                // re-seed it when a different web session is selected.
-                .onChange(of: session.id) { _, _ in
-                  webAddressText = effectiveURLText
-                }
-                .onAppear {
-                  // Seed the field with the effective URL. The field is NOT
-                  // focused on appear — a toolbar search field that grabs
-                  // focus on open would immediately engage search (and, on
-                  // iOS, raise the keyboard over the page), which is not what
-                  // opening a saved page should do. The user taps the field
-                  // when they want to type an address.
-                  webAddressText = effectiveURLText
-                }
-                .onDisappear { webAddressFocused = false }
-                .toolbar {
-                  // The SSH-tunnel picker is a web-session-only control: it
-                  // lets the user switch which host the open page is tunnelled
-                  // through (or clear the tunnel). See webSSHTunnelPicker.
-                  #if os(macOS)
-                  ToolbarItem(placement: .primaryAction) {
-                    webSSHTunnelPicker(web: web)
-                  }
-                  #endif
-                }
-            } else if case .database(let connection) = kind {
-              // A database session renders the per-engine documents/tables
-              // browser (no terminal, no Files panel). The live engine
-              // lifecycle is owned by AppModel.
-              if let dbSession = model.databaseSession(for: connection) {
-                DatabaseBrowserView(session: dbSession)
-                  .id(session.id)
-              } else {
-                ContentUnavailableView(
-                  "Database Not Open",
-                  systemImage: "server.rack",
-                  description: Text("The database connection is not open.")
-                )
-                .id(session.id)
-              }
-            } else {
-              ZStack {
-                // The terminal stays mounted so its scrollback/focus state is
-                // preserved while the Files panel is shown on top of it. The
-                // panel only covers it (and blocks its hit-testing) when the
-                // Files feature is enabled AND the panel is open.
-                TerminalView(session: session)
-                  .id(session.id)
-                  .allowsHitTesting(!(model.directoryBrowser.visible && flags.isEnabled(.files)))
-
-                if model.directoryBrowser.visible, flags.isEnabled(.files) {
-                  FilesPanelView(model: model.directoryBrowser)
-                    .transition(.opacity)
-                    .background(.background)
-                }
-              }
-              .toolbar {
-#if os(macOS)
-                  // Smart actions for the active local directory: a Run button per
-                  // action, a Stop button (disabled unless something is running), and a
-                  // target picker when the project has multiple targets/schemes.
-                  if let directory = model.smartActionDirectory, !model.smartActionActions.isEmpty {
-                    ToolbarItemGroup(placement: .primaryAction) {
-                      if smartActionsTargets.count > 1 {
-                        Menu {
-                          Button("Project") { smartActionsTarget = nil }
-                          Divider()
-                          ForEach(smartActionsTargets, id: \.self) { target in
-                            Button(target) { smartActionsTarget = target }
-                          }
-                        } label: {
-                          Label(smartActionsTarget ?? "Project", systemImage: "scope")
-                        }
-                        .help("Select target")
-                      }
-                      ForEach(smartActionGroups) { group in
-                        if group.kind == .distribute {
-                          DistributeMenu(actions: group.actions, directory: directory)
-                        } else {
-                          SmartActionMenu(actions: group.actions, directory: directory)
-                        }
-                      }
-                    }
-                  }
-                  
-                  if #available(macOS 26.0, *) {
-                    ToolbarSpacer()
-                  }
-                  files
-                  
-                  // Open With for the active local directory — trailing secondary
-                  // action, showing the available apps' real icons.
-                  if let directory = model.smartActionDirectory, !model.openWithKinds.isEmpty {
-                    ToolbarItemGroup(placement: .primaryAction) {
-                      OpenWithMenu(directory: directory, kinds: model.openWithKinds)
-                    }
-                  }
-#else
-                  files
-#endif
-                }
-            }
-          }
-          .navigationTitle(model.displayName(for: session))
-          .navigationDirectorySubtitle(localDirectoryText)
-        } else if let historySession = model.mainSelectedHistorySession {
-          HistorySessionView(session: historySession)
-            .id(historySession.id)
-            .navigationTitle(historySession.title)
-            .toolbar {
-              ToolbarItemGroup {
-                Button(role: .destructive) {
-                  model.deleteHistorySession(historySession.id)
-                } label: {
-                  Label("Delete History", systemImage: "trash")
-                }
-                .help("Delete History")
-                
-                Button {
-                  model.replayHistorySession(historySession)
-                } label: {
-                  Label("Replay Commands", systemImage: "play")
-                }
-                .help("Replay Commands")
-                
-                Button {
-                  model.createAction(from: historySession)
-                } label: {
-                  Label("Create Action", systemImage: "command")
-                }
-                .help("Create Action")
-              }
-            }
-        } else if let note = model.mainSelectedNote {
-          NoteEditorView(noteID: note.id)
-            .id(note.id)
-            .navigationTitle(model.notes.title(for: note.id))
-        } else {
-#if os(macOS)
-          if let file = model.mainSelectedOpenedFile {
-            OpenFilePane(file: file)
-              .id(file.id)
-              .navigationTitle(file.displayName)
-          } else {
-            ContentUnavailableView(
-              "No Terminal Selected",
-              systemImage: "terminal",
-              description: Text("Choose a terminal in the sidebar or create a new one.")
-            )
-            .navigationTitle("Terminals")
-          }
-#else
-          ContentUnavailableView(
-            "No Terminal Selected",
-            systemImage: "terminal",
-            description: Text("Choose a terminal in the sidebar or create a new one.")
-          )
-          .navigationTitle("Terminals")
-#endif
-        }
+        detailPane
       }
       .sheet(isPresented: $model.showingNewConnection) {
         NewConnectionView()
@@ -372,7 +170,7 @@ struct ContentView: View {
     // Kick the directory refresh the moment the selected session changes
     // (the timer alone adds up to a second of lag before the toolbar
     // actions refresh when switching sessions in the sidebar).
-    .onChange(of: model.mainSelectedSession?.id) { _, _ in
+    .onChange(of: model.selection) { _, _ in
       refreshLocalDirectory()
       syncFileBrowser()
     }
@@ -398,6 +196,254 @@ struct ContentView: View {
     }
   }
   
+
+  /// The main window's detail pane for the current selection. The KIND comes
+  /// from the selection itself — one switch, each branch a single targeted
+  /// lookup — instead of a chain of per-collection getters that had to be
+  /// probed in turn to find out what was selected. A selection whose item
+  /// lives in its OWN detached window presents nothing here: that window owns
+  /// it, and re-attaching (`markAttached`) restores it.
+  @ViewBuilder
+  private var detailPane: some View {
+    switch model.selection {
+    case .session(let id):
+      if let session = model.session(id), !model.isDetached(id) {
+        sessionDetail(session)
+      } else {
+        noSelection
+      }
+    case .note(let id):
+      if let note = model.note(id), !model.isDetached(id) {
+        NoteEditorView(noteID: note.id)
+          .id(note.id)
+          .navigationTitle(model.notes.title(for: note.id))
+      } else {
+        noSelection
+      }
+    case .history(let id):
+      if let record = model.historySession(id), !model.isDetached(id) {
+        historyDetail(record)
+      } else {
+        noSelection
+      }
+    #if os(macOS)
+    case .openedFile(let id):
+      if let file = model.openedFile(id), !model.isDetached(id) {
+        OpenFilePane(file: file)
+          .id(file.id)
+          .navigationTitle(file.displayName)
+      } else {
+        noSelection
+      }
+    #endif
+    default:
+      // Nothing selected, or a saved row (`ssh` / `screen` / `web` /
+      // `database`) that is still being opened — those become a session
+      // selection once the item they name is open.
+      noSelection
+    }
+  }
+
+  /// The detail pane for a live session: a `.web` session renders its page,
+  /// a `.database` session its browser, everything else (local, SSH, action,
+  /// persistent attachment) its terminal. The pane is picked from the
+  /// session's KIND — the same branching the detached window does.
+  @ViewBuilder
+  private func sessionDetail(_ session: TerminalSession) -> some View {
+    let kind = model.kind(of: session)
+    Group {
+      if case .web(let web) = kind {
+        // A web session renders its URL in the system SwiftUI WebView
+        // (no terminal, no Files panel, no terminal toolbar). For an
+        // ssh-owned session the tunnel runtime supplies the reachable
+        // local URL (or a connecting/error state) instead of the raw URL.
+        let tunnel = model.webSessionRuntime(for: web)
+        // The address bar value: the tunneled local URL for an ssh-owned
+        // session once the tunnel is up, otherwise the stored web URL —
+        // so the displayed value matches what the WebView actually loads.
+        let effectiveURLText: String = tunnel?.tunnelURL?.absoluteString ?? web.url
+        WebSessionDetailView(web: web, tunnel: tunnel)
+          .id(session.id)
+          // The address bar is the window toolbar's search field: the
+          // `searchable` modifier hands the field to the toolbar (a
+          // plain TextField stacked above the WebView cannot sit there),
+          // and Return — via `.onSubmit(of: .search)` — commits the
+          // edited text to navigate the WebView.
+          .searchable(text: $webAddressText, prompt: "URL")
+          .searchFocused($webAddressFocused)
+          // By default the search field hides the rest of the toolbar
+          // while it is active (on iOS the navigation bar's back button
+          // disappears until the field is cleared). Keep the toolbar's
+          // other controls visible so the user can always navigate away
+          // without cancelling the search first. Must come AFTER
+          // `.searchable` to apply to the toolbar search field.
+          .searchPresentationToolbarBehavior(.avoidHidingContent)
+          .onSubmit(of: .search) {
+            // Only navigate when the edited text actually differs from
+            // what's displayed — submitting an unchanged address is a
+            // no-op (avoids an unnecessary reconnect/reload).
+            guard webAddressText != effectiveURLText else { return }
+            model.updateWebSessionURL(web, to: webAddressText)
+          }
+          .onChange(of: effectiveURLText) { _, newText in
+            // Keep the field in sync with the effective URL — an
+            // ssh-owned page's bar follows the tunnel's local URL as it
+            // comes up. While the user is editing, never overwrite
+            // their keystrokes.
+            if !webAddressFocused { webAddressText = newText }
+          }
+          // `webAddressText` is ContentView state (not the pane's), so
+          // re-seed it when a different web session is selected.
+          .onChange(of: session.id) { _, _ in
+            webAddressText = effectiveURLText
+          }
+          .onAppear {
+            // Seed the field with the effective URL. The field is NOT
+            // focused on appear — a toolbar search field that grabs
+            // focus on open would immediately engage search (and, on
+            // iOS, raise the keyboard over the page), which is not what
+            // opening a saved page should do. The user taps the field
+            // when they want to type an address.
+            webAddressText = effectiveURLText
+          }
+          .onDisappear { webAddressFocused = false }
+          .toolbar {
+            // The SSH-tunnel picker is a web-session-only control: it
+            // lets the user switch which host the open page is tunnelled
+            // through (or clear the tunnel). See webSSHTunnelPicker.
+            #if os(macOS)
+            ToolbarItem(placement: .primaryAction) {
+              webSSHTunnelPicker(web: web)
+            }
+            #endif
+          }
+      } else if case .database(let connection) = kind {
+        // A database session renders the per-engine documents/tables
+        // browser (no terminal, no Files panel). The live engine
+        // lifecycle is owned by AppModel.
+        if let dbSession = model.databaseSession(for: connection) {
+          DatabaseBrowserView(session: dbSession)
+            .id(session.id)
+        } else {
+          ContentUnavailableView(
+            "Database Not Open",
+            systemImage: "server.rack",
+            description: Text("The database connection is not open.")
+          )
+          .id(session.id)
+        }
+      } else {
+        ZStack {
+          // The terminal stays mounted so its scrollback/focus state is
+          // preserved while the Files panel is shown on top of it. The
+          // panel only covers it (and blocks its hit-testing) when the
+          // Files feature is enabled AND the panel is open.
+          TerminalView(session: session)
+            .id(session.id)
+            .allowsHitTesting(!(model.directoryBrowser.visible && flags.isEnabled(.files)))
+
+          if model.directoryBrowser.visible, flags.isEnabled(.files) {
+            FilesPanelView(model: model.directoryBrowser)
+              .transition(.opacity)
+              .background(.background)
+          }
+        }
+        .toolbar {
+#if os(macOS)
+            // Smart actions for the active local directory: a Run button per
+            // action, a Stop button (disabled unless something is running), and a
+            // target picker when the project has multiple targets/schemes.
+            if let directory = model.smartActionDirectory, !model.smartActionActions.isEmpty {
+              ToolbarItemGroup(placement: .primaryAction) {
+                if smartActionsTargets.count > 1 {
+                  Menu {
+                    Button("Project") { smartActionsTarget = nil }
+                    Divider()
+                    ForEach(smartActionsTargets, id: \.self) { target in
+                      Button(target) { smartActionsTarget = target }
+                    }
+                  } label: {
+                    Label(smartActionsTarget ?? "Project", systemImage: "scope")
+                  }
+                  .help("Select target")
+                }
+                ForEach(smartActionGroups) { group in
+                  if group.kind == .distribute {
+                    DistributeMenu(actions: group.actions, directory: directory)
+                  } else {
+                    SmartActionMenu(actions: group.actions, directory: directory)
+                  }
+                }
+              }
+            }
+
+            if #available(macOS 26.0, *) {
+              ToolbarSpacer()
+            }
+            files
+
+            // Open With for the active local directory — trailing secondary
+            // action, showing the available apps' real icons.
+            if let directory = model.smartActionDirectory, !model.openWithKinds.isEmpty {
+              ToolbarItemGroup(placement: .primaryAction) {
+                OpenWithMenu(directory: directory, kinds: model.openWithKinds)
+              }
+            }
+#else
+            files
+#endif
+          }
+      }
+    }
+    .navigationTitle(model.displayName(for: session))
+    .navigationDirectorySubtitle(localDirectoryText)
+  }
+
+  /// The detail pane for an archived history session, with its delete /
+  /// replay / create-action toolbar.
+  @ViewBuilder
+  private func historyDetail(_ historySession: HistorySession) -> some View {
+    HistorySessionView(session: historySession)
+      .id(historySession.id)
+      .navigationTitle(historySession.title)
+      .toolbar {
+        ToolbarItemGroup {
+          Button(role: .destructive) {
+            model.deleteHistorySession(historySession.id)
+          } label: {
+            Label("Delete History", systemImage: "trash")
+          }
+          .help("Delete History")
+
+          Button {
+            model.replayHistorySession(historySession)
+          } label: {
+            Label("Replay Commands", systemImage: "play")
+          }
+          .help("Replay Commands")
+
+          Button {
+            model.createAction(from: historySession)
+          } label: {
+            Label("Create Action", systemImage: "command")
+          }
+          .help("Create Action")
+        }
+      }
+  }
+
+  /// Shown when nothing presentable is selected: nothing at all, a saved row
+  /// still being opened, or an item living in its own detached window (which
+  /// owns it — re-attaching restores it here).
+  private var noSelection: some View {
+    ContentUnavailableView(
+      "No Terminal Selected",
+      systemImage: "terminal",
+      description: Text("Choose a terminal in the sidebar or create a new one.")
+    )
+    .navigationTitle("Terminals")
+  }
+
   @ContentBuilder
   var files: some ToolbarContent {
     // Terminal | Files view toggle: a single button whose icon flips
@@ -447,6 +493,16 @@ struct ContentView: View {
   }
   #endif
 
+  /// The live session the main window presents, if the selection names one —
+  /// nil while a saved row (`ssh` / `screen` / `web` / `database`) is still
+  /// being opened, and for an item living in its own detached window. Drives
+  /// the cwd subtitle, the smart actions and the Files panel; the detail pane
+  /// itself switches on `model.selection`.
+  private var presentedSession: TerminalSession? {
+    guard case .session(let id) = model.selection, !model.isDetached(id) else { return nil }
+    return model.session(id)
+  }
+
   /// Re-queries the selected session's cwd so the window subtitle follows
   /// the shell's `cd`. Local sessions read the child's live cwd via libproc;
   /// ssh-backed sessions run a throttled `pwd` over the live transport and
@@ -454,7 +510,7 @@ struct ContentView: View {
   /// The home-directory prefix is shortened to `~` for display — LOCAL only
   /// (the remote home is on another host, so remote paths are shown in full).
   private func refreshLocalDirectory() {
-    let session = model.mainSelectedSession
+    let session = presentedSession
     let kind = session.map { model.kind(of: $0) }
     let path: String?
     switch kind {
@@ -507,7 +563,7 @@ struct ContentView: View {
   /// (or clears it when nothing terminal-ish is selected), so the Files panel
   /// rebuilds its context and lists the right directory for the right runner.
   private func syncFileBrowser() {
-    if let session = model.mainSelectedSession {
+    if let session = presentedSession {
       model.directoryBrowser.setSession(session, kind: model.kind(of: session))
     } else {
       model.directoryBrowser.setSession(nil, kind: .local)

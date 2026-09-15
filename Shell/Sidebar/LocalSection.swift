@@ -69,7 +69,7 @@ struct LocalSectionView: View {
         if model.historyMode {
           ForEach(localCollapsed || !flags.isEnabled(.history) ? [] : model.history.sessions) { record in
             HistorySessionRow(session: record)
-              .tag(record.id)
+              .tag(AppModel.Selection.history(record.id))
           }
           .transition(.blurReplace)
         } else {
@@ -82,7 +82,7 @@ struct LocalSectionView: View {
               onCommitRename: { commitRename(session.id, $0) },
               onCancelRename: { renamingSessionID = nil }
             )
-            .tag(session.id)
+            .tag(AppModel.Selection.session(session.id))
             .dropDestination(for: ShellFile.self) { files, _ in
               // A file dropped on this session cell — from Finder (decoded as a
               // ShellFile via the FileRepresentation importing closure) or dragged
@@ -113,9 +113,10 @@ struct LocalSectionView: View {
               onCommitRename: { commitScreenRename(info, $0) },
               onCancelRename: { renamingScreenName = nil }
             )
-            // Tag with the open session's id when attached (so the row shows
-            // selected while its terminal is open), else the stable tagID.
-            .tag(model.attachedSession(toScreen: info)?.id ?? info.tagID)
+            // Tag with the open session's selection when attached (so the row
+            // shows selected while its terminal is open), else the row's own
+            // stable tag id — activating that attaches.
+            .tag(model.rowSelection(forScreen: info))
             .contextMenu {
               Button("Rename…") { renamingScreenName = info.name }
               Divider()
@@ -137,9 +138,8 @@ struct LocalSectionView: View {
               onCommitRename: { _ in },
               onCancelRename: {}
             )
-            // Tag with the open session's id when attached (so the row shows
-            // selected while its terminal is open), else the stable tagID.
-            .tag(model.attachedSession(toScreen: info)?.id ?? info.tagID)
+            // Same convention as the local persistent rows above.
+            .tag(model.rowSelection(forScreen: info))
             .contextMenu {
               // Remote persistent sessions are identified by their SSH origin;
               // renaming runs on the host, which is out of scope here.
@@ -159,10 +159,10 @@ struct LocalSectionView: View {
           }
           ForEach(localCollapsed || !flags.isEnabled(.web) ? [] : localWebSessions) { web in
             WebSessionRow(web: web)
-              // Tag with the open session's id when the page is open (so the
-              // row shows selected while its WebView is up), else the stable
-              // web id — same convention as the screen rows above.
-              .tag(model.liveWebSession(for: web)?.id ?? web.id)
+              // Tag with the open page's session when it is up (so the row
+              // shows selected while its WebView is visible), else the page's
+              // own id — activating that opens it.
+              .tag(model.rowSelection(for: web))
           }
           .onMove { source, destination in
             model.moveLocalWebSession(from: source, to: destination)
@@ -171,7 +171,7 @@ struct LocalSectionView: View {
           // section like local shells; remote ones group under Remote instead.
           ForEach(localCollapsed || !flags.isEnabled(.database) ? [] : localDatabaseConnections) { connection in
             DatabaseConnectionRow(connection: connection)
-              .tag(model.liveDatabaseSession(for: connection)?.id ?? connection.id)
+              .tag(model.rowSelection(for: connection))
               .contextMenu { DatabaseConnectionActions(connection: connection) { onRenameDatabase($0) } }
           }
           .onMove { source, destination in

@@ -18,13 +18,64 @@ import TerminalIntegrations
 @Observable
 final class AppModel {
   static let shared = AppModel()
+
+  /// What the sidebar has focused: the KIND of row plus its id.
+  ///
+  /// The kind is the point. A bare `UUID?` forced every accessor to search
+  /// `sessions`, then `notes`, then `history`, then `openedFiles` before it
+  /// could tell what was selected, and the content area could only find the
+  /// view to present by chaining one getter per collection
+  /// (`mainSelectedSession` → `mainSelectedNote` → …). Naming the kind makes
+  /// each lookup a single pass over ONE collection and lets the content area
+  /// switch straight to the pane it presents.
+  ///
+  /// `.ssh`, `.screen`, `.web` and `.database` are ACTIVATION selections:
+  /// those rows don't back a live session yet, so `activate(_:)` turns them
+  /// into the session they open (or focuses the open one) and the content
+  /// area presents nothing for them. Every other case is the resting state
+  /// of an open item.
+  enum Selection: Hashable {
+    /// A live terminal session — the resting state of every open item: local
+    /// and SSH shells, action runs, attached persistent sessions, open web
+    /// pages and open database browsers.
+    case session(UUID)
+    /// A saved SSH connection row: activating it connects.
+    case ssh(UUID)
+    /// A persistent (screen/tmux) session row, keyed by its deterministic
+    /// `ScreenSessionInfo.tagID` (stable across monitor refreshes):
+    /// activating it attaches a terminal, or focuses the attached one.
+    case screen(UUID)
+    /// A saved web page row: activating it opens the page, or focuses the
+    /// already-open one.
+    case web(UUID)
+    /// A saved database connection row: activating it opens the browser, or
+    /// focuses the already-open one.
+    case database(UUID)
+    /// A note in the main window's editor.
+    case note(UUID)
+    /// An archived history session in the history viewer.
+    case history(UUID)
+    /// A transient opened text file (macOS only).
+    case openedFile(UUID)
+
+    /// The id this selection carries. Every case carries exactly one, so this
+    /// is the key the detached-window scene (`WindowGroup` id "detach", which
+    /// presents by item id) and the detach badge work with.
+    var itemID: UUID {
+      switch self {
+      case .session(let id), .ssh(let id), .screen(let id), .web(let id),
+           .database(let id), .note(let id), .history(let id), .openedFile(let id):
+        return id
+      }
+    }
+  }
   
   /// The feature-flag source of truth. Background surfaces and probes read
   /// `isEnabled(_:)` from here so a disabled feature never spawns work.
   private var features: FeatureFlagsStore { .shared }
   
   var sessions: [TerminalSession] = []
-  var selection: UUID?
+  var selection: Selection?
   /// The directory browser (Files panel) model, driven by the selected
   /// session. Shared so both ContentView and ShellCommands can drive it.
   let directoryBrowser = DirectoryBrowserModel()
@@ -138,7 +189,7 @@ final class AppModel {
   private var sessionKinds: [UUID: ConnectionKind] = [:]
   private var sessionCommands: [UUID: [SubmittedCommand]] = [:]
   private var localHistoryDrafts: [UUID: LocalHistoryDraft] = [:]
-  private var selectionBeforeHistory: UUID?
+  private var selectionBeforeHistory: Selection?
   /// Observation token for CloudKit remote-change notifications (kept so
   /// the observer can be torn down; AppModel is a singleton, so it lives
   /// for the process).
@@ -472,56 +523,148 @@ final class AppModel {
   }
   #endif
 
-  var selectedSession: TerminalSession? {
-    sessions.first { $0.id == selection }
+  /// The live session with `id`, if it is open — one pass over `sessions`
+  /// (the only collection that can hold it).
+  func session(_ id: UUID) -> TerminalSession? {
+    sessions.first { $0.id == id }
   }
 
-  /// The note currently focused in the main view, if any. Shares the
-  /// sidebar selection with sessions (note ids are distinct UUIDs, so
-  /// row tags never collide).
-  var selectedNote: NotesStore.NoteSummary? {
-    notes.notes.first { $0.id == selection }
+  /// The note summary with `id`, if it exists (notes are decrypted lazily, so
+  /// the summary — not the text — is what the sidebar and the editor's title
+  /// need).
+  func note(_ id: UUID) -> NotesStore.NoteSummary? {
+    notes.notes.first { $0.id == id }
   }
 
-  var selectedHistorySession: HistorySession? {
-    guard historyMode else { return nil }
-    return history.sessions.first { $0.id == selection }
-  }
-
-  /// The selected session as shown in the MAIN window. A session currently
-  /// presented in its own detached window is not shown again in the main
-  /// detail (its window owns it); re-attaching (`markAttached`) restores it.
-  var mainSelectedSession: TerminalSession? {
-    guard let session = selectedSession, !detachedIDs.contains(session.id) else { return nil }
-    return session
-  }
-
-  /// The selected note as shown in the MAIN window (nil if it is detached).
-  var mainSelectedNote: NotesStore.NoteSummary? {
-    guard let note = selectedNote, !detachedIDs.contains(note.id) else { return nil }
-    return note
-  }
-
-  /// The selected history session as shown in the MAIN window (nil if detached).
-  var mainSelectedHistorySession: HistorySession? {
-    guard let history = selectedHistorySession, !detachedIDs.contains(history.id) else { return nil }
-    return history
+  /// The archived history session with `id`, if it still exists.
+  func historySession(_ id: UUID) -> HistorySession? {
+    history.sessions.first { $0.id == id }
   }
 
   #if os(macOS)
-  /// The opened-file document currently focused in the main view, if any.
-  /// Shares the sidebar selection with sessions and notes (file ids are
-  /// distinct UUIDs, so row tags never collide with session/note ids).
-  var selectedOpenedFile: OpenedFile? {
-    openedFiles.first { $0.id == selection }
-  }
-
-  /// The selected opened file as shown in the MAIN window (nil if detached).
-  var mainSelectedOpenedFile: OpenedFile? {
-    guard let file = selectedOpenedFile, !detachedIDs.contains(file.id) else { return nil }
-    return file
+  /// The transient opened text file with `id`, if it is still open.
+  func openedFile(_ id: UUID) -> OpenedFile? {
+    openedFiles.first { $0.id == id }
   }
   #endif
+
+  /// The live terminal session behind the selection, if it points at one —
+  /// the ONE selection→session resolution, used by the menus, the ⌘W/⌘N
+  /// navigation and the action runner. Answers from the selection's case
+  /// instead of scanning every collection for the id.
+  var selectedSession: TerminalSession? {
+    guard case .session(let id) = selection else { return nil }
+    return session(id)
+  }
+
+  /// The note currently focused in the main view, if any.
+  var selectedNote: NotesStore.NoteSummary? {
+    guard case .note(let id) = selection else { return nil }
+    return note(id)
+  }
+
+  /// Routes a sidebar selection to the item it names. The sidebar's `List`
+  /// writes the clicked row's `Selection` and nothing else: a saved SSH host
+  /// connects, a persistent-session row attaches (or focuses) its terminal, a
+  /// saved page or database row opens (or focuses) its browser. A selection
+  /// that already names an open item is a no-op — it IS the presented pane.
+  /// (This used to be the sidebar's job, and it had to look the raw id up in
+  /// the connection store, the web store, the database store and the two
+  /// screen lists in turn to discover which kind of row had been clicked.)
+  func activate(_ selection: Selection) {
+    switch selection {
+    case .session, .note, .history, .openedFile:
+      break
+    case .ssh(let id):
+      if let config = connections.first(where: { $0.id == id }) {
+        connect(to: config)
+      }
+    case .web(let id):
+      if let web = webSessions.all.first(where: { $0.id == id }) {
+        openOrFocusWebSession(web)
+      }
+    case .database(let id):
+      if let connection = databaseConnections.first(where: { $0.id == id }) {
+        openOrFocusDatabaseConnection(connection)
+      }
+    case .screen(let tagID):
+      #if os(macOS)
+      if let info = screenMonitor.sessions.first(where: { $0.tagID == tagID }) {
+        attachOrFocus(info)
+      } else if let info = remoteScreenSessions.first(where: { $0.tagID == tagID }),
+                let config = connections.first(where: { $0.id == info.remoteOrigin?.sshConfigID }) {
+        attachOrFocus(info, on: config)
+      }
+      #else
+      // iOS renders no persistent-session rows (no local multiplexer, no
+      // remote scanner), so a `.screen` selection can't occur there.
+      _ = tagID
+      #endif
+    }
+  }
+
+  /// The selection a saved web page's sidebar row tags with: the OPEN page's
+  /// session when there is one (so the row highlights while its WebView is
+  /// up), else the page's own id — an activation selection that opens it.
+  func rowSelection(for web: WebSession) -> Selection {
+    if let live = liveWebSession(for: web) { return .session(live.id) }
+    return .web(web.id)
+  }
+
+  /// The selection a saved database connection's sidebar row tags with: the
+  /// open browser's session when there is one, else the connection's own id
+  /// (activating that opens the browser). Same convention as the web rows.
+  func rowSelection(for connection: DatabaseConnection) -> Selection {
+    if let live = liveDatabaseSession(for: connection) { return .session(live.id) }
+    return .database(connection.id)
+  }
+
+  #if os(macOS)
+  /// The selection a persistent (screen/tmux) session's sidebar row tags
+  /// with: the attached terminal's session when one is open (so the row
+  /// highlights while its terminal is up), else the row's stable `tagID` —
+  /// an activation selection that attaches (or focuses) a terminal.
+  func rowSelection(forScreen info: ScreenSessionInfo) -> Selection {
+    if let attached = attachedSession(toScreen: info) { return .session(attached.id) }
+    return .screen(info.tagID)
+  }
+  #endif
+
+  #if os(macOS)
+  /// Focuses the open terminal attached to `info`, or attaches a new one.
+  /// Focusing (rather than multi-attaching) keeps the persistent session's
+  /// state honest — a second client would leave it "Attached" after either
+  /// one closes. A remote row is identified by its origin host.
+  private func attachOrFocus(_ info: ScreenSessionInfo, on config: SSHConfig? = nil) {
+    if let existing = attachedSession(toScreen: info) {
+      selection = .session(existing.id)
+    } else if let config {
+      attach(toRemoteScreen: info, on: config)
+    } else {
+      attach(toScreen: info)
+    }
+  }
+  #endif
+
+  /// The selection that focuses the item with `id` — its kind is not known to
+  /// the caller (a detached window or the detach badge reports a bare id), so
+  /// resolve it against the two detachable collections (sessions, notes).
+  private func selection(forItemID id: UUID) -> Selection {
+    note(id) == nil ? .session(id) : .note(id)
+  }
+
+  /// The selection that can be detached (a session or a note), nil when
+  /// nothing detachable is selected. Drives the "Detach Session/Note" menu
+  /// command: its enabled state and which item the ⌘⇧D toggle acts on. An
+  /// item stays detachable while detached, so ⌘⇧D again returns it.
+  var selectedDetachable: Selection? {
+    switch selection {
+    case .session, .note:
+      return selection
+    default:
+      return nil
+    }
+  }
 
   // MARK: - Detached windows (macOS + iPad)
 
@@ -543,32 +686,21 @@ final class AppModel {
   /// (not the ⌘⇧D toggle or the sidebar return badge). Closing the window
   /// destroys the scene but previously left the id in `detachedIDs`, so the
   /// main window treated the item as still detached while it had no window —
-  /// `mainSelectedSession`/`mainSelectedNote` returned nil and the item was
-  /// stuck. This returns it to the main window: remove from `detachedIDs` and
-  /// select it so it reappears and is focusable. An empty note is deleted
-  /// (mirrors the ⌘W close behavior).
+  /// the content area presented nothing and the item was stuck. This returns
+  /// it to the main window: remove from `detachedIDs` and select it so it
+  /// reappears and is focusable. An empty note is deleted (mirrors the ⌘W
+  /// close behavior).
   func handleDetachedWindowClosed(_ id: UUID) {
     guard detachedIDs.contains(id) else { return }
     markAttached(id)
     // A detached empty note is deleted just like an empty note closed with
     // ⌘W — look it up by id (not by the current selection, which may have
     // moved on while the detached window was up).
-    if let note = notes.notes.first(where: { $0.id == id }), notes.isEmptyNote(id) {
+    if note(id) != nil, notes.isEmptyNote(id) {
       deleteNote(id)
       return
     }
-    selection = id
-  }
-
-  /// The id of the currently selected item that can be detached (a session
-  /// or a note), nil when nothing detachable is selected. Drives the
-  /// "Detach Session/Note" menu command: its enabled state and which item
-  /// the ⌘⇧D toggle acts on. A session is detachable even while detached
-  /// (so pressing ⌘⇧D again returns it to the main window).
-  var selectedDetachableID: UUID? {
-    if let session = selectedSession { return session.id }
-    if let note = selectedNote { return note.id }
-    return nil
+    selection = selection(forItemID: id)
   }
   
   /// The app-side kind of a session. Registered at creation, dropped on
@@ -686,7 +818,7 @@ final class AppModel {
     sessionKinds[session.id] = .local
     registerCapture(for: session, archiveLocally: true)
     sessions.append(session)
-    selection = session.id
+    selection = .session(session.id)
     return session
   }
   #endif
@@ -718,7 +850,7 @@ final class AppModel {
     sessionKinds[session.id] = .ssh(config)
     registerCapture(for: session, archiveLocally: false)
     sessions.append(session)
-    selection = session.id
+    selection = .session(session.id)
     #if os(macOS)
     // Kick a remote scan on connect. The just-created session isn't
     // `.connected` yet, so it's skipped this pass; every already-connected
@@ -758,7 +890,7 @@ final class AppModel {
     let session = TerminalSession(transport: WebSessionTransport())
     sessionKinds[session.id] = .web(web)
     sessions.append(session)
-    selection = session.id
+    selection = .session(session.id)
     return session
   }
 
@@ -807,7 +939,7 @@ final class AppModel {
   /// Opens a saved web session, or focuses the one already open.
   func openOrFocusWebSession(_ web: WebSession) {
     if let live = liveWebSession(for: web) {
-      selection = live.id
+      selection = .session(live.id)
     } else {
       openWebSession(web)
     }
@@ -920,7 +1052,7 @@ final class AppModel {
     sessionKinds[session.id] = .screen(info)
     registerCapture(for: session, archiveLocally: false)
     sessions.append(session)
-    selection = session.id
+    selection = .session(session.id)
     screenMonitor.refresh()  // the session just flipped to Attached
     return session
   }
@@ -955,7 +1087,7 @@ final class AppModel {
     sessionKinds[session.id] = .screen(info)
     registerCapture(for: session, archiveLocally: false)
     sessions.append(session)
-    selection = session.id
+    selection = .session(session.id)
     refreshRemoteScreenSessions()  // the session just flipped to Attached
     return session
   }
@@ -1240,8 +1372,8 @@ final class AppModel {
     sessions.removeAll { $0.id == id }
     sessionKinds.removeValue(forKey: id)
     sessionCommands.removeValue(forKey: id)
-    if selection == id {
-      selection = sessions.last?.id
+    if selection == .session(id) {
+      selection = sessions.last.map { .session($0.id) }
     }
   }
 
@@ -1366,14 +1498,14 @@ final class AppModel {
   /// `application(_:openFiles:)`.
   func openFile(_ url: URL) {
     if let existing = openedFiles.first(where: { $0.url == url }) {
-      selection = existing.id
+      selection = .openedFile(existing.id)
       return
     }
     openFileGeneration += 1
     let generation = openFileGeneration
     var opened = OpenedFile(url: url, loadGeneration: generation)
     openedFiles.append(opened)
-    selection = opened.id
+    selection = .openedFile(opened.id)
     Task.detached(priority: .userInitiated) {
       let content = Self.loadContent(of: url)
       Task { @MainActor in
@@ -1471,7 +1603,8 @@ final class AppModel {
       try? file.text.write(to: file.url, atomically: true, encoding: .utf8)
     }
     openedFiles.remove(at: idx)
-    selection = openedFiles.isEmpty ? nil : (openedFiles.indices.contains(idx) ? openedFiles[idx].id : openedFiles.last?.id)
+    let next = openedFiles.indices.contains(idx) ? openedFiles[idx].id : openedFiles.last?.id
+    selection = next.map { .openedFile($0) }
   }
   #endif
 
@@ -1494,7 +1627,7 @@ final class AppModel {
     #if os(macOS)
     // ⌘W with an opened file focused closes it, flushing any pending
     // autosave first (the file is write-through, so nothing is lost).
-    if let file = selectedOpenedFile {
+    if case .openedFile(let fileID) = selection, let file = openedFile(fileID) {
       closeOpenedFile(file.id)
       return
     }
@@ -1531,9 +1664,9 @@ final class AppModel {
     if wasOnly || remaining.isEmpty {
       newSession(inSameSectionAs: session)
     } else if index > 0 {
-      selection = remaining[index - 1].id
+      selection = .session(remaining[index - 1].id)
     } else {
-      selection = remaining[0].id
+      selection = .session(remaining[0].id)
     }
   }
   
@@ -1628,8 +1761,8 @@ final class AppModel {
     for session in toRemove {
       removeSession(session.id)
     }
-    if selection == config.id {
-      selection = sessions.last?.id
+    if selection == .ssh(config.id) {
+      selection = sessions.last.map { .session($0.id) }
     }
     SSHKeychain.deletePassword(account: config.passwordAccount)
   }
@@ -1696,7 +1829,7 @@ final class AppModel {
     -> TerminalSession
   {
     if let live = liveDatabaseSession(for: connection) {
-      selection = live.id
+      selection = .session(live.id)
       return live
     }
     // Load the persisted credential when the caller didn't supply one.
@@ -1705,7 +1838,7 @@ final class AppModel {
     let session = TerminalSession(transport: DatabaseTransport())
     sessionKinds[session.id] = .database(connection)
     sessions.append(session)
-    selection = session.id
+    selection = .session(session.id)
     databaseSessions[connection.id] = dbSession
     Task { @MainActor in
       await dbSession.connect(password: password)
@@ -1812,7 +1945,7 @@ final class AppModel {
   @discardableResult
   func newNote() -> NotesStore.NoteSummary {
     let note = notes.addNote()
-    selection = note.id
+    selection = .note(note.id)
     return note
   }
 
@@ -1820,8 +1953,8 @@ final class AppModel {
   /// deleted one was focused.
   func deleteNote(_ id: UUID) {
     notes.deleteNote(id)
-    if selection == id {
-      selection = notes.notes.first?.id
+    if selection == .note(id) {
+      selection = notes.notes.first.map { .note($0.id) }
     }
   }
 
@@ -1830,23 +1963,25 @@ final class AppModel {
   func toggleHistoryMode() {
     if historyMode {
       historyMode = false
-      if let previous = selectionBeforeHistory,
-         sessions.contains(where: { $0.id == previous }) {
-        selection = previous
+      if case .session(let previous) = selectionBeforeHistory, session(previous) != nil {
+        selection = .session(previous)
       } else {
-        selection = sessions.first { kind(of: $0) == .local }?.id ?? sessions.last?.id
+        let fallback = sessions.first { kind(of: $0) == .local } ?? sessions.last
+        selection = fallback.map { .session($0.id) }
       }
       selectionBeforeHistory = nil
     } else {
       if selectedSession != nil { selectionBeforeHistory = selection }
       historyMode = true
-      selection = history.sessions.first?.id
+      selection = history.sessions.first.map { .history($0.id) }
     }
   }
 
   func deleteHistorySession(_ id: UUID) {
     history.remove(id)
-    if selection == id { selection = history.sessions.first?.id }
+    if selection == .history(id) {
+      selection = history.sessions.first.map { .history($0.id) }
+    }
     // Deleting the last record while viewing history would leave an empty
     // list with no way back (the history button hides when empty).
     if historyMode && history.sessions.isEmpty { toggleHistoryMode() }
@@ -2148,7 +2283,7 @@ final class AppModel {
       openOrFocusWebSession(web)
       showingActions = false
     } else if focus {
-      selection = newSession.id
+      selection = .session(newSession.id)
       showingActions = false   // you're looking at the run now
     }
     // focusWindow == false and no web field: the overlay stays open for queuing more runs.

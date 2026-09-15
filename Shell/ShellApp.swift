@@ -214,10 +214,11 @@ struct ShellCommands: Commands {
       // when nothing detachable is selected. Menu key equivalents dispatch
       // before terminal keyDown, so it works while a terminal has focus.
       Button("Detach Session/Note") {
-        guard let id = AppModel.shared.selectedDetachableID else { return }
+        guard let target = AppModel.shared.selectedDetachable else { return }
+        let id = target.itemID
         if AppModel.shared.isDetached(id) {
           AppModel.shared.markAttached(id)
-          AppModel.shared.selection = id
+          AppModel.shared.selection = target
           dismissWindow(id: "detach", value: id)
         } else {
           openWindow(id: "detach", value: id)
@@ -225,7 +226,7 @@ struct ShellCommands: Commands {
         }
       }
       .keyboardShortcut("d", modifiers: [.command, .shift])
-      .disabled(AppModel.shared.selectedDetachableID == nil)
+      .disabled(AppModel.shared.selectedDetachable == nil)
 
       Divider()
 
