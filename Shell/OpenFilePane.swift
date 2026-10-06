@@ -82,6 +82,10 @@ struct OpenFilePane: View {
         monospacedEditor
       }
     }
+    // The TextEditor / Md editor under this pane is deallocated with it; drop
+    // the edits it left on the window's undo stack before a ⌘Z can reach them.
+    // (ContentView keys this pane by file id, so a file switch lands here too.)
+    .onDisappear { UndoHygiene.discardStaleTextUndo() }
   }
 
   /// Store-backed binding: reads the current buffer from the model and pushes

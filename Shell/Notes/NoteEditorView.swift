@@ -19,6 +19,10 @@ struct NoteEditorView: View {
       text: model.notes.decryptedNote(id: noteID)?.text ?? "",
       onChange: { model.notes.updateText($0, for: noteID) }
     )
+    // The editor is deallocated with this view, but its text edits stay on the
+    // window's undo stack — a later ⌘Z would message the freed editor.
+    // (ContentView keys this view by note id, so a note switch lands here too.)
+    .onDisappear { UndoHygiene.discardStaleTextUndo() }
     .toolbar {
       ToolbarItem {
         Button {

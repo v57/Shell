@@ -86,6 +86,9 @@ struct CommandInsertView: View {
     .onAppear {
       DispatchQueue.main.async { editorFocused = true }
     }
+    // The TextEditor dies with this overlay; drop the edits it left on the
+    // window's undo stack so a later ⌘Z cannot message the freed editor.
+    .onDisappear { UndoHygiene.discardStaleTextUndo() }
   }
 
   private func apply() {

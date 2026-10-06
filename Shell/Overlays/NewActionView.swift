@@ -228,6 +228,9 @@ struct NewActionView: View {
         seededImplicitConnections = true
       }
     }
+    // The commands TextEditor dies with this sheet; drop the edits it left on
+    // the window's undo stack so a later ⌘Z cannot message the freed editor.
+    .onDisappear { UndoHygiene.discardStaleTextUndo() }
   }
 
   private func binding(for id: UUID) -> Binding<Bool> {
