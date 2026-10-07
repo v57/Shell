@@ -132,14 +132,8 @@ public final class TerminalOutputParser {
   /// it so the next snapshot reports only what changed since). Must be
   /// called with `lock` held.
   private func consumeDirtyLinesLocked() -> Set<Int> {
-    var active = activeGrid
-    let dirty = active.dirtyLines
-    active.clearDirtyLines()
-    if usingAlternateScreen {
-      alternateGrid = active
-    } else {
-      grid = active
-    }
+    let dirty = activeGrid.dirtyLines
+    mutateActiveGrid { $0.clearDirtyLines() }
     return dirty
   }
 
@@ -159,13 +153,15 @@ public final class TerminalOutputParser {
     usingAlternateScreen ? alternateGrid : grid
   }
   
+  /// Mutates the active grid IN PLACE. Copying it out and writing it back
+  /// (`var g = activeGrid; update(&g); grid = g`) leaves two references to
+  /// the cell/scrollback/dirty-set buffers during `update`, so every write
+  /// copy-on-writes the whole grid — per byte of output.
   private func mutateActiveGrid(_ update: (inout TerminalGrid) -> Void) {
-    var current = activeGrid
-    update(&current)
     if usingAlternateScreen {
-      alternateGrid = current
+      update(&alternateGrid)
     } else {
-      grid = current
+      update(&grid)
     }
   }
   
@@ -1065,14 +1061,14 @@ struct TerminalGrid {
     if recordsHistory {
       pushScrollbackRow()
     }
-    for row in scrollTop..<scrollBottom {
-      for column in 0..<columns {
-        cells[row * columns + column] = cells[(row + 1) * columns + column]
-      }
-      // The wrapped flag travels with the row's content.
-      rowWrapped[row] = rowWrapped[row + 1]
-    }
-    eraseRow(scrollBottom)
+    // Drop the top row and insert a blank one at the bottom: Array moves
+    // the rows in between with a memmove instead of a per-cell
+    // copy + retain/release (this runs on every line feed of bulk output).
+    // The wrapped flag travels with the row's content.
+    cells.removeSubrange((scrollTop * columns)..<((scrollTop + 1) * columns))
+    cells.insert(contentsOf: repeatElement(erasedCell(), count: columns), at: scrollBottom * columns)
+    rowWrapped.remove(at: scrollTop)
+    rowWrapped.insert(false, at: scrollBottom)
     if scrollTop > 0 {
       for row in scrollTop...scrollBottom {
         markDirty(row)
@@ -1099,14 +1095,11 @@ struct TerminalGrid {
   
   mutating func scrollDown() {
     guard rows > 0, columns > 0, scrollTop < scrollBottom else { return }
-    for row in stride(from: scrollBottom, through: scrollTop + 1, by: -1) {
-      for column in 0..<columns {
-        cells[row * columns + column] = cells[(row - 1) * columns + column]
-      }
-      // The wrapped flag travels with the row's content.
-      rowWrapped[row] = rowWrapped[row - 1]
-    }
-    eraseRow(scrollTop)
+    // Mirror of scrollUp: bulk-move the rows instead of copying per cell.
+    cells.removeSubrange((scrollBottom * columns)..<((scrollBottom + 1) * columns))
+    cells.insert(contentsOf: repeatElement(erasedCell(), count: columns), at: scrollTop * columns)
+    rowWrapped.remove(at: scrollBottom)
+    rowWrapped.insert(false, at: scrollTop)
     for row in scrollTop...scrollBottom {
       markDirty(row)
     }
