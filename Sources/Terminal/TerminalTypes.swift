@@ -57,6 +57,14 @@ public struct TerminalSnapshot {
   /// re-join logical lines instead of treating every physical row as a new
   /// line.
   public var scrollbackWrapped: [Bool]
+  /// Ordinal of the next logical line to begin below the scrollback: the
+  /// number of logical lines that ever started in the scrollback, including
+  /// ones since trimmed at the scrollback limit or cleared. Unlike
+  /// `scrollback.count` it keeps growing once the scrollback is full, so an
+  /// incremental capture can still tell which lines are new; it counts
+  /// LOGICAL lines, so a resize re-flow keeps every line's ordinal. Lines
+  /// are numbered per grid (the alternate screen has its own count).
+  public var scrolledLineCount: Int = 0
   /// Per-grid-row wrapped flag (row n continues row n-1). Together with
   /// `scrollbackWrapped` it records every soft-wrap boundary, which is what
   /// lets plainText/copy re-join wrapped lines (and resize re-flow them).
@@ -104,12 +112,13 @@ public struct TerminalSnapshot {
     return gridWrapped[gridRow]
   }
 
-  init(rows: Int = 24, columns: Int = 80, cells: [TerminalCell] = [], scrollback: [[TerminalCell]] = [], scrollbackWrapped: [Bool] = [], gridWrapped: [Bool] = [], cursor: TerminalCursor = .zero, showCursor: Bool = true, cursorBackground: Color = TerminalPalette.selectionBackground, message: String? = nil, selectionEpoch: Int = 0, dirtyLines: Set<Int> = []) {
+  init(rows: Int = 24, columns: Int = 80, cells: [TerminalCell] = [], scrollback: [[TerminalCell]] = [], scrollbackWrapped: [Bool] = [], scrolledLineCount: Int = 0, gridWrapped: [Bool] = [], cursor: TerminalCursor = .zero, showCursor: Bool = true, cursorBackground: Color = TerminalPalette.selectionBackground, message: String? = nil, selectionEpoch: Int = 0, dirtyLines: Set<Int> = []) {
     self.rows = rows
     self.columns = columns
     self.cells = cells.isEmpty ? Array(repeating: TerminalCell.space, count: rows * columns) : cells
     self.scrollback = scrollback
     self.scrollbackWrapped = scrollbackWrapped
+    self.scrolledLineCount = scrolledLineCount
     self.gridWrapped = gridWrapped
     self.cursor = cursor
     self.showCursor = showCursor
@@ -155,8 +164,14 @@ public struct TerminalSnapshot {
   /// current screen. Trailing blank rows are omitted, but ordinary scrollback
   /// is retained. Alternate-screen snapshots naturally contain no scrollback.
   public var fullPlainText: String {
+    plainText(fromLine: 0)
+  }
+
+  /// Text of logical lines `first..<totalLines` joined by newline, trailing
+  /// blank lines trimmed.
+  public func plainText(fromLine first: Int) -> String {
     guard message == nil else { return message ?? "" }
-    var lines = gluedLines(first: 0, last: totalLines - 1)
+    var lines = gluedLines(first: first, last: totalLines - 1)
     while lines.last?.isEmpty == true { lines.removeLast() }
     return lines.joined(separator: "\n")
   }
@@ -289,26 +304,75 @@ public struct TerminalSnapshot {
     lineText(line: line, from: 0, to: columns - 1)
   }
 
-  /// Text of the visible grid — the last `rows` logical lines (logical
-  /// indices `scrollback.count..<totalLines`) — joined by newline, trailing
-  /// blank lines trimmed. The grid is small (one screen), so rebuilding it
-  /// per publish is cheap; history capture keeps the scrollback text
-  /// incremental and swaps THIS segment when the screen changes.
-  public var gridText: String {
-    guard message == nil else { return message ?? "" }
-    var lines = gluedLines(first: scrollback.count, last: totalLines - 1)
-    while lines.last?.isEmpty == true { lines.removeLast() }
-    return lines.joined(separator: "\n")
+  /// First logical line of the screen's text segment: the grid's top row,
+  /// or — when that row is a soft-wrap continuation — the scrollback row its
+  /// line starts on. A line wrapped across the scrollback/grid seam belongs
+  /// wholly to the screen segment, so `scrollbackText` + newline + `gridText`
+  /// equals `fullPlainText` without any seam special-casing.
+  public var gridTextStart: Int {
+    var line = scrollback.count
+    while line > 0, isLineWrapped(line) { line -= 1 }
+    return line
   }
 
-  /// Text of scrollback rows `[from..<scrollback.count]` joined by newline.
+  /// Text of the visible grid from `gridTextStart`, joined by newline,
+  /// trailing blank lines trimmed. The grid is small (one screen), so
+  /// rebuilding it per publish is cheap; history capture keeps the
+  /// scrollback text incremental and swaps THIS segment when the screen
+  /// changes.
+  public var gridText: String {
+    plainText(fromLine: gridTextStart)
+  }
+
+  /// Text of scrollback lines `[from..<gridTextStart]` joined by newline.
   /// The scrollback is append-only (oldest first), so a capture that
-  /// remembers how many rows it already converted can append only the new
-  /// ones — O(new rows) instead of O(whole scrollback) per publish.
+  /// remembers where it stopped can append only the new lines — O(new rows)
+  /// instead of O(whole scrollback) per publish. `from` should start a
+  /// logical line (see `firstLine(ofOrdinal:)`).
   public func scrollbackText(after from: Int) -> String {
     guard message == nil else { return message ?? "" }
-    guard from >= 0, from < scrollback.count else { return "" }
-    return gluedLines(first: from, last: scrollback.count - 1).joined(separator: "\n")
+    let end = gridTextStart
+    guard from >= 0, from < end else { return "" }
+    return gluedLines(first: from, last: end - 1).joined(separator: "\n")
+  }
+
+  /// Ordinal (in `scrolledLineCount` numbering) of the line at
+  /// `gridTextStart`: every line before it is complete in the scrollback.
+  public var completedLineCount: Int {
+    let seam = gridTextStart
+    return seam < scrollback.count && startsLine(seam) ? scrolledLineCount - 1 : scrolledLineCount
+  }
+
+  /// First logical line of the line numbered `ordinal` (see
+  /// `scrolledLineCount`). Walks from the seam, so it costs O(distance) — a
+  /// capture asking for the lines since its last publish never scans the
+  /// whole scrollback. Lines already trimmed off clamp to 0; lines not yet
+  /// started clamp to `totalLines`.
+  public func firstLine(ofOrdinal ordinal: Int) -> Int {
+    var line = gridTextStart
+    var current = completedLineCount
+    while current > ordinal, line > 0 {
+      line -= 1
+      if startsLine(line) { current -= 1 }
+    }
+    while current < ordinal, line < totalLines {
+      line += 1
+      if line < totalLines, startsLine(line) { current += 1 }
+    }
+    return line
+  }
+
+  /// Whether logical line `line` begins a logical line by its own wrapped
+  /// flag. Unlike `isLineWrapped`, line 0 is not special-cased: a scrollback
+  /// head trimmed mid-line is a continuation (its start was counted when it
+  /// scrolled in), which keeps `firstLine(ofOrdinal:)` consistent with
+  /// `scrolledLineCount`.
+  private func startsLine(_ line: Int) -> Bool {
+    if line < scrollback.count {
+      return !(line < scrollbackWrapped.count && scrollbackWrapped[line])
+    }
+    let row = line - scrollback.count
+    return !(row < gridWrapped.count && gridWrapped[row])
   }
   
   /// Column of the last non-blank cell in a logical line, or -1 when the

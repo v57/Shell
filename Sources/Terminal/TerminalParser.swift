@@ -118,6 +118,7 @@ public final class TerminalOutputParser {
       cells: active.cells,
       scrollback: active.scrollback,
       scrollbackWrapped: active.scrollbackWrapped,
+      scrolledLineCount: active.scrolledLineCount,
       gridWrapped: active.rowWrapped,
       cursor: active.cursor,
       showCursor: active.showCursor,
@@ -565,6 +566,13 @@ struct TerminalGrid {
   /// `scrollback` (same index, either may hold the flag across the
   /// scrollback/grid seam).
   private(set) var scrollbackWrapped: [Bool] = []
+  /// Ordinal of the next logical line to begin below the scrollback: the
+  /// number of logical lines that ever started in the scrollback, including
+  /// ones since trimmed at `scrollbackLimit` or cleared. It keeps growing
+  /// once the scrollback is full (where `scrollback.count` stays constant),
+  /// and counts LOGICAL lines so a resize re-flow keeps every line's
+  /// ordinal (see `TerminalSnapshot.scrolledLineCount`).
+  private(set) var scrolledLineCount = 0
   /// Matches Terminal.app's default scrollback size.
   static let scrollbackLimit = 10_000
 
@@ -591,6 +599,10 @@ struct TerminalGrid {
     let oldRowWrapped = rowWrapped
     let oldScrollback = scrollback
     let oldCursor = cursor
+    // Logical lines that left the scrollback's head (trimmed/cleared). Row 0
+    // always starts a line in the re-flow below (step 2), so it is counted
+    // as a start on both sides — a partial head line keeps its ordinal.
+    let droppedLines = scrolledLineCount - Self.lineStarts(in: scrollbackWrapped[...])
 
     // 1. Gather the old buffer as ONE ordered sequence of physical rows
     //    (scrollback first, then the grid), each with its wrapped flag.
@@ -690,6 +702,8 @@ struct TerminalGrid {
 
     var newScrollback = Array(newRowsSeq[0..<gridStart])
     var newScrollbackWrapped = Array(newWrapped[0..<gridStart])
+    // Counted before the limit trim below: trimmed lines still happened.
+    let newScrolledLineCount = droppedLines + Self.lineStarts(in: newScrollbackWrapped[...])
     for i in 0..<newScrollback.count {
       var row = newScrollback[i]
       while let last = row.last, last.isBlank, last.background == .clear {
@@ -721,6 +735,7 @@ struct TerminalGrid {
     self.rowWrapped = newRowWrapped
     self.scrollback = newScrollback
     self.scrollbackWrapped = newScrollbackWrapped
+    self.scrolledLineCount = newScrolledLineCount
     self.scrollTop = 0
     self.scrollBottom = newRows - 1
     self.wrapPending = false
@@ -729,6 +744,13 @@ struct TerminalGrid {
       column: min(max(0, newCursorCol), newColumns - 1)
     )
     markAllDirty()
+  }
+
+  /// Logical lines starting in a run of scrollback rows: row 0 plus every
+  /// row that is not a soft-wrap continuation.
+  private static func lineStarts(in wrapped: ArraySlice<Bool>) -> Int {
+    guard !wrapped.isEmpty else { return 0 }
+    return 1 + wrapped.dropFirst().lazy.filter { !$0 }.count
   }
 
   /// Re-wraps one logical line (a contiguous cell array with no wrap markers)
@@ -1232,6 +1254,7 @@ struct TerminalGrid {
     scrollback.append(row)
     // The row keeps its wrapped flag with it as it moves off-screen.
     scrollbackWrapped.append(rowWrapped[0])
+    if !rowWrapped[0] { scrolledLineCount += 1 }
     if scrollback.count > Self.scrollbackLimit {
       let overflow = scrollback.count - Self.scrollbackLimit
       scrollback.removeFirst(overflow)

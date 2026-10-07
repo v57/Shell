@@ -206,6 +206,48 @@ struct TerminalParserTests {
     #expect(later.scrollbackText(after: capturedScrollback).isEmpty)
   }
 
+  @Test func historyCaptureSeesLinesScrolledOffAtTheLimit() {
+    let p = parser()
+    p.resize(columns: 10, rows: 3)
+    let limit = TerminalGrid.scrollbackLimit
+    // limit + 3 rows scroll off, so the scrollback is full and trimmed.
+    let filler = (0..<(limit + 5)).map { "\($0)\r\n" }.joined()
+    p.consume(Data(filler.utf8))
+    let full = p.snapshot()
+    #expect(full.scrollback.count == limit)
+    let captured = full.completedLineCount
+    #expect(captured == limit + 3)
+
+    // Three more rows scroll off; scrollback.count stays at the limit, the
+    // line ordinals keep counting.
+    p.consume(Data("x\r\ny\r\nz\r\n".utf8))
+    let later = p.snapshot()
+    #expect(later.scrollback.count == limit)
+    #expect(later.completedLineCount == captured + 3)
+    let from = later.firstLine(ofOrdinal: captured)
+    #expect(later.scrollbackText(after: from) == "\(limit + 3)\n\(limit + 4)\nx")
+    #expect(later.gridText == "y\nz")
+  }
+
+  @Test func historyLineOrdinalsSurviveResizeReflow() {
+    let p = parser()
+    p.resize(columns: 10, rows: 3)
+    // "a" x15 wraps into two rows; a, b, c end up in the scrollback.
+    p.consume(Data("\(String(repeating: "a", count: 15))\r\nb\r\nc\r\nd\r\ne\r\n".utf8))
+    let before = p.snapshot()
+    #expect(before.completedLineCount == 3)
+    #expect(before.lineText(line: before.firstLine(ofOrdinal: 1)) == "b")
+
+    // Narrower: "a" re-wraps into three rows, but every line keeps its
+    // ordinal.
+    p.resize(columns: 5, rows: 3)
+    let after = p.snapshot()
+    #expect(after.completedLineCount == 3)
+    #expect(after.lineText(line: after.firstLine(ofOrdinal: 1)) == "b")
+    #expect(after.scrollbackText(after: after.firstLine(ofOrdinal: 0))
+      == "\(String(repeating: "a", count: 15))\nb\nc")
+  }
+
   @Test func regionScrollRespectsDECSTBM() {
     let p = parser()
     p.resize(columns: 10, rows: 5)
