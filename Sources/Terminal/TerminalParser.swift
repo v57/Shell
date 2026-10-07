@@ -279,7 +279,20 @@ public final class TerminalOutputParser {
     let privateMode = marker == "?"
     pendingCSI = ""
     state = .ground
-    
+
+    // A private marker (? > < =) makes a DIFFERENT sequence that only
+    // shares its final byte with the plain one: CSI ? u is the kitty
+    // keyboard query, CSI > 1 u / CSI < u push/pop kitty flags, CSI > 4 m
+    // is xterm modifyOtherKeys, CSI ? s / CSI ? r are XTSAVE/XTRESTORE.
+    // Dispatched as SCORC/SGR/SCOSC/DECSTBM they moved the cursor or
+    // changed attributes — Claude Code's startup CSI ? u restored the
+    // cursor its launch ESC 7 had saved, so every later relative redraw
+    // landed rows too high. Only finals that read the marker get marked
+    // sequences; DECSED/DECSEL (CSI ? J / CSI ? K) run as plain erases.
+    if marker != nil, !Self.markerAwareFinals.contains(byte) {
+      return
+    }
+
     switch byte {
     case UInt8(ascii: "A"):
       mutateActiveGrid { $0.moveCursor(rowDelta: -max(params.first ?? 1, 1), columnDelta: 0) }
@@ -370,6 +383,12 @@ public final class TerminalOutputParser {
     }
   }
   
+  /// CSI finals whose handlers accept a private marker (see `handleCSI`).
+  private static let markerAwareFinals: Set<UInt8> = [
+    UInt8(ascii: "c"), UInt8(ascii: "q"), UInt8(ascii: "n"),
+    UInt8(ascii: "h"), UInt8(ascii: "l"), UInt8(ascii: "J"), UInt8(ascii: "K"),
+  ]
+
   private func handleOSC(byte: UInt8) {
     if byte == 0x07 {
       handleOSCString(pendingOSC)
