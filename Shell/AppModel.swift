@@ -274,66 +274,7 @@ final class AppModel {
 
   private struct LocalHistoryDraft {
     var commands: [SubmittedCommand] = []
-    /// Every logical line completed in the scrollback so far. Append-only:
-    /// lines stay here after the scrollback trims them at its limit.
-    var scrollbackText = ""
-    /// Whether `scrollbackText` holds any line (a lone blank line is "").
-    var hasScrollbackText = false
-    /// The current screen's text, replaced wholesale per publish (it is
-    /// only one screen, and cursors rewrite its lines in place — line
-    /// deltas would miss live updates like ping's status line).
-    var screenText = ""
-    /// Lines with an ordinal (`TerminalSnapshot.scrolledLineCount`
-    /// numbering) below this are already in `scrollbackText`.
-    var capturedLines = Int.min
-    /// The snapshot epoch the captured text is valid against. Wholesale
-    /// invalidation (alt-screen switch, full clear, RIS, Cmd+K) replaces
-    /// the text with a full rebuild; ordinary output appends incrementally.
-    var capturedEpoch = 0
-
-    /// Captured scrollback followed by the current screen.
-    var output: String {
-      guard hasScrollbackText else { return screenText }
-      return screenText.isEmpty ? scrollbackText : scrollbackText + "\n" + screenText
-    }
-
-    init(seed: TerminalSnapshot) {
-      capturedEpoch = seed.selectionEpoch
-      capture(seed)
-    }
-
-    mutating func capture(_ snapshot: TerminalSnapshot) {
-      if snapshot.selectionEpoch != capturedEpoch {
-        // Wholesale invalidation (alt-screen switch, full clear, RIS,
-        // Cmd+K): line ordinals may belong to another grid now — rebuild
-        // from the whole snapshot. Rare (epoch bumps only on such events),
-        // so the O(scrollback) cost is acceptable here.
-        scrollbackText = ""
-        hasScrollbackText = false
-        capturedLines = .min
-        capturedEpoch = snapshot.selectionEpoch
-      }
-      // Convert only the lines completed since the last capture (the
-      // O(scrollback) full-text rebuild per output chunk was the CPU
-      // amplifier that made history capture cost grow with session age).
-      // Ordinals keep counting once the scrollback is full, so lines
-      // scrolling off at the limit are still caught.
-      let completed = snapshot.completedLineCount
-      if capturedLines <= completed {
-        let from = snapshot.firstLine(ofOrdinal: capturedLines)
-        if from < snapshot.gridTextStart {
-          let text = snapshot.scrollbackText(after: from)
-          scrollbackText += hasScrollbackText ? "\n" + text : text
-          hasScrollbackText = true
-        }
-        capturedLines = completed
-        screenText = snapshot.gridText
-      } else {
-        // A taller window pulled already-captured lines back onto the
-        // screen: keep only the part not yet in `scrollbackText`.
-        screenText = snapshot.plainText(fromLine: snapshot.firstLine(ofOrdinal: capturedLines))
-      }
-    }
+    var capture: TerminalHistoryCapture
   }
 
   /// Opens the create-action sheet (fresh form).
@@ -2086,7 +2027,7 @@ final class AppModel {
   private func registerCapture(for session: TerminalSession, archiveLocally: Bool) {
     sessionCommands[session.id] = []
     if archiveLocally {
-      localHistoryDrafts[session.id] = LocalHistoryDraft(seed: session.snapshot)
+      localHistoryDrafts[session.id] = LocalHistoryDraft(capture: TerminalHistoryCapture(seed: session.snapshot))
     }
 
     session.commandSubmittedHandler = { [weak self] text in
@@ -2099,7 +2040,7 @@ final class AppModel {
     }
     session.snapshotUpdateHandler = { [weak self] snapshot in
       guard archiveLocally else { return }
-      self?.localHistoryDrafts[session.id]?.capture(snapshot)
+      self?.localHistoryDrafts[session.id]?.capture.capture(snapshot)
     }
   }
 
@@ -2121,7 +2062,7 @@ final class AppModel {
     history.archive(HistorySession(
       id: id,
       commands: draft.commands,
-      output: draft.output,
+      output: draft.capture.output,
       archivedAt: Date()
     ))
   }

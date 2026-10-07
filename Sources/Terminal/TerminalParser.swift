@@ -105,14 +105,13 @@ public final class TerminalOutputParser {
     defer { lock.unlock() }
     var s = snapshotLocked(clearDirty: true)
     s.bracketedPasteEnabled = bracketedPasteEnabled
-    s.usesAlternateScreen = usingAlternateScreen
     return s
   }
 
   private func snapshotLocked(clearDirty: Bool) -> TerminalSnapshot {
     let active = activeGrid
     let dirty = clearDirty ? consumeDirtyLinesLocked() : active.dirtyLines
-    return TerminalSnapshot(
+    var s = TerminalSnapshot(
       rows: active.rows,
       columns: active.columns,
       cells: active.cells,
@@ -127,6 +126,10 @@ public final class TerminalOutputParser {
       selectionEpoch: selectionEpoch,
       dirtyLines: dirty
     )
+    // Every snapshot says which grid it shows: history capture numbers the
+    // two screens' lines separately.
+    s.usesAlternateScreen = usingAlternateScreen
+    return s
   }
 
   /// Reads and clears the ACTIVE grid's dirty set (the snapshot consumes

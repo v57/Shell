@@ -229,6 +229,72 @@ struct TerminalParserTests {
     #expect(later.gridText == "y\nz")
   }
 
+  @Test func historyCaptureKeepsAClearedScreen() {
+    let p = parser()
+    p.resize(columns: 10, rows: 3)
+    p.consume(Data("old\r\n$ clear\r\n".utf8))
+    var capture = TerminalHistoryCapture(seed: p.snapshot())
+    p.consume(Data("\u{1b}[H\u{1b}[2J$ ls\r\nnew".utf8))
+    capture.capture(p.snapshot())
+    #expect(capture.output == "old\n$ clear\n$ ls\nnew")
+  }
+
+  @Test func historyCaptureKeepsCapturedTextWhenScrollbackIsErased() {
+    let p = parser()
+    p.resize(columns: 10, rows: 3)
+    p.consume(Data("a\r\nb\r\nc\r\nd\r\ne".utf8))
+    var capture = TerminalHistoryCapture(seed: p.snapshot())
+    // CSI 3 J erases only the scrollback: nothing is lost or repeated.
+    p.consume(Data("\u{1b}[3J".utf8))
+    capture.capture(p.snapshot())
+    #expect(capture.output == "a\nb\nc\nd\ne")
+    // RIS wipes everything; the transcript keeps it.
+    p.consume(Data("\u{1b}c$".utf8))
+    capture.capture(p.snapshot())
+    #expect(capture.output == "a\nb\nc\nd\ne\n$")
+  }
+
+  @Test func historyCaptureCleanStdoutKeepsErasedRowsOnce() {
+    let p = parser()
+    p.resize(columns: 10, rows: 3)
+    p.consume(Data("out\r\n$ ".utf8))
+    var capture = TerminalHistoryCapture(seed: p.snapshot())
+    p.clearStdout()
+    capture.capture(p.snapshot())
+    // "out" is committed; the kept prompt line is not repeated.
+    #expect(capture.output == "out\n\n$")
+  }
+
+  @Test func historyCaptureSpansAlternateScreenRoundTrip() {
+    let p = parser()
+    p.resize(columns: 10, rows: 3)
+    p.consume(Data("x\r\n$ vim\r\n".utf8))
+    var capture = TerminalHistoryCapture(seed: p.snapshot())
+    p.consume(Data("\u{1b}[?1049hVIM".utf8))
+    capture.capture(p.snapshot())
+    #expect(capture.output == "x\n$ vim\nVIM")
+
+    // Leaving restores the main screen: its lines are not repeated, neither
+    // on screen nor when they later scroll off.
+    p.consume(Data("\u{1b}[?1049l$".utf8))
+    capture.capture(p.snapshot())
+    #expect(capture.output == "x\n$ vim\nVIM\n$")
+    p.consume(Data("\r\nl1\r\nl2\r\nl3".utf8))
+    capture.capture(p.snapshot())
+    #expect(capture.output == "x\n$ vim\nVIM\n$\nl1\nl2\nl3")
+  }
+
+  @Test func historyCaptureKeepsOutputWhenTheSessionFails() {
+    let p = parser()
+    p.resize(columns: 10, rows: 3)
+    p.consume(Data("a\r\n\u{1b}[2Jb".utf8))   // epoch > 0 (ED 2 homes the cursor)
+    var capture = TerminalHistoryCapture(seed: TerminalSnapshot(message: "Starting…"))
+    capture.capture(p.snapshot())
+    #expect(capture.output == "b")
+    capture.capture(TerminalSnapshot(message: "Connection lost"))
+    #expect(capture.output == "b\nConnection lost")
+  }
+
   @Test func historyLineOrdinalsSurviveResizeReflow() {
     let p = parser()
     p.resize(columns: 10, rows: 3)
