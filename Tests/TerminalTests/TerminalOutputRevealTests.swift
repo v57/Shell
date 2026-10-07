@@ -27,31 +27,43 @@ struct TerminalOutputRevealTests {
   @Test func appendedTailTypesOnlyTheTail() {
     let r = reveal(from: "hello", to: " world")
     // Column 5 is a space in both (blank-equivalent), so the prefix covers it
-    // and only "world" types.
-    #expect(r.pending[0] == TerminalOutputReveal.PendingLine(cursor: 6, to: 11))
-    for c in 0..<6 { #expect(r.isShown(line: 0, column: c)) }
-    #expect(!r.isShown(line: 0, column: 6))
+    // and only "world" types — its first 2 characters already on the same
+    // frame the update lands.
+    #expect(r.pending[0] == TerminalOutputReveal.PendingLine(cursor: 8, to: 11))
+    for c in 0..<8 { #expect(r.isShown(line: 0, column: c)) }
+    #expect(!r.isShown(line: 0, column: 8))
     #expect(!r.isShown(line: 0, column: 10))
   }
 
   @Test func typingAtLineStartShowsShiftedTextAtOnce() {
-    // "hello" -> "Xhello": only the inserted "X" types; the shifted "hello"
-    // shows immediately instead of blanking and re-typing per keystroke.
-    let r = reveal(from: "hello", to: "\rXhello")
-    #expect(r.pending[0] == TerminalOutputReveal.PendingLine(cursor: 0, to: 1))
-    #expect(!r.isShown(line: 0, column: 0))
-    for c in 1..<6 { #expect(r.isShown(line: 0, column: c)) }
-  }
-
-  @Test func midLineInsertionTypesOnlyTheInsertion() {
-    let r = reveal(from: "abcd", to: "\rabXYcd")
-    #expect(r.pending[0] == TerminalOutputReveal.PendingLine(cursor: 2, to: 4))
+    // "hello" -> "XXXhello": only the insertion types; the shifted "hello"
+    // shows immediately instead of blanking and re-typing per keystroke. The
+    // insertion's first 2 characters show on the same frame.
+    let r = reveal(from: "hello", to: "\rXXXhello")
+    #expect(r.pending[0] == TerminalOutputReveal.PendingLine(cursor: 2, to: 3))
     #expect(r.isShown(line: 0, column: 0))
     #expect(r.isShown(line: 0, column: 1))
     #expect(!r.isShown(line: 0, column: 2))
-    #expect(!r.isShown(line: 0, column: 3))
-    #expect(r.isShown(line: 0, column: 4))
+    for c in 3..<8 { #expect(r.isShown(line: 0, column: c)) }
+  }
+
+  @Test func midLineInsertionTypesOnlyTheInsertion() {
+    let r = reveal(from: "abcd", to: "\rabXYZcd")
+    #expect(r.pending[0] == TerminalOutputReveal.PendingLine(cursor: 4, to: 5))
+    #expect(r.isShown(line: 0, column: 0))
+    #expect(r.isShown(line: 0, column: 1))
+    #expect(r.isShown(line: 0, column: 2))
+    #expect(r.isShown(line: 0, column: 3))
+    #expect(!r.isShown(line: 0, column: 4))
     #expect(r.isShown(line: 0, column: 5))
+    #expect(r.isShown(line: 0, column: 6))
+  }
+
+  @Test func tinyRewriteShowsAtOnce() {
+    // A rewrite of 2 or fewer characters never blanks: it shows on the same
+    // frame (a spinner tick, a progress digit), so percentages don't flicker.
+    #expect(reveal(from: "abcd", to: "\rabXYcd").pending.isEmpty)
+    #expect(reveal(from: "hello", to: "\rXhello").pending.isEmpty)
   }
 
   @Test func pureRecolorSettlesInstantly() {
@@ -80,16 +92,17 @@ struct TerminalOutputRevealTests {
     r.snap(to: p.snapshot())
     p.consume(Data(new.utf8))
     r.update(to: p.snapshot(), animate: true)
-    // The spinner tick hides.
-    #expect(!r.isShown(line: 0, column: 0))
+    // The spinner tick shows on the same frame (tiny rewrites never blank).
+    #expect(r.isShown(line: 0, column: 0))
     // Unchanged text between the edits stays shown ...
     #expect(r.isShown(line: 0, column: 2)) // the "B" of "Bottle"
     #expect(r.isShown(line: 0, column: 10))
     // ... including the shared tail.
     #expect(r.isShown(line: 0, column: 118))
-    // Only the disjoint edits hide: spinner (1) + grown bar (8) + changed
-    // digits (2) — far less than the ~80 columns the single middle hid.
+    // Only the disjoint edits hide, minus the 2 characters revealed with the
+    // update: most of the grown bar (7) plus the changed digits (2) — far
+    // less than the ~80 columns the single middle hid.
     let hidden = (0..<120).filter { !r.isShown(line: 0, column: $0) }.count
-    #expect(hidden == 11)
+    #expect(hidden == 9)
   }
 }

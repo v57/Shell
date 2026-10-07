@@ -131,6 +131,11 @@ final class TerminalOutputReveal {
     }
 
     shown = target
+    // The animation's first characters show on the SAME frame the update
+    // lands (not a ticker frame later): tiny rewrites — a spinner tick, a
+    // progress digit — never visibly blank, and every animation starts with
+    // something already visible.
+    Self.revealImmediately(&pending)
     if pending != self.pending { self.pending = pending }
     framesLeft = Self.framesToCatchUp
     if pending.isEmpty {
@@ -142,6 +147,35 @@ final class TerminalOutputReveal {
   }
 
   // MARK: - Typing
+
+  /// Characters revealed synchronously inside `update()`, on the same frame.
+  private static let immediateCharacters = 2
+
+  /// Reveals the animation's first characters at once, top line first (no
+  /// frame elapses, so the deadline is untouched).
+  private static func revealImmediately(_ pending: inout [Int: PendingLine]) {
+    var budget = immediateCharacters
+    for line in pending.keys.sorted() {
+      guard budget > 0 else { break }
+      guard var spans = pending[line]?.spans, !spans.isEmpty else { continue }
+      take(&spans, budget: &budget)
+      pending[line] = spans.isEmpty ? nil : PendingLine(spans: spans)
+    }
+  }
+
+  /// Consumes `budget` characters off the front of `spans`.
+  private static func take(_ spans: inout [Range<Int>], budget: inout Int) {
+    while budget > 0, !spans.isEmpty {
+      let step = min(budget, spans[0].count)
+      budget -= step
+      let lower = spans[0].lowerBound + step
+      if lower >= spans[0].upperBound {
+        spans.removeFirst()
+      } else {
+        spans[0] = lower..<spans[0].upperBound
+      }
+    }
+  }
 
   private func startTicking() {
     guard ticker == nil else { return }
@@ -170,16 +204,7 @@ final class TerminalOutputReveal {
     for line in pending.keys.sorted() {
       guard budget > 0 else { break }
       guard var spans = pending[line]?.spans, !spans.isEmpty else { continue }
-      while budget > 0, !spans.isEmpty {
-        let step = min(budget, spans[0].count)
-        budget -= step
-        let lower = spans[0].lowerBound + step
-        if lower >= spans[0].upperBound {
-          spans.removeFirst()
-        } else {
-          spans[0] = lower..<spans[0].upperBound
-        }
-      }
+      Self.take(&spans, budget: &budget)
       pending[line] = spans.isEmpty ? nil : PendingLine(spans: spans)
     }
     self.pending = pending
