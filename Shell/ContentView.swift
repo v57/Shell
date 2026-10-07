@@ -46,10 +46,23 @@ struct ContentView: View {
   private var flags: FeatureFlagsStore { .shared }
 
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  /// Whether the window appears active (key window). Animations freeze while
+  /// the window is unfocused; the sidebar container choice below deliberately
+  /// ignores it so focus never swaps the sidebar (state loss).
+  @Environment(\.appearsActive) private var appearsActive
 
   /// The Animations feature, unless the system asks for reduced motion.
-  private var animates: Bool {
+  /// Decides only which sidebar CONTAINER mounts — stable across window
+  /// focus, so unfocusing never swaps SidebarView2 for SidebarView.
+  private var useAnimatedSidebar: Bool {
     flags.isEnabled(.animations) && !reduceMotion
+  }
+
+  /// Whether anything animates right now: the feature, motion, AND the
+  /// window appearing active. Feeds the terminal, the detail transition and
+  /// (through SidebarView2) the sidebar's own motion.
+  private var animates: Bool {
+    useAnimatedSidebar && appearsActive
   }
 
   /// How a detail page enters and leaves when the selection changes: the new
@@ -67,7 +80,7 @@ struct ContentView: View {
     ZStack {
       NavigationSplitView {
         HStack(spacing: 0) {
-          if animates {
+          if useAnimatedSidebar {
             SidebarView2()
           } else {
             SidebarView()

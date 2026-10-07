@@ -35,14 +35,19 @@ struct SidebarView2: View {
   /// Whether the sidebar holds keyboard focus, as a `List` does once a row is
   /// clicked — what turns its selection highlight from gray to the accent color.
   @FocusState private var focused: Bool
+  /// While the window is unfocused every animation in here goes still — but
+  /// the container stays mounted (ContentView picks the container from the
+  /// feature flag alone, so focus never swaps SidebarView2 for SidebarView).
+  @Environment(\.appearsActive) private var appearsActive
   /// Where the selection highlight glides between rows.
   @Namespace private var selectionNamespace
 
   private var flags: FeatureFlagsStore { .shared }
 
-  /// The Animations feature, unless the system asks for reduced motion.
+  /// The Animations feature, unless the system asks for reduced motion or the
+  /// window is unfocused (frozen windows go still, but stay mounted).
   private var animates: Bool {
-    flags.isEnabled(.animations) && !reduceMotion
+    flags.isEnabled(.animations) && !reduceMotion && appearsActive
   }
 
   var body: some View {
