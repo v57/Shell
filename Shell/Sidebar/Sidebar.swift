@@ -7,185 +7,70 @@ import Monitoring
 /// The sidebar: a `List` composing ONE VIEW PER SECTION — `LocalSectionView`,
 /// `RemoteSectionView`, `NotesSectionView`, plus the Running and Text Files
 /// sections at the bottom of this file. Each section view owns its rows, its
-/// feature gate, its collapse state and any state only it uses; this file owns
-/// what the sidebar SHARES:
+/// feature gate, its collapse state and any state only it uses.
 ///
-///  - the selection routing (`onChange(of: model.selection)`), which turns a
-///    clicked row id into a connect/attach/open action;
-///  - the sheets and alerts whose STATE is shared by more than one section (the
-///    web-session editor, the database rename sheet, the authorized-keys panel);
-///  - the live-stats monitor's lifetime (see `statsMonitor`);
-///  - the row views used by more than one section (`SessionRow`,
-///    `DatabaseConnectionRow`, `DatabaseConnectionActions`, `DetachReturnBadge`,
-///    `SidebarCollapseChevron`) and the status-line rendering extensions.
+/// `SidebarView2` (Sidebar2.swift) renders the SAME sections on a `ScrollView` +
+/// `LazyVStack`. The container is the only difference, and each difference has
+/// exactly one home:
 ///
-/// The section files live in `Shell/Sidebar/`.
+///  - WHAT is rendered: `SidebarSections` (below) — shared;
+///  - HOW a row/header is presented: `.sidebarRow(_:reorder:)` and
+///    `SidebarSection` (SidebarContainer.swift), which tag for a `List` and take
+///    over tap-selection, the highlight and drag-reorder for a `LazyVStack`;
+///  - WHAT the sidebar does around the rows (selection routing, sheets, the
+///    live-stats monitor): `.sidebarChrome(_:)` (SidebarChrome.swift) — shared;
+///  - the drag-reorder plumbing the `LazyVStack` needs: SidebarReorder.swift.
+///
+/// This file owns the row views used by more than one section (`SessionRow`,
+/// `DatabaseConnectionRow`, `DatabaseConnectionActions`, `DetachReturnBadge`),
+/// `SidebarCollapseChevron` and the status-line rendering extensions.
 struct SidebarView: View {
   @Environment(AppModel.self) private var model
-  /// The session currently being renamed (shows an inline text field). SHARED:
-  /// both the Local and the Remote section rename session rows in place.
-  @State private var renamingSessionID: UUID?
-  /// The database connection being renamed (drives the rename sheet), and the
-  /// text field's draft value, pre-filled with the connection's display name.
-  /// SHARED: database rows render in both the Local and the Remote section.
-  @State private var renamingDatabaseConnection: DatabaseConnection?
-  @State private var databaseRenameText = ""
 
-  /// Collapse state for the sections defined in THIS file, persisted across
-  /// launches. Local/Remote/Notes persist their own.
-  @AppStorage("sidebar.running.collapsed") private var runningCollapsed = false
-  #if os(macOS)
-  @AppStorage("sidebar.files.collapsed") private var filesCollapsed = false
-  #endif
-
-  #if os(macOS)
-  /// Live CPU/GPU/wattage for the Local section header (macOS only — the reads
-  /// need IOKit's AppleSMC / IOAccelerator).
-  ///
-  /// Owned HERE rather than by `LocalSectionView` because its LIFETIME belongs
-  /// to this List: the observer below starts it while the Monitoring feature is
-  /// on and stops it the moment the feature flips off, and a Section's own
-  /// onAppear/onDisappear also fire when the section scrolls out of view —
-  /// which must not stop the sampling. `LocalSectionView` only RENDERS it.
-  @State private var statsMonitor = SystemStatsMonitor()
-  /// The stats graphs sheet, opened by clicking the Local section header.
-  @State private var showingStatsGraphs = false
-  /// Whether the Monitoring feature is on — gates the live stats monitor so
-  /// it never samples when the feature is off.
-  private var monitoringEnabled: Bool {
-    FeatureFlagsStore.shared.isEnabled(.monitoring)
-  }
-  #endif
-
-  /// The feature-flag source of truth. Reads `.isEnabled(_:)` here so a
-  /// disabled feature's rows/sections vanish from the sidebar. Accessing it
-  /// through `@Observable` re-renders the sidebar when a flag flips.
-  private var flags: FeatureFlagsStore { .shared }
+  /// What the sections and the chrome share: the rename state, the database
+  /// rename sheet and the stats monitor (see `SidebarState`). One instance per
+  /// sidebar CONTAINER — `SidebarView2` carries its own.
+  @State private var state = SidebarState()
 
   var body: some View {
     @Bindable var model = model
     List(selection: $model.selection) {
-      RunningSectionView()
-
-      #if os(macOS)
-      // The Local section hosts local terminals (sessions), persistent
-      // screen/tmux (screen), history, saved web pages and (untunneled)
-      // database connections. LocalSectionView owns the section and its gate.
-      LocalSectionView(
-        renamingSessionID: $renamingSessionID,
-        monitor: statsMonitor,
-        onShowStatsGraphs: { showingStatsGraphs = true },
-        onRenameDatabase: beginRenameDatabase
-      )
-      #endif
-
-      RemoteSectionView(
-        renamingSessionID: $renamingSessionID,
-        onRenameDatabase: beginRenameDatabase
-      )
-
-      NotesSectionView()
-
-      #if os(macOS)
-      TextFilesSectionView()
-      #endif
+      SidebarSections(state: state)
     }
-    // Clicking a row writes its `Selection`; AppModel routes it to the item
-    // (connect / attach / open / focus) — the section views only tag rows.
-    .onChange(of: model.selection) { _, newValue in
-      if renamingSessionID != nil { renamingSessionID = nil }
-      guard let selection = newValue else { return }
-      model.activate(selection)
-    }
-    .navigationTitle("Terminals")
-    // Drive the history-mode → terminals swap with a blur-replace transition
-    // (both branches carry .transition(.blurReplace)).
-    .animation(.easeInOut(duration: 0.25), value: model.historyMode)
-    #if os(macOS)
-    .alert(item: $model.screenMonitor.actionError) { error in
-      Alert(
-        title: Text(error.title),
-        message: Text(error.message),
-        dismissButton: .default(Text("OK"))
-      )
-    }
-    #endif
-    // The authorized-keys panel (key.2.on.ring in the Local/Remote
-    // headers); opens for this Mac or the selected SSH connection.
-    .sheet(isPresented: $model.showingAuthorizedKeys) {
-      if let target = model.authorizedKeysTarget {
-        AuthorizedKeysView(target: target)
-          .environment(model)
-      }
-    }
-    // The Edit… action on a saved web session: the same form as new,
-    // prefilled, saving in place (same id). Creating a page has no sheet — the
-    // SSH host menu items open one immediately (openNewWebSession).
-    .sheet(item: $model.editingWebSession) { web in
-      NewWebSessionView(web: web)
-    }
-    // The Rename… action on a database connection: a small sheet with a
-    // TextField pre-filled with the connection's current name/display name.
-    // Empty input resets to the engine display name.
-    .sheet(item: $renamingDatabaseConnection) { connection in
-      DatabaseRenameSheet(
-        connection: connection,
-        text: $databaseRenameText,
-        onCommit: { commitRenameDatabase(connection) },
-        onCancel: { renamingDatabaseConnection = nil }
-      )
-      .environment(model)
-    }
-    .alert("Authorized Keys", isPresented: Binding(
-      get: { model.authorizedKeysError != nil },
-      set: { if !$0 { model.authorizedKeysError = nil } }
-    )) {
-      Button("OK", role: .cancel) { model.authorizedKeysError = nil }
-    } message: {
-      Text(model.authorizedKeysError ?? "")
-    }
-    #if os(macOS)
-    .background {
-      // The observer owns the enable-state policy: it starts the monitor when
-      // the Monitoring feature is on and stops it the moment the feature is
-      // toggled off (and never restarts it while disabled). Always installed
-      // so the enable toggle is handled here rather than by view teardown.
-      WindowStatsObserver(monitor: statsMonitor, enabled: monitoringEnabled)
-    }
-    .onAppear {
-      if monitoringEnabled { statsMonitor.start() }
-    }
-    .onDisappear { statsMonitor.stop() }
-    // Stats graphs for the last minute, opened from the Local header.
-    .sheet(isPresented: $showingStatsGraphs) {
-      StatsGraphView(monitor: statsMonitor)
-    }
-    #endif
-#if os(iOS)
-    .toolbar {
-      ToolbarItem(placement: .navigationBarTrailing) {
-        Button {
-          model.showingSettings = true
-        } label: {
-          Label("Settings", systemImage: "gearshape")
-        }
-      }
-    }
-#endif
+    // Everything the sidebar does around its rows — selection routing, the
+    // shared sheets/alerts, the stats monitor's lifetime (SidebarChrome.swift).
+    .sidebarChrome(state)
   }
+}
 
-  /// Opens the database rename sheet pre-filled with the connection's current
-  /// name (or its display name fallback).
-  private func beginRenameDatabase(_ connection: DatabaseConnection) {
-    databaseRenameText = connection.displayName
-    renamingDatabaseConnection = connection
-  }
+/// The sidebar's five sections in order — the SHAPE both containers render.
+///
+/// `SidebarSection { rows } header: { … }` is a `Section` in the `List` and a
+/// header row + its rows in a `LazyVStack`, so a section view never mentions the
+/// container it ends up in.
+struct SidebarSections: View {
+  /// The container's shared sidebar state (`SidebarState`), handed to the
+  /// sections that need it (the session rename and the database rename sheet are
+  /// shared by the Local and Remote sections).
+  let state: SidebarState
 
-  /// Applies a database rename (empty input resets to the engine display name)
-  /// and dismisses the sheet.
-  private func commitRenameDatabase(_ connection: DatabaseConnection) {
-    model.renameDatabaseConnection(connection, to: databaseRenameText)
-    renamingDatabaseConnection = nil
+  var body: some View {
+    RunningSectionView()
+
+    #if os(macOS)
+    // The Local section hosts local terminals (sessions), persistent
+    // screen/tmux (screen), history, saved web pages and (untunneled) database
+    // connections. LocalSectionView owns the section and its gate.
+    LocalSectionView(state: state)
+    #endif
+
+    RemoteSectionView(state: state)
+
+    NotesSectionView()
+
+    #if os(macOS)
+    TextFilesSectionView()
+    #endif
   }
 }
 
@@ -200,10 +85,11 @@ private struct RunningSectionView: View {
 
   var body: some View {
     if flags.isEnabled(.actions), !model.actionSessions.isEmpty {
-      Section {
+      SidebarSection {
         ForEach(runningCollapsed || !flags.isEnabled(.actions) ? [] : model.actionSessions) { session in
           ActionRunRow(session: session, spec: model.actionSpec(for: session))
-            .tag(AppModel.Selection.session(session.id))   // mandatory: untagged rows write nil into selection
+            // Rows carry their own selection: an untagged row writes nil into it.
+            .sidebarRow(.session(session.id))
             .contextMenu {
               if isRunning(session) {
                 Button("Cancel (Ctrl+C)") { session.send(Data([0x03])) }
@@ -217,8 +103,7 @@ private struct RunningSectionView: View {
             }
         }
       } header: {
-        HStack(spacing: 4) {
-          SidebarCollapseChevron(collapsed: $runningCollapsed)
+        SidebarSectionHeader(collapsed: $runningCollapsed, spacing: 4) {
           Text("Running")
         }
       }
@@ -268,25 +153,30 @@ private struct ActionRunRow: View {
       }
       statusLine
     }
+    .sidebarAnimation(value: stateSymbol)
     .contentShape(Rectangle())
   }
 
-  @ViewBuilder
-  private var stateIcon: some View {
+  /// The run's state as ONE symbol, so the animated sidebar morphs it
+  /// (play → checkmark / xmark) rather than swapping views.
+  private var stateSymbol: String {
     switch session.connectionState {
-    case .starting, .connecting, .connected:
-      Image(systemName: "play.fill")
-        .foregroundStyle(.secondary)
-        .accessibilityLabel("Running")
-    case .failed:
-      Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
-    case .closed:
-      if session.actionExitCode == 0 {
-        Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-      } else {
-        Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
-      }
+    case .starting, .connecting, .connected: "play.fill"
+    case .failed: "xmark.circle.fill"
+    case .closed: session.actionExitCode == 0 ? "checkmark.circle.fill" : "xmark.circle.fill"
     }
+  }
+
+  private var stateIcon: some View {
+    let style: AnyShapeStyle = switch stateSymbol {
+    case "play.fill": AnyShapeStyle(.secondary)
+    case "checkmark.circle.fill": AnyShapeStyle(.green)
+    default: AnyShapeStyle(.red)
+    }
+    return Image(systemName: stateSymbol)
+      .foregroundStyle(style)
+      .contentTransition(.symbolEffect(.replace))
+      .accessibilityLabel(stateSymbol == "play.fill" ? "Running" : stateSymbol == "checkmark.circle.fill" ? "Finished" : "Failed")
   }
 
   @ViewBuilder
@@ -330,10 +220,10 @@ private struct TextFilesSectionView: View {
 
   var body: some View {
     if !model.openedFiles.isEmpty {
-      Section {
+      SidebarSection {
         ForEach(filesCollapsed ? [] : model.openedFiles) { file in
           OpenedFileRow(file: file)
-            .tag(AppModel.Selection.openedFile(file.id))
+            .sidebarRow(.openedFile(file.id))
             .contextMenu {
               Button("Close", role: .destructive) {
                 model.closeOpenedFile(file.id)
@@ -341,8 +231,7 @@ private struct TextFilesSectionView: View {
             }
         }
       } header: {
-        HStack {
-          SidebarCollapseChevron(collapsed: $filesCollapsed)
+        SidebarSectionHeader(collapsed: $filesCollapsed) {
           Text("Text Files")
         }
       }
@@ -369,8 +258,10 @@ private struct OpenedFileRow: View {
           .fill(Color.orange)
           .frame(width: 8, height: 8)
           .help("Unsaved changes")
+          .transition(SidebarMotion.iconTransition)
       }
     }
+    .sidebarAnimation(value: file.isDirty)
     .contentShape(Rectangle())
   }
 }
@@ -382,15 +273,27 @@ private struct OpenedFileRow: View {
 /// chevron.right = collapsed. Shared by every section view.
 struct SidebarCollapseChevron: View {
   @Binding var collapsed: Bool
+  /// The animated sidebar turns ONE chevron and animates the rows away; the
+  /// `List` sidebar swaps the glyph in place.
+  @Environment(\.sidebarAnimations) private var animates
 
   var body: some View {
     Button {
-      collapsed.toggle()
+      withAnimation(animates ? SidebarMotion.rows : nil) {
+        collapsed.toggle()
+      }
     } label: {
-      Image(systemName: collapsed ? "chevron.right" : "chevron.down")
-        .font(.caption2)
-        .foregroundStyle(.secondary)
-        .contentShape(Rectangle())
+      Group {
+        if animates {
+          Image(systemName: "chevron.right")
+            .rotationEffect(.degrees(collapsed ? 0 : 90))
+        } else {
+          Image(systemName: collapsed ? "chevron.right" : "chevron.down")
+        }
+      }
+      .font(.caption2)
+      .foregroundStyle(.secondary)
+      .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
     .help(collapsed ? "Expand section" : "Collapse section")
@@ -452,24 +355,33 @@ struct SessionRow: View {
         fieldFocused = true
       }
     }
+    .sidebarAnimation(value: session.connectionState)
+    .sidebarAnimation(value: session.hasActivity)
     .contentShape(Rectangle())
   }
-  
+
+  /// ONE dot whose color follows the state (so the animated sidebar fades it
+  /// between colors), or none.
   @ViewBuilder
   private var stateDot: some View {
+    if let color = stateDotColor {
+      Circle().fill(color).frame(width: 7, height: 7)
+        .transition(SidebarMotion.iconTransition)
+    }
+  }
+
+  private var stateDotColor: AnyShapeStyle? {
     switch session.connectionState {
     case .connected:
       // Green only while the session produced output recently; after
       // `TerminalSession.inactivityTimeout` of quiet the session is idle
       // and the dot hides. Read via @Observable so the row re-renders when
       // `hasActivity` flips.
-      if session.hasActivity {
-        Circle().fill(.green).frame(width: 7, height: 7)
-      }
+      session.hasActivity ? AnyShapeStyle(.green) : nil
     case .failed:
-      Circle().fill(.red).frame(width: 7, height: 7)
+      AnyShapeStyle(.red)
     case .starting, .connecting, .closed:
-      Circle().fill(.secondary).frame(width: 7, height: 7)
+      AnyShapeStyle(.secondary)
     }
   }
 }
@@ -495,8 +407,10 @@ struct DatabaseConnectionRow: View {
             .fill(Color.green)
             .frame(width: 8, height: 8)
             .help("Open")
+            .transition(SidebarMotion.iconTransition)
         }
       }
+      .sidebarAnimation(value: model.liveDatabaseSession(for: connection) != nil)
       Text(connection.subtitle)
         .font(.caption)
         .foregroundStyle(.secondary)
@@ -631,18 +545,22 @@ struct DetachReturnBadge: View {
   let selection: AppModel.Selection
 
   var body: some View {
-    if model.isDetached(selection.itemID) {
-      Button {
-        model.markAttached(selection.itemID)
-        model.selection = selection
-        dismissWindow(id: "detach", value: selection.itemID)
-      } label: {
-        Image(systemName: "arrowshape.turn.up.left.fill")
-          .font(.caption2)
-          .foregroundStyle(.secondary)
+    Group {
+      if model.isDetached(selection.itemID) {
+        Button {
+          model.markAttached(selection.itemID)
+          model.selection = selection
+          dismissWindow(id: "detach", value: selection.itemID)
+        } label: {
+          Image(systemName: "arrowshape.turn.up.left.fill")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
+        .buttonStyle(.plain)
+        .help("Return to main window")
+        .transition(SidebarMotion.iconTransition)
       }
-      .buttonStyle(.plain)
-      .help("Return to main window")
     }
+    .sidebarAnimation(value: model.isDetached(selection.itemID))
   }
 }

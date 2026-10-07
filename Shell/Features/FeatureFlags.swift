@@ -24,6 +24,10 @@ enum FeatureID: String, CaseIterable, Identifiable {
   case web
   /// Reserved for a future embedded database feature.
   case database
+  /// Motion in the UI: the custom sidebar's hover, insert/remove, selection
+  /// and icon animations, detail-page transitions and the gliding terminal
+  /// cursor. Also off while the system's Reduce Motion is on.
+  case animations
 
   var id: String { rawValue }
 
@@ -43,6 +47,7 @@ enum FeatureID: String, CaseIterable, Identifiable {
     case .settings: return "Settings"
     case .web: return "Web"
     case .database: return "Database"
+    case .animations: return "Animations"
     }
   }
 
@@ -63,6 +68,7 @@ enum FeatureID: String, CaseIterable, Identifiable {
     case .settings: return "Shell settings"
     case .web: return "In-app web sessions"
     case .database: return "Database connections"
+    case .animations: return "Sidebar, page and cursor animations"
     }
   }
 }

@@ -7,26 +7,21 @@ import Monitoring
 #if os(macOS)
 /// The Local section: this Mac's terminals, its persistent screen/tmux
 /// sessions (local AND the ones scanned from connected SSH hosts), local
-/// history while history mode is on, saved web pages not bound to a host, and
+/// history while history mode is on, saved web pages not bound to a tunnel, and
 /// database connections with no tunnel. Rendered while ANY of those features is
 /// enabled — the gate below is this section's own.
 ///
-/// State only this section uses lives here. The session rename (shared with the
-/// Remote section), the database rename sheet and the stats monitor's lifetime
-/// stay in `SidebarView` and are passed in.
+/// State only this section uses lives here. The session rename, the database
+/// rename sheet and the stats monitor stay with the CONTAINER (`SidebarState` in
+/// SidebarChrome.swift, shared with the Remote section and with whichever
+/// container renders this section) and are handed in as `state`.
 struct LocalSectionView: View {
   @Environment(AppModel.self) private var model
-  /// The session currently being renamed — SHARED with the Remote section, so
-  /// the state lives in `SidebarView`.
-  @Binding var renamingSessionID: UUID?
-  /// Live CPU/GPU/wattage for the section header (the monitor itself is owned
-  /// by `SidebarView`; see the note there).
-  let monitor: SystemStatsMonitor
-  /// Opens the stats graphs sheet (owned by `SidebarView`).
-  let onShowStatsGraphs: () -> Void
-  /// Opens the database rename sheet (owned by `SidebarView` — the Remote
-  /// section's database rows open the same sheet).
-  let onRenameDatabase: (DatabaseConnection) -> Void
+  /// The sidebar state the CONTAINER owns (SidebarChrome.swift): the session
+  /// rename, the database rename sheet and the live-stats monitor are all shared
+  /// with the Remote section — and with whichever container renders this section
+  /// (`SidebarView` or `SidebarView2`).
+  let state: SidebarState
 
   /// Collapse state for this section, persisted across launches.
   @AppStorage("sidebar.local.collapsed") private var localCollapsed = false
@@ -34,6 +29,24 @@ struct LocalSectionView: View {
   @State private var renamingScreenName: String?
 
   private var flags: FeatureFlagsStore { .shared }
+
+  /// Live CPU/GPU/wattage for the section header (the monitor itself is owned by
+  /// the container — see `SidebarState.statsMonitor`).
+  private var monitor: SystemStatsMonitor { state.statsMonitor }
+
+  /// This section's drag-reorderable lists. ONE descriptor per list feeds both
+  /// the `ForEach`'s `.onMove` (the `List` sidebar) and each row's
+  /// `SidebarReorder` (the `LazyVStack` one), so either container reorders the
+  /// list through the same model call (SidebarReorder.swift).
+  private var sessionReorder: SidebarReorderGroup {
+    SidebarReorderGroup(.localSessions) { model.moveLocalSession(from: $0, to: $1) }
+  }
+  private var webReorder: SidebarReorderGroup {
+    SidebarReorderGroup(.localWebSessions) { model.moveLocalWebSession(from: $0, to: $1) }
+  }
+  private var databaseReorder: SidebarReorderGroup {
+    SidebarReorderGroup(.localDatabaseConnections) { model.moveLocalDatabaseConnection(from: $0, to: $1) }
+  }
 
   private var localSessions: [TerminalSession] {
     model.sessions.filter { model.kind(of: $0) == .local }
@@ -61,28 +74,28 @@ struct LocalSectionView: View {
   }
 
   /// This section's rows; the gate is the section's own, and keeping it in a
-  /// property leaves the List's `if → Section` shape untouched.
+  /// property leaves the section's shape untouched.
   @ViewBuilder
   private var sectionContent: some View {
     if flags.isEnabled(.sessions) || flags.isEnabled(.screen) || flags.isEnabled(.history) || flags.isEnabled(.web) || flags.isEnabled(.database) {
-      Section {
+      SidebarSection {
         if model.historyMode {
           ForEach(localCollapsed || !flags.isEnabled(.history) ? [] : model.history.sessions) { record in
             HistorySessionRow(session: record)
-              .tag(AppModel.Selection.history(record.id))
+              .sidebarRow(.history(record.id))
           }
           .transition(.blurReplace)
         } else {
-          ForEach(localCollapsed || !flags.isEnabled(.sessions) ? [] : localSessions) { session in
+          ForEach(Array((localCollapsed || !flags.isEnabled(.sessions) ? [] : localSessions).enumerated()), id: \.element.id) { index, session in
             SessionRow(
               session: session,
               defaultLabel: model.displayName(for: session),
               subtitle: nil,
-              isRenaming: renamingSessionID == session.id,
+              isRenaming: state.renamingSessionID == session.id,
               onCommitRename: { commitRename(session.id, $0) },
-              onCancelRename: { renamingSessionID = nil }
+              onCancelRename: { state.renamingSessionID = nil }
             )
-            .tag(AppModel.Selection.session(session.id))
+            .sidebarRow(.session(session.id), reorder: sessionReorder.row(at: index))
             .dropDestination(for: ShellFile.self) { files, _ in
               // A file dropped on this session cell — from Finder (decoded as a
               // ShellFile via the FileRepresentation importing closure) or dragged
@@ -93,7 +106,7 @@ struct LocalSectionView: View {
               return true
             }
             .contextMenu {
-              Button("Rename…") { renamingSessionID = session.id }
+              Button("Rename…") { state.renamingSessionID = session.id }
               Button("Authorized Keys", systemImage: "key.2.on.ring.fill") {
                 model.openLocalAuthorizedKeys()
               }.buttonStyle(.borderless).help("Manage this Mac's authorized keys")
@@ -103,9 +116,7 @@ struct LocalSectionView: View {
               }
             }
           }
-          .onMove { source, destination in
-            model.moveLocalSession(from: source, to: destination)
-          }
+          .onMove(perform: sessionReorder.move)
           ForEach(localCollapsed || !flags.isEnabled(.screen) ? [] : model.screenMonitor.sessions) { info in
             ScreenSessionRow(
               info: info,
@@ -116,7 +127,7 @@ struct LocalSectionView: View {
             // Tag with the open session's selection when attached (so the row
             // shows selected while its terminal is open), else the row's own
             // stable tag id — activating that attaches.
-            .tag(model.rowSelection(forScreen: info))
+            .sidebarRow(model.rowSelection(forScreen: info))
             .contextMenu {
               Button("Rename…") { renamingScreenName = info.name }
               Divider()
@@ -139,7 +150,7 @@ struct LocalSectionView: View {
               onCancelRename: {}
             )
             // Same convention as the local persistent rows above.
-            .tag(model.rowSelection(forScreen: info))
+            .sidebarRow(model.rowSelection(forScreen: info))
             .contextMenu {
               // Remote persistent sessions are identified by their SSH origin;
               // renaming runs on the host, which is out of scope here.
@@ -157,31 +168,26 @@ struct LocalSectionView: View {
               }
             }
           }
-          ForEach(localCollapsed || !flags.isEnabled(.web) ? [] : localWebSessions) { web in
+          ForEach(Array((localCollapsed || !flags.isEnabled(.web) ? [] : localWebSessions).enumerated()), id: \.element.id) { index, web in
             WebSessionRow(web: web)
-              // Tag with the open page's session when it is up (so the row
+              // Rows carry the open page's session when it is up (so the row
               // shows selected while its WebView is visible), else the page's
               // own id — activating that opens it.
-              .tag(model.rowSelection(for: web))
+              .sidebarRow(model.rowSelection(for: web), reorder: webReorder.row(at: index))
           }
-          .onMove { source, destination in
-            model.moveLocalWebSession(from: source, to: destination)
-          }
+          .onMove(perform: webReorder.move)
           // Local database connections (no SSH tunnel) live in the Local
           // section like local shells; remote ones group under Remote instead.
-          ForEach(localCollapsed || !flags.isEnabled(.database) ? [] : localDatabaseConnections) { connection in
+          ForEach(Array((localCollapsed || !flags.isEnabled(.database) ? [] : localDatabaseConnections).enumerated()), id: \.element.id) { index, connection in
             DatabaseConnectionRow(connection: connection)
-              .tag(model.rowSelection(for: connection))
-              .contextMenu { DatabaseConnectionActions(connection: connection) { onRenameDatabase($0) } }
+              .sidebarRow(model.rowSelection(for: connection), reorder: databaseReorder.row(at: index))
+              .contextMenu { DatabaseConnectionActions(connection: connection) { state.beginRenameDatabase($0) } }
           }
-          .onMove { source, destination in
-            model.moveLocalDatabaseConnection(from: source, to: destination)
-          }
+          .onMove(perform: databaseReorder.move)
           .transition(.blurReplace)
         }
       } header: {
-        HStack {
-          SidebarCollapseChevron(collapsed: $localCollapsed)
+        SidebarSectionHeader(collapsed: $localCollapsed, spacing: 4) {
           Group {
             if model.historyMode {
               Text("Local History")
@@ -201,7 +207,7 @@ struct LocalSectionView: View {
             .help("Delete all local history")
             .transition(.blurReplace)
           }
-          Spacer()
+        } trailing: {
           // Only meaningful when there is something to show; hidden while
           // the list is empty (the trash button still serves as the exit
           // when viewing history).
@@ -246,7 +252,7 @@ struct LocalSectionView: View {
           .buttonStyle(.borderless)
           .menuIndicator(.hidden)
           }
-        }.padding(.trailing, 4)
+        }
       }
     } // end if (local section gate)
   }
@@ -262,11 +268,14 @@ struct LocalSectionView: View {
     let gpu = Int(monitor.gpuPercent.rounded())
     if monitor.watts > 0 {
       Button {
-        onShowStatsGraphs()
+        state.showingStatsGraphs = true
       } label: {
         Text("\(String(format: "%3d", cpu))% \(String(format: "%3d", gpu))% \(String(format: "%2d", monitor.watts))W")
           .font(.caption.weight(.medium))
           .monospaced()
+          // The animated sidebar rolls the digits as the stats tick.
+          .contentTransition(.numericText())
+          .sidebarAnimation(value: [cpu, gpu, monitor.watts])
       }
       .buttonStyle(.plain)
       .help("CPU · GPU · System power draw — click for graphs")
@@ -275,11 +284,11 @@ struct LocalSectionView: View {
     }
   }
 
-  /// Applies a session rename and exits edit mode. The binding is
-  /// `SidebarView`'s (the Remote section renames the same rows).
+  /// Applies a session rename and exits edit mode. The state is the container's
+  /// (the Remote section renames the same rows).
   private func commitRename(_ id: UUID, _ name: String) {
     model.renameSession(id, to: name)
-    renamingSessionID = nil
+    state.renamingSessionID = nil
   }
 
   /// Renames a screen session on the local machine and exits edit mode.
@@ -358,6 +367,7 @@ private struct ScreenSessionRow: View {
         Circle()
           .fill(info.isAttached ? Color.green : Color.gray)
           .frame(width: 7, height: 7)
+          .sidebarAnimation(value: info.isAttached)
           .accessibilityLabel(info.state)
           .help(info.kind == .tmux
             ? "tmux session"

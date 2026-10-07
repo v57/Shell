@@ -13,10 +13,10 @@ struct NotesSectionView: View {
 
   var body: some View {
     if flags.isEnabled(.notes) {
-      Section {
+      SidebarSection {
         ForEach(notesCollapsed || !flags.isEnabled(.notes) ? [] : model.notes.notes) { note in
           NoteRow(note: note)
-            .tag(AppModel.Selection.note(note.id))
+            .sidebarRow(.note(note.id))
             .contextMenu {
               Button("Delete Note", role: .destructive) {
                 model.deleteNote(note.id)
@@ -24,18 +24,17 @@ struct NotesSectionView: View {
             }
         }
       } header: {
-        HStack {
-          SidebarCollapseChevron(collapsed: $notesCollapsed)
+        SidebarSectionHeader(collapsed: $notesCollapsed) {
           Text("Notes")
-          Spacer()
+        } trailing: {
           if flags.isEnabled(.notes) {
-          Button {
-            model.newNote()
-          } label: {
-            Image(systemName: "plus")
-          }.buttonStyle(.borderless).help("New note")
+            Button {
+              model.newNote()
+            } label: {
+              Image(systemName: "plus")
+            }.buttonStyle(.borderless).help("New note")
           }
-        }.padding(.trailing, 4)
+        }
       }
     } // end if (notes section gate)
   }
@@ -65,8 +64,10 @@ private struct NoteRow: View {
             .font(.caption2)
             .foregroundStyle(Color.blue)
             .help("Stored in iCloud (encrypted)")
+            .transition(SidebarMotion.iconTransition)
         }
       }
+      .sidebarAnimation(value: note.storedInICloud)
       if let subtitle = model.notes.subtitle(for: note.id) {
         Text(subtitle)
           .font(.caption)

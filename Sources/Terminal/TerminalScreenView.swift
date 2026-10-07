@@ -178,6 +178,9 @@ public struct TerminalScreenView: View {
   /// preferredColorScheme override) that contrast decisions key on.
   @Environment(\.terminalBackgroundsDisabled) private var backgroundsDisabled
   @Environment(\.colorScheme) private var colorScheme
+  /// Whether the cursor glides between cells (an overlay that animates to the
+  /// cursor's cell) instead of being painted into the cell's text run.
+  @Environment(\.terminalAnimationsEnabled) private var animationsEnabled
 
   public var body: some View {
     // Read observable properties in body (not inside closures) so SwiftUI
@@ -192,60 +195,66 @@ public struct TerminalScreenView: View {
     // the terminal uses the conventional `focused` SwiftUI focus for its
     // keyboard-input model (see InputModifier).
 
-    if let message = snapshot.message {
-      messageView(message)
-    } else {
-      // The live grid is the ONLY interactive branch, so resize and the
-      // input/selection modifiers are scoped here; the message is a plain
-      // status label with no focus, key routing, or selection gesture.
-      GeometryReader { geo in
-        terminalGrid(
-          snapshot: snapshot,
-          selectionStart: selectionStart,
-          selectionEnd: selectionEnd,
-          topInset: geo.safeAreaInsets.top
-        )
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .contentShape(Rectangle())
-        .onAppear {
+    Group {
+      if let message = snapshot.message {
+        messageView(message)
+          .transition(.opacity)
+      } else {
+        // The live grid is the ONLY interactive branch, so resize and the
+        // input/selection modifiers are scoped here; the message is a plain
+        // status label with no focus, key routing, or selection gesture.
+        GeometryReader { geo in
+          terminalGrid(
+            snapshot: snapshot,
+            selectionStart: selectionStart,
+            selectionEnd: selectionEnd,
+            topInset: geo.safeAreaInsets.top
+          )
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+          .contentShape(Rectangle())
+          .onAppear {
+            #if os(iOS)
+            // Raise the on-screen keyboard as soon as the live grid is on screen
+            // (session open) — independent of any SwiftUI focus involvement.
+            showKeyboard = true
+            #endif
+            resizeIfNeeded(to: geo.size, safeArea: geo.safeAreaInsets)
+          }
           #if os(iOS)
-          // Raise the on-screen keyboard as soon as the live grid is on screen
-          // (session open) — independent of any SwiftUI focus involvement.
-          showKeyboard = true
+          .onDisappear { showKeyboard = false }
+          // The keyboard follows the terminal's on-screen presence and taps, NOT
+          // SwiftUI focus (#FocusState is not used on iOS — it fights the proxy).
           #endif
-          resizeIfNeeded(to: geo.size, safeArea: geo.safeAreaInsets)
+          .onChange(of: geo.size) { _, newSize in
+            resizeIfNeeded(to: newSize, safeArea: geo.safeAreaInsets)
+          }
+          .onChange(of: geo.safeAreaInsets) { _, newInsets in
+            // Fullscreen / toolbar changes shift the safe area without
+            // changing the size; the grid must reflow.
+            resizeIfNeeded(to: geo.size, safeArea: newInsets)
+          }
+          .modifier(InputModifier(session: session, focused: $focused, keyboardOn: showKeyboard, anchorLine: $anchorLine))
+          .modifier(SelectionModifier(
+            session: session,
+            focused: $focused,
+            keyboardOn: $showKeyboard,
+            anchorLine: $anchorLine,
+            scrollOffset: $scrollOffset,
+            viewportHeight: $viewportHeight
+          ))
+          // Floating "scroll to bottom" affordance pinned to the viewport's
+          // bottom-trailing corner while the user is scrolled up; tapping it
+          // snaps back to the live grid. Exists above the selection drag, so
+          // clicks on it never start a selection.
+          .overlay(alignment: .bottomTrailing) {
+            scrollToBottomButton()
+          }
         }
-        #if os(iOS)
-        .onDisappear { showKeyboard = false }
-        // The keyboard follows the terminal's on-screen presence and taps, NOT
-        // SwiftUI focus (#FocusState is not used on iOS — it fights the proxy).
-        #endif
-        .onChange(of: geo.size) { _, newSize in
-          resizeIfNeeded(to: newSize, safeArea: geo.safeAreaInsets)
-        }
-        .onChange(of: geo.safeAreaInsets) { _, newInsets in
-          // Fullscreen / toolbar changes shift the safe area without
-          // changing the size; the grid must reflow.
-          resizeIfNeeded(to: geo.size, safeArea: newInsets)
-        }
-        .modifier(InputModifier(session: session, focused: $focused, keyboardOn: showKeyboard, anchorLine: $anchorLine))
-        .modifier(SelectionModifier(
-          session: session,
-          focused: $focused,
-          keyboardOn: $showKeyboard,
-          anchorLine: $anchorLine,
-          scrollOffset: $scrollOffset,
-          viewportHeight: $viewportHeight
-        ))
-        // Floating "scroll to bottom" affordance pinned to the viewport's
-        // bottom-trailing corner while the user is scrolled up; tapping it
-        // snaps back to the live grid. Exists above the selection drag, so
-        // clicks on it never start a selection.
-        .overlay(alignment: .bottomTrailing) {
-          scrollToBottomButton()
-        }
+        .transition(.opacity)
       }
     }
+    // The connecting message cross-fades into the live grid.
+    .animation(animationsEnabled ? .smooth(duration: 0.3) : nil, value: snapshot.message == nil)
   }
 
   /// The non-interactive status label (connecting / failed). Deliberately
@@ -279,7 +288,9 @@ public struct TerminalScreenView: View {
             linePieces(
               snapshot: snapshot,
               line: line,
-              atBottom: atBottom,
+              // A gliding cursor is drawn by the overlay below, not into
+              // its cell's run.
+              atBottom: atBottom && !animationsEnabled,
               selectionStart: selectionStart,
               selectionEnd: selectionEnd
             )
@@ -288,6 +299,16 @@ public struct TerminalScreenView: View {
         }
       }
       .scrollTargetLayout()
+      .overlay(alignment: .topLeading) {
+        if animationsEnabled {
+          glidingCursor(
+            snapshot: snapshot,
+            atBottom: atBottom,
+            selectionStart: selectionStart,
+            selectionEnd: selectionEnd
+          )
+        }
+      }
       // Content margin: the scroll view spans the full safe area; only the
       // grid text is inset from its edges.
       .padding(Self.gridPadding)
@@ -295,6 +316,54 @@ public struct TerminalScreenView: View {
     // Scrolling behavior (anchor tracking, content-offset reporting,
     // bottom-tailing) lives in ScrollModifier.
     .modifier(ScrollModifier(session: session, anchorLine: $anchorLine, scrollOffset: $scrollOffset, topInset: topInset))
+  }
+
+  // MARK: - Gliding cursor
+
+  /// The cursor as its own view over the grid, so it can glide from cell to
+  /// cell: a block in the cursor color carrying the glyph beneath it, drawn
+  /// exactly as the run renderer paints a cursor cell (`attributes(for:)`),
+  /// positioned in CONTENT coordinates (logical line, column) and animated
+  /// between positions. Shown under the same conditions the painted cursor is
+  /// — pinned to the bottom, cursor visible — and hidden on a selected cell,
+  /// where the selection wins.
+  @ViewBuilder
+  private func glidingCursor(
+    snapshot: TerminalSnapshot,
+    atBottom: Bool,
+    selectionStart: TerminalCursor?,
+    selectionEnd: TerminalCursor?
+  ) -> some View {
+    let line = snapshot.totalLines - snapshot.rows + snapshot.cursor.row
+    let column = min(max(snapshot.cursor.column, 0), snapshot.columns - 1)
+    if atBottom, snapshot.showCursor, column >= 0, line >= 0, line < snapshot.totalLines,
+       !isCellSelected(line: line, column: column, start: selectionStart, end: selectionEnd) {
+      let cell = snapshot.cell(atLine: line, column: column)
+      let style = Self.attributes(
+        for: cell,
+        isCursor: true,
+        isSelected: false,
+        cursorBackground: snapshot.cursorBackground,
+        terminalBackground: TerminalPalette.windowBackground,
+        backgroundsDisabled: backgroundsDisabled,
+        scheme: colorScheme
+      )
+      ZStack(alignment: .leading) {
+        Rectangle()
+          .fill(style.background ?? snapshot.cursorBackground)
+        Text(AttributedString(cell.isBlank ? " " : String(cell.character), attributes: style.attrs))
+          .fixedSize()
+      }
+      .frame(width: Self.metrics.cellWidth, height: Self.metrics.lineHeight, alignment: .leading)
+      .clipped()
+      .offset(
+        x: CGFloat(column) * Self.metrics.cellWidth,
+        y: CGFloat(line) * Self.metrics.lineHeight
+      )
+      .animation(.smooth(duration: 0.12), value: [line, column])
+      .allowsHitTesting(false)
+      .transition(.opacity)
+    }
   }
 
   // MARK: - Scroll-to-bottom affordance

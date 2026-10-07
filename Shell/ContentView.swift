@@ -45,14 +45,39 @@ struct ContentView: View {
   /// `@Observable` re-renders the toolbar when a flag flips.
   private var flags: FeatureFlagsStore { .shared }
 
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  /// The Animations feature, unless the system asks for reduced motion.
+  private var animates: Bool {
+    flags.isEnabled(.animations) && !reduceMotion
+  }
+
+  /// How a detail page enters and leaves when the selection changes: the new
+  /// page fades in from slightly smaller, the old one fades out. Inert while
+  /// Animations is off (nothing animates the swap).
+  private var detailTransition: AnyTransition {
+    .asymmetric(
+      insertion: .opacity.combined(with: .scale(scale: 0.98)),
+      removal: .opacity
+    )
+  }
+
   var body: some View {
     @Bindable var model = model
     ZStack {
       NavigationSplitView {
-        SidebarView()
-          .navigationSplitViewColumnWidth(min: 190, ideal: 230)
+        HStack(spacing: 0) {
+          if animates {
+            SidebarView2()
+          } else {
+            SidebarView()
+          }
+        }
       } detail: {
         detailPane
+          // Switching pages cross-fades the outgoing page into the incoming
+          // one (each page carries `detailTransition`).
+          .animation(animates ? .smooth(duration: 0.25) : nil, value: model.selection)
       }
       .sheet(isPresented: $model.showingNewConnection) {
         NewConnectionView()
@@ -147,6 +172,7 @@ struct ContentView: View {
     .animation(.easeOut(duration: 0.15), value: model.showingSettings)
     .preferredColorScheme(model.appearanceMode.colorScheme)
     .environment(\.terminalBackgroundsDisabled, model.disableTerminalBackgrounds)
+    .environment(\.terminalAnimationsEnabled, animates)
     .onAppear {
       // Set the browser up for the initially-selected session (onChange does
       // not fire for the initial value).
@@ -216,6 +242,7 @@ struct ContentView: View {
       if let note = model.note(id), !model.isDetached(id) {
         NoteEditorView(noteID: note.id)
           .id(note.id)
+          .transition(detailTransition)
           .navigationTitle(model.notes.title(for: note.id))
       } else {
         noSelection
@@ -231,6 +258,7 @@ struct ContentView: View {
       if let file = model.openedFile(id), !model.isDetached(id) {
         OpenFilePane(file: file)
           .id(file.id)
+          .transition(detailTransition)
           .navigationTitle(file.displayName)
       } else {
         noSelection
@@ -264,6 +292,7 @@ struct ContentView: View {
         let effectiveURLText: String = tunnel?.tunnelURL?.absoluteString ?? web.url
         WebSessionDetailView(web: web, tunnel: tunnel)
           .id(session.id)
+          .transition(detailTransition)
           // The address bar is the window toolbar's search field: the
           // `searchable` modifier hands the field to the toolbar (a
           // plain TextField stacked above the WebView cannot sit there),
@@ -324,6 +353,7 @@ struct ContentView: View {
         if let dbSession = model.databaseSession(for: connection) {
           DatabaseBrowserView(session: dbSession)
             .id(session.id)
+            .transition(detailTransition)
         } else {
           ContentUnavailableView(
             "Database Not Open",
@@ -331,6 +361,7 @@ struct ContentView: View {
             description: Text("The database connection is not open.")
           )
           .id(session.id)
+          .transition(detailTransition)
         }
       } else {
         ZStack {
@@ -340,6 +371,7 @@ struct ContentView: View {
           // Files feature is enabled AND the panel is open.
           TerminalView(session: session)
             .id(session.id)
+            .transition(detailTransition)
             .allowsHitTesting(!(model.directoryBrowser.visible && flags.isEnabled(.files)))
 
           if model.directoryBrowser.visible, flags.isEnabled(.files) {
@@ -405,6 +437,7 @@ struct ContentView: View {
   private func historyDetail(_ historySession: HistorySession) -> some View {
     HistorySessionView(session: historySession)
       .id(historySession.id)
+      .transition(detailTransition)
       .navigationTitle(historySession.title)
       .toolbar {
         ToolbarItemGroup {
@@ -441,6 +474,7 @@ struct ContentView: View {
       systemImage: "terminal",
       description: Text("Choose a terminal in the sidebar or create a new one.")
     )
+    .transition(detailTransition)
     .navigationTitle("Terminals")
   }
 

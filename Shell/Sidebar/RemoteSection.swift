@@ -8,22 +8,27 @@ import Terminal
 /// gate).
 ///
 /// The Edit… sheet for a saved connection and the collapse state are local to
-/// this section; the session rename and the database rename sheet are shared
-/// with the Local section and passed in.
+/// this section; the session rename and the database rename sheet stay with the
+/// CONTAINER (`SidebarState` in SidebarChrome.swift — the Local section and the
+/// other sidebar container share them) and are handed in as `state`.
 struct RemoteSectionView: View {
   @Environment(AppModel.self) private var model
-  /// The session currently being renamed — SHARED with the Local section, so
-  /// the state lives in `SidebarView`.
-  @Binding var renamingSessionID: UUID?
-  /// Opens the database rename sheet (owned by `SidebarView`).
-  let onRenameDatabase: (DatabaseConnection) -> Void
-
+  /// The sidebar state the CONTAINER owns (SidebarChrome.swift): the session
+  /// rename and the database rename sheet, both shared with the Local section.
+  let state: SidebarState
   /// Collapse state for this section, persisted across launches.
   @AppStorage("sidebar.remote.collapsed") private var remoteCollapsed = false
   /// The saved SSH connection currently being edited (opens the edit sheet).
   @State private var editingConfig: SSHConfig?
 
   private var flags: FeatureFlagsStore { .shared }
+
+  /// The saved SSH hosts' drag-reorder descriptor: ONE descriptor feeds both the
+  /// `ForEach`'s `.onMove` (the `List` sidebar) and each host row's drag (the
+  /// `LazyVStack` one), so either container reorders through the same model call.
+  private var connectionReorder: SidebarReorderGroup {
+    SidebarReorderGroup(.sshConnections) { model.moveConnection(from: $0, to: $1) }
+  }
 
   var body: some View {
     sectionContent
@@ -35,66 +40,67 @@ struct RemoteSectionView: View {
   }
 
   /// This section's rows; the gate is the section's own, and keeping it in a
-  /// property leaves the List's `if → Section` shape untouched.
+  /// property leaves the section's shape untouched.
   @ViewBuilder
   private var sectionContent: some View {
     if flags.isEnabled(.ssh) {
-      Section {
-        ForEach(remoteCollapsed || !flags.isEnabled(.ssh) ? [] : model.connections) { config in
+      SidebarSection {
+        ForEach(Array((remoteCollapsed || !flags.isEnabled(.ssh) ? [] : model.connections).enumerated()), id: \.element.id) { index, config in
           SSHConfigGroup(
             config: config,
-            renamingSessionID: renamingSessionID,
-            onBeginRename: { renamingSessionID = $0 },
-            onCommitRename: { commitRename($0, $1) },
-            onCancelRename: { renamingSessionID = nil },
-            onRenameDatabase: onRenameDatabase,
+            state: state,
+            reorder: connectionReorder.row(at: index),
             onEdit: { editingConfig = $0 }
           )
         }
-        .onMove { source, destination in
-          model.moveConnection(from: source, to: destination)
-        }
+        .onMove(perform: connectionReorder.move)
       } header: {
-        HStack {
-          SidebarCollapseChevron(collapsed: $remoteCollapsed)
+        SidebarSectionHeader(collapsed: $remoteCollapsed) {
           Text("Remote")
-          Spacer()
+        } trailing: {
           if flags.isEnabled(.ssh) {
-          Button {
-            model.showingNewConnection = true
-          } label: {
-            Image(systemName: "plus")
-          }.buttonStyle(.borderless).help("New SSH connection")
+            Button {
+              model.showingNewConnection = true
+            } label: {
+              Image(systemName: "plus")
+            }.buttonStyle(.borderless).help("New SSH connection")
           }
-        }.padding(.trailing, 4)
+        }
       }
     } // end if (ssh section gate)
   }
 
-  /// Applies a session rename and exits edit mode. The binding is
-  /// `SidebarView`'s (the Local section renames the same rows).
+  /// Applies a session rename and exits edit mode. The state is the container's
+  /// (the Local section renames the same rows).
   private func commitRename(_ id: UUID, _ name: String) {
     model.renameSession(id, to: name)
-    renamingSessionID = nil
+    state.renamingSessionID = nil
   }
 }
 
 /// A saved SSH connection (server) plus its running connections. Emits
-/// one sidebar row per running session, so the List shows them all.
+/// one sidebar row per running session, so the sidebar shows them all.
 private struct SSHConfigGroup: View {
   @Environment(AppModel.self) private var model
   let config: SSHConfig
-  let renamingSessionID: UUID?
-  let onBeginRename: (UUID) -> Void
-  let onCommitRename: (UUID, String) -> Void
-  let onCancelRename: () -> Void
-  let onRenameDatabase: (DatabaseConnection) -> Void
+  /// The sidebar state the CONTAINER owns (SidebarChrome.swift): the session
+  /// rename and the database rename sheet, both shared with the Local section.
+  let state: SidebarState
+  /// This host's row in the sidebar's host list: the `List` reorders hosts
+  /// through `.onMove`, the `LazyVStack` by dragging the row.
+  let reorder: SidebarReorder
   let onEdit: (SSHConfig) -> Void
   private var flags: FeatureFlagsStore { .shared }
+
+  /// This host's running shell rows — a reorderable list of their OWN, so
+  /// dragging a session row never moves the host row (and vice versa).
+  private var sessionReorder: SidebarReorderGroup {
+    SidebarReorderGroup(.sshSessions(config.id)) { model.moveSSHSession(for: config, from: $0, to: $1) }
+  }
   
   var body: some View {
     SSHConfigRow(config: config)
-      .tag(AppModel.Selection.ssh(config.id))
+      .sidebarRow(.ssh(config.id), reorder: reorder)
 #if os(macOS)
       .dropDestination(for: ShellFile.self) { files, _ in
         // A file dropped on the saved connection — no terminal cwd to follow,
@@ -159,17 +165,17 @@ private struct SSHConfigGroup: View {
     // Only SSH SHELL sessions get a terminal row here. A host-bound web page or
     // database connection has its own row view in the loops below; emitting one
     // here too would render its name twice (once with a terminal icon).
-    ForEach(model.shellSessions(for: config)) { session in
+    ForEach(Array(model.shellSessions(for: config).enumerated()), id: \.element.id) { index, session in
       SessionRow(
         session: session,
         defaultLabel: model.displayName(for: session),
         subtitle: "\(config.user)@\(config.host):\(config.port)",
-        isRenaming: renamingSessionID == session.id,
-        onCommitRename: { onCommitRename(session.id, $0) },
-        onCancelRename: onCancelRename
+        isRenaming: state.renamingSessionID == session.id,
+        onCommitRename: { commitRename(session.id, $0) },
+        onCancelRename: { state.renamingSessionID = nil }
       )
       .padding(.leading, 14)
-      .tag(AppModel.Selection.session(session.id))
+      .sidebarRow(.session(session.id), reorder: sessionReorder.row(at: index))
 #if os(macOS)
       .dropDestination(for: ShellFile.self) { files, _ in
         // A file dropped on a running SSH session's row: materialize it locally
@@ -180,16 +186,14 @@ private struct SSHConfigGroup: View {
       }
 #endif
       .contextMenu {
-        Button("Rename…") { onBeginRename(session.id) }
+        Button("Rename…") { state.renamingSessionID = session.id }
         Divider()
         Button("Close Connection", role: .destructive) {
           model.removeSession(session.id)
         }
       }
     }
-    .onMove { source, destination in
-      model.moveSSHSession(for: config, from: source, to: destination)
-    }
+    .onMove(perform: sessionReorder.move)
     // Saved web pages bound to this host render as SSH-section rows, in the
     // same indented sub-row layout as the connection's terminals. Hidden when
     // the web feature is disabled.
@@ -197,7 +201,7 @@ private struct SSHConfigGroup: View {
     ForEach(model.webSessions.all.filter { $0.sshConfigID == config.id }) { web in
       WebSessionRow(web: web, environmentName: config.displayName)
         .padding(.leading, 14)
-        .tag(model.rowSelection(for: web))
+        .sidebarRow(model.rowSelection(for: web))
     }
     }
     // Database connections tunneled through this host render as SSH-section
@@ -208,10 +212,17 @@ private struct SSHConfigGroup: View {
     ForEach(model.databaseConnections.filter { $0.sshConfigID == config.id }) { connection in
       DatabaseConnectionRow(connection: connection)
         .padding(.leading, 14)
-        .tag(model.rowSelection(for: connection))
-        .contextMenu { DatabaseConnectionActions(connection: connection) { onRenameDatabase($0) } }
+        .sidebarRow(model.rowSelection(for: connection))
+        .contextMenu { DatabaseConnectionActions(connection: connection) { state.beginRenameDatabase($0) } }
     }
     }
+  }
+
+  /// Applies a session rename and exits edit mode. The state is the container's
+  /// (the Local section renames the same rows).
+  private func commitRename(_ id: UUID, _ name: String) {
+    model.renameSession(id, to: name)
+    state.renamingSessionID = nil
   }
 }
 
@@ -233,6 +244,7 @@ private struct SSHConfigRow: View {
           .fill(.green)
           .frame(width: 7, height: 7)
           .accessibilityLabel("Connected")
+          .transition(SidebarMotion.iconTransition)
         // Trailing + menu: create an ssh-tunnelled Web/Database session for
         // this connected host. Visible only while connected, items gated by
         // their feature flag. A web session opens immediately (no sheet).
@@ -260,9 +272,11 @@ private struct SSHConfigRow: View {
           .buttonStyle(.borderless)
           .menuIndicator(.hidden)
           .help("New session for this host")
+          .transition(SidebarMotion.iconTransition)
         }
       }
     }
+    .sidebarAnimation(value: model.sessionID(for: config) != nil)
     .contentShape(Rectangle())
   }
 }

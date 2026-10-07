@@ -366,9 +366,9 @@ struct FeatureTests {
     #expect(FeatureID.allCases.map(\.rawValue) == [
       "sessions", "screen", "ssh", "notes", "history", "actions",
       "smartActions", "monitoring", "files", "authorizedKeys",
-      "settings", "web", "database"
+      "settings", "web", "database", "animations"
     ])
-    #expect(FeatureID.allCases.count == 13)
+    #expect(FeatureID.allCases.count == 14)
     // Reserved lanes exist and round-trip through their rawValue.
     #expect(FeatureID.web.rawValue == "web")
     #expect(FeatureID.database.rawValue == "database")
