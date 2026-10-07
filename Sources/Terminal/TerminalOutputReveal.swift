@@ -4,15 +4,22 @@ import Observation
 /// Types a terminal's new output out instead of showing it all at once.
 ///
 /// Two buffers: the session publishes the TARGET snapshot; the view renders
-/// `shown`, plus a per-line `limits` cut-off — the number of leading columns
-/// already typed. Each new target is diffed against the previous one line by
-/// line, by CHARACTER only, so:
+/// `shown`, minus each still-typing line's hidden range (see `PendingLine`).
+/// Each new target is diffed against the previous one line by line, by
+/// CHARACTER only (attributes are ignored), as the cheaper of:
+/// - column-aligned hunks (an in-place repaint: only the disjointly changed
+///   columns type — a spinner tick no longer retypes the whole line), and
+/// - a common PREFIX plus a common SUFFIX (a SHIFT: typing at the line's
+///   start pushes the rest right, which column comparison misreads), so:
 ///
 ///  - an unchanged line, or an unchanged prefix, is never typed again (a
 ///    recolor — zsh's syntax highlighting repainting the command line on every
 ///    keystroke — shows at once rather than re-typing);
-///  - only the new tail of a line is typed, and a line still typing that
-///    changes again keeps what it already showed.
+///  - only the CHANGED middle of a line is typed: text past the edit that
+///    merely shifted (typing at the start of the line pushes the rest right,
+///    a picker swapping its marker) is recognized by the suffix match and
+///    shows at once, never blanking and re-typing;
+///  - a line still typing that changes again keeps what it already showed.
 ///
 /// Typing runs top line first (line by line), a few characters per frame, at a
 /// speed that adapts to the backlog so everything lands within about
@@ -25,12 +32,36 @@ import Observation
 @MainActor
 @Observable
 final class TerminalOutputReveal {
-  /// The snapshot the view renders: the latest target, with `limits` applied.
+  /// One line's still-typing ranges: sorted non-overlapping half-open column
+  /// spans that render blank and fill in left to right, top line first.
+  /// Everything OUTSIDE those spans — unchanged text between disjoint edits
+  /// (a spinner tick plus a grown progress bar plus a changed digit on one
+  /// rewritten line) — renders at once, so unchanged text never blanks and
+  /// re-types. A single contiguous edit stays a single span.
+  struct PendingLine: Equatable {
+    var spans: [Range<Int>]
+
+    init(cursor: Int, to: Int) {
+      spans = cursor < to ? [cursor..<to] : []
+    }
+
+    init(spans: [Range<Int>]) {
+      self.spans = spans
+    }
+
+    /// Typing head: the first column still hidden (the single-span cursor).
+    var cursor: Int { spans.first?.lowerBound ?? 0 }
+    /// End of the hidden tail (the single-span end).
+    var to: Int { spans.last?.upperBound ?? 0 }
+
+    /// Columns still hidden.
+    var hiddenCount: Int { spans.reduce(0) { $0 + $1.count } }
+  }
+
+  /// The snapshot the view renders: the latest target, with `pending` applied.
   private(set) var shown: TerminalSnapshot?
-  /// Lines still typing (logical line → columns shown). Absent = fully shown.
-  private(set) var limits: [Int: Int] = [:]
-  /// Where each typing line's content ends (its last visible column + 1).
-  @ObservationIgnored private var ends: [Int: Int] = [:]
+  /// Lines still typing (logical line → their hidden range). Absent = fully shown.
+  private(set) var pending: [Int: PendingLine] = [:]
   @ObservationIgnored private var ticker: Task<Void, Never>?
   /// Frames left before the typing must have caught up with the output —
   /// reset by every update that brings new output, counted down per frame.
@@ -42,17 +73,23 @@ final class TerminalOutputReveal {
   static let minimumCharactersPerFrame = 2
   private static let frame = Duration.milliseconds(16)
 
-  /// The number of leading columns of `line` shown so far; nil = all of them.
-  func limit(forLine line: Int) -> Int? {
-    limits[line]
+  /// Whether `column` of `line` renders its cell already (false = still blank
+  /// while the line's changed middle types out). Lines with no pending entry
+  /// are fully shown.
+  func isShown(line: Int, column: Int) -> Bool {
+    guard let p = pending[line] else { return true }
+    for span in p.spans {
+      if column < span.lowerBound { return true }
+      if span.contains(column) { return false }
+    }
+    return true
   }
 
   /// Shows `snapshot` at once: nothing types.
   func snap(to snapshot: TerminalSnapshot) {
     ticker?.cancel()
     ticker = nil
-    ends = [:]
-    if !limits.isEmpty { limits = [:] }
+    if !pending.isEmpty { pending = [:] }
     shown = snapshot
   }
 
@@ -73,32 +110,30 @@ final class TerminalOutputReveal {
 
     // Only the visible grid types; anything above it is already history.
     let firstVisible = max(0, target.totalLines - target.rows)
-    var limits = Self.shifted(self.limits, by: shift).filter { $0.key >= firstVisible }
-    var ends = Self.shifted(self.ends, by: shift).filter { $0.key >= firstVisible }
+    var pending = Self.shifted(self.pending, by: shift).filter { $0.key >= firstVisible }
 
     for line in firstVisible..<target.totalLines {
       let end = Self.contentEnd(of: target, line: line)
       let previousLine = line + shift
-      let common = previousLine < previous.totalLines
-        ? Self.commonPrefix(previous, previousLine, target, line, upTo: end)
-        : 0
-      // A typing line keeps what it showed; a settled one shows its unchanged
-      // prefix and types the rest.
-      let limit = min(limits[line] ?? Int.max, common)
-      if limit >= end {
-        limits[line] = nil
-        ends[line] = nil
-      } else {
-        limits[line] = limit
-        ends[line] = end
+      if end == 0 || previousLine >= previous.totalLines {
+        // An emptied line snaps (a deletion has nothing to type); a genuinely
+        // new line types whole.
+        pending[line] = end == 0 ? nil : PendingLine(cursor: 0, to: end)
+        continue
       }
+      // Fresh spans for this line, then unioned with what this line had not
+      // typed yet (clipped to the new end): columns already revealed stay
+      // revealed, columns never typed keep typing even when unchanged again.
+      let fresh = Self.freshSpans(previous, previousLine, target, line, end: end)
+      let kept = pending[line].map { Self.clipped($0.spans, to: end) } ?? []
+      let spans = Self.merged(kept + fresh)
+      pending[line] = spans.isEmpty ? nil : PendingLine(spans: spans)
     }
 
     shown = target
-    if limits != self.limits { self.limits = limits }
-    self.ends = ends
+    if pending != self.pending { self.pending = pending }
     framesLeft = Self.framesToCatchUp
-    if ends.isEmpty {
+    if pending.isEmpty {
       ticker?.cancel()
       ticker = nil
     } else {
@@ -125,32 +160,30 @@ final class TerminalOutputReveal {
   /// Types the next characters, top line first. Returns whether anything is
   /// still typing.
   private func advance() -> Bool {
-    let pending = ends.reduce(0) { total, entry in
-      total + max(0, entry.value - (limits[entry.key] ?? entry.value))
-    }
+    let outstanding = pending.values.reduce(0) { $0 + $1.hiddenCount }
     // An even pace that lands the backlog by the deadline (a share of what is
     // LEFT each frame would decay and crawl through the tail).
     let frames = max(1, framesLeft)
     framesLeft -= 1
-    var budget = max(Self.minimumCharactersPerFrame, (pending + frames - 1) / frames)
-    var limits = self.limits
-    for line in ends.keys.sorted() {
+    var budget = max(Self.minimumCharactersPerFrame, (outstanding + frames - 1) / frames)
+    var pending = self.pending
+    for line in pending.keys.sorted() {
       guard budget > 0 else { break }
-      guard let limit = limits[line], let end = ends[line] else {
-        ends[line] = nil
-        continue
+      guard var spans = pending[line]?.spans, !spans.isEmpty else { continue }
+      while budget > 0, !spans.isEmpty {
+        let step = min(budget, spans[0].count)
+        budget -= step
+        let lower = spans[0].lowerBound + step
+        if lower >= spans[0].upperBound {
+          spans.removeFirst()
+        } else {
+          spans[0] = lower..<spans[0].upperBound
+        }
       }
-      let step = min(budget, end - limit)
-      budget -= step
-      if limit + step >= end {
-        limits[line] = nil
-        ends[line] = nil
-      } else {
-        limits[line] = limit + step
-      }
+      pending[line] = spans.isEmpty ? nil : PendingLine(spans: spans)
     }
-    self.limits = limits
-    return !ends.isEmpty
+    self.pending = pending
+    return !pending.isEmpty
   }
 
   // MARK: - Diffing
@@ -173,9 +206,9 @@ final class TerminalOutputReveal {
     return nil
   }
 
-  private static func shifted(_ lines: [Int: Int], by shift: Int) -> [Int: Int] {
+  private static func shifted<V>(_ lines: [Int: V], by shift: Int) -> [Int: V] {
     guard shift != 0 else { return lines }
-    var result: [Int: Int] = [:]
+    var result: [Int: V] = [:]
     for (line, value) in lines where line - shift >= 0 {
       result[line - shift] = value
     }
@@ -194,6 +227,84 @@ final class TerminalOutputReveal {
     return column
   }
 
+  /// The fresh hidden spans for one line: the cheaper of the column-aligned
+  /// hunks (an in-place repaint: spinner tick, grown progress bar, changed
+  /// digits — unchanged columns between disjoint edits stay shown) and the
+  /// single prefix→suffix middle (a SHIFT: typing at the line's start pushes
+  /// the rest right, which column comparison misreads as all-changed).
+  /// By character, ignoring attributes, so a recolor settles instantly.
+  private static func freshSpans(
+    _ a: TerminalSnapshot, _ lineA: Int,
+    _ b: TerminalSnapshot, _ lineB: Int,
+    end: Int
+  ) -> [Range<Int>] {
+    let prefix = Self.commonPrefix(a, lineA, b, lineB, upTo: end)
+    let prevEnd = Self.contentEnd(of: a, line: lineA)
+    let maxSuffix = min(prevEnd, end) - prefix
+    let suffix = maxSuffix > 0
+      ? Self.commonSuffix(a, lineA, prevEnd, b, lineB, end, maxCount: maxSuffix)
+      : 0
+    let single: [Range<Int>] = prefix < end - suffix ? [prefix..<(end - suffix)] : []
+    let hunks = Self.columnHunks(a, lineA, b, lineB, end: end)
+    let singleCount = single.reduce(0) { $0 + $1.count }
+    let hunksCount = hunks.reduce(0) { $0 + $1.count }
+    return hunksCount < singleCount ? hunks : single
+  }
+
+  /// Runs of columns whose characters differ, compared at the SAME column
+  /// (an in-place `\r` repaint overwrites each cell where it stands).
+  private static func columnHunks(
+    _ a: TerminalSnapshot, _ lineA: Int,
+    _ b: TerminalSnapshot, _ lineB: Int,
+    end: Int
+  ) -> [Range<Int>] {
+    var spans: [Range<Int>] = []
+    var column = 0
+    while column < end {
+      let cellA = a.cell(atLine: lineA, column: column)
+      let cellB = b.cell(atLine: lineB, column: column)
+      guard cellA.character != cellB.character && !(cellA.isBlank && cellB.isBlank) else {
+        column += 1
+        continue
+      }
+      var next = column + 1
+      while next < end {
+        let ca = a.cell(atLine: lineA, column: next)
+        let cb = b.cell(atLine: lineB, column: next)
+        guard ca.character != cb.character && !(ca.isBlank && cb.isBlank) else { break }
+        next += 1
+      }
+      spans.append(column..<next)
+      column = next
+    }
+    return spans
+  }
+
+  /// Old still-hidden spans clipped to the line's new end (a shrunk line
+  /// drops spans past it).
+  private static func clipped(_ spans: [Range<Int>], to end: Int) -> [Range<Int>] {
+    spans.compactMap { span in
+      let lower = max(0, span.lowerBound)
+      let upper = min(end, span.upperBound)
+      return lower < upper ? lower..<upper : nil
+    }
+  }
+
+  /// Sorted non-overlapping spans (overlaps and adjacencies merged).
+  private static func merged(_ spans: [Range<Int>]) -> [Range<Int>] {
+    let sorted = spans.sorted { $0.lowerBound < $1.lowerBound }
+    var result: [Range<Int>] = []
+    for span in sorted {
+      guard span.lowerBound < span.upperBound else { continue }
+      if let last = result.last, span.lowerBound <= last.upperBound {
+        result[result.count - 1] = last.lowerBound..<max(last.upperBound, span.upperBound)
+      } else {
+        result.append(span)
+      }
+    }
+    return result
+  }
+
   /// How many leading columns two lines share, by CHARACTER (attributes are
   /// ignored: a recolor isn't new output), up to `end`.
   private static func commonPrefix(
@@ -209,5 +320,25 @@ final class TerminalOutputReveal {
       column += 1
     }
     return column
+  }
+
+  /// How many trailing columns two lines share, by CHARACTER (same
+  /// blank-equivalence as `commonPrefix`), aligning their content ends
+  /// (`endA`, `endB`) and capped at `maxCount` so the suffix never overlaps
+  /// the prefix. What this recognizes is a SHIFT: text that moved right
+  /// (typing at the line's start) or stayed put past an edit types nothing.
+  private static func commonSuffix(
+    _ a: TerminalSnapshot, _ lineA: Int, _ endA: Int,
+    _ b: TerminalSnapshot, _ lineB: Int, _ endB: Int,
+    maxCount: Int
+  ) -> Int {
+    var count = 0
+    while count < maxCount {
+      let cellA = a.cell(atLine: lineA, column: endA - 1 - count)
+      let cellB = b.cell(atLine: lineB, column: endB - 1 - count)
+      guard cellA.character == cellB.character || (cellA.isBlank && cellB.isBlank) else { break }
+      count += 1
+    }
+    return count
   }
 }

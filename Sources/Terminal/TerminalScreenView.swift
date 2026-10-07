@@ -50,7 +50,7 @@ public func isCellSelected(line: Int, column: Int, start: TerminalCursor?, end: 
 
 /// Splits one logical line into attribute runs. `line` is the LOGICAL line
 /// (scrollback + grid); `row` is the screen row used for cursor hit-testing
-/// (only meaningful when `atBottom` is true). Cells at or past `revealLimit`
+/// (only meaningful when `atBottom` is true). Cells `isHidden` reports
 /// (output not typed out yet — see `TerminalOutputReveal`) render blank.
 public func terminalCellRuns(
   snapshot: TerminalSnapshot,
@@ -59,19 +59,18 @@ public func terminalCellRuns(
   atBottom: Bool,
   selectionStart: TerminalCursor?,
   selectionEnd: TerminalCursor?,
-  revealLimit: Int? = nil
+  isHidden: (Int) -> Bool = { _ in false }
 ) -> [TerminalCellRun] {
-  let revealLimit = revealLimit ?? snapshot.columns
   var runs: [TerminalCellRun] = []
   var column = 0
   while column < snapshot.columns {
-    let cell = column < revealLimit ? snapshot.cell(atLine: line, column: column) : .space
+    let cell = isHidden(column) ? .space : snapshot.cell(atLine: line, column: column)
     let isCursor = atBottom && snapshot.showCursor && row == snapshot.cursor.row && column == snapshot.cursor.column
     let isSelected = isCellSelected(line: line, column: column, start: selectionStart, end: selectionEnd)
 
     var end = column + 1
     while end < snapshot.columns {
-      let next = end < revealLimit ? snapshot.cell(atLine: line, column: end) : .space
+      let next = isHidden(end) ? .space : snapshot.cell(atLine: line, column: end)
       let nextCursor = atBottom && snapshot.showCursor && row == snapshot.cursor.row && end == snapshot.cursor.column
       let nextSelected = isCellSelected(line: line, column: end, start: selectionStart, end: selectionEnd)
       if next.foreground == cell.foreground,
@@ -356,12 +355,11 @@ public struct TerminalScreenView: View {
   ) -> some View {
     let line = snapshot.totalLines - snapshot.rows + snapshot.cursor.row
     // While its line is still typing out, the cursor rides the typing head.
-    let revealLimit = reveal.limit(forLine: line) ?? Int.max
-    let column = min(max(min(snapshot.cursor.column, revealLimit), 0), snapshot.columns - 1)
+    let column = shownCursorColumn(snapshot: snapshot, line: line)
     if atBottom, snapshot.showCursor, column >= 0, line >= 0, line < snapshot.totalLines,
        !isCellSelected(line: line, column: column, start: selectionStart, end: selectionEnd) {
-      // The head's own cell isn't typed yet: the block shows it blank.
-      let cell = column < revealLimit ? snapshot.cell(atLine: line, column: column) : .space
+      // A cell not typed yet shows the block blank.
+      let cell = reveal.isShown(line: line, column: column) ? snapshot.cell(atLine: line, column: column) : .space
       let style = Self.attributes(
         for: cell,
         isCursor: true,
@@ -387,6 +385,15 @@ public struct TerminalScreenView: View {
       .allowsHitTesting(false)
       .transition(.opacity)
     }
+  }
+
+  /// The cursor's column to draw at: while its line is still typing out, the
+  /// cursor rides the typing head (the last already-shown column at or before
+  /// its own), so it never sits on a cell that is still blank.
+  private func shownCursorColumn(snapshot: TerminalSnapshot, line: Int) -> Int {
+    var column = min(max(snapshot.cursor.column, 0), snapshot.columns - 1)
+    while column > 0, !reveal.isShown(line: line, column: column) { column -= 1 }
+    return column
   }
 
   // MARK: - Scroll-to-bottom affordance
@@ -496,8 +503,11 @@ public struct TerminalScreenView: View {
   ) -> [LinePiece] {
     let terminalBackground = TerminalPalette.windowBackground
     let screenRow = line - (snapshot.totalLines - snapshot.rows)
-    // Output not typed out yet renders blank (TerminalOutputReveal).
-    let revealLimit = animationsEnabled ? reveal.limit(forLine: line) ?? snapshot.columns : snapshot.columns
+    // Columns not typed out yet render blank (TerminalOutputReveal); with
+    // animations off everything shows at once.
+    let isHidden: (Int) -> Bool = animationsEnabled
+      ? { [reveal] column in !reveal.isShown(line: line, column: column) }
+      : { _ in false }
     var pieces: [LinePiece] = []
 
     for run in terminalCellRuns(
@@ -507,7 +517,7 @@ public struct TerminalScreenView: View {
       atBottom: atBottom,
       selectionStart: selectionStart,
       selectionEnd: selectionEnd,
-      revealLimit: revealLimit
+      isHidden: isHidden
     ) {
       let base = Self.attributes(
         for: run.cell,
@@ -546,7 +556,7 @@ public struct TerminalScreenView: View {
       }
 
       for column in run.column..<(run.column + run.length) {
-        let cell = column < revealLimit ? snapshot.cell(atLine: line, column: column) : .space
+        let cell = isHidden(column) ? .space : snapshot.cell(atLine: line, column: column)
         let cluster = cell.isBlank ? " " : String(cell.character)
         guard let pair = Self.segmentMetrics(cluster: cluster) else {
           // .clip: per-cell frame, overflow cut at the cell edge.
