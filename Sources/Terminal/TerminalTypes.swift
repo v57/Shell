@@ -79,6 +79,9 @@ public struct TerminalSnapshot {
   /// on the main thread; written by the parser on its parse queue, so
   /// guarded by the parser's lock (see `bracketedPasteEnabled` below).
   public var bracketedPasteEnabled = false
+  /// True while a full-screen program (vim, less, top) is on the alternate
+  /// screen — its redraws are repaints, not output to type out.
+  public var usesAlternateScreen = false
 
   /// Logical line count: scrollback plus the visible grid.
   public var totalLines: Int { scrollback.count + rows }

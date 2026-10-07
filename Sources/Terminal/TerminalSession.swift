@@ -26,7 +26,12 @@ public final class TerminalSession: Identifiable {
   /// Optional user-given name shown in the sidebar; nil = default name.
   public var customName: String?
 
-  public var snapshot = TerminalSnapshot()
+  public var snapshot = TerminalSnapshot() {
+    didSet { snapshotGeneration &+= 1 }
+  }
+  /// Bumped on every published snapshot — a cheap change token for views
+  /// that react to new output (the snapshot itself isn't Equatable).
+  public private(set) var snapshotGeneration = 0
   /// Text selection (LOGICAL line coordinates — see mouse handling in the
   /// terminal screen view), driven by the view.
   public var selectionStart: TerminalCursor?

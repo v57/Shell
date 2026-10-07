@@ -105,6 +105,7 @@ public final class TerminalOutputParser {
     defer { lock.unlock() }
     var s = snapshotLocked(clearDirty: true)
     s.bracketedPasteEnabled = bracketedPasteEnabled
+    s.usesAlternateScreen = usingAlternateScreen
     return s
   }
 

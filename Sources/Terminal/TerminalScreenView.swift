@@ -50,25 +50,28 @@ public func isCellSelected(line: Int, column: Int, start: TerminalCursor?, end: 
 
 /// Splits one logical line into attribute runs. `line` is the LOGICAL line
 /// (scrollback + grid); `row` is the screen row used for cursor hit-testing
-/// (only meaningful when `atBottom` is true).
+/// (only meaningful when `atBottom` is true). Cells at or past `revealLimit`
+/// (output not typed out yet — see `TerminalOutputReveal`) render blank.
 public func terminalCellRuns(
   snapshot: TerminalSnapshot,
   line: Int,
   row: Int,
   atBottom: Bool,
   selectionStart: TerminalCursor?,
-  selectionEnd: TerminalCursor?
+  selectionEnd: TerminalCursor?,
+  revealLimit: Int? = nil
 ) -> [TerminalCellRun] {
+  let revealLimit = revealLimit ?? snapshot.columns
   var runs: [TerminalCellRun] = []
   var column = 0
   while column < snapshot.columns {
-    let cell = snapshot.cell(atLine: line, column: column)
+    let cell = column < revealLimit ? snapshot.cell(atLine: line, column: column) : .space
     let isCursor = atBottom && snapshot.showCursor && row == snapshot.cursor.row && column == snapshot.cursor.column
     let isSelected = isCellSelected(line: line, column: column, start: selectionStart, end: selectionEnd)
 
     var end = column + 1
     while end < snapshot.columns {
-      let next = snapshot.cell(atLine: line, column: end)
+      let next = end < revealLimit ? snapshot.cell(atLine: line, column: end) : .space
       let nextCursor = atBottom && snapshot.showCursor && row == snapshot.cursor.row && end == snapshot.cursor.column
       let nextSelected = isCellSelected(line: line, column: end, start: selectionStart, end: selectionEnd)
       if next.foreground == cell.foreground,
@@ -181,11 +184,15 @@ public struct TerminalScreenView: View {
   /// Whether the cursor glides between cells (an overlay that animates to the
   /// cursor's cell) instead of being painted into the cell's text run.
   @Environment(\.terminalAnimationsEnabled) private var animationsEnabled
+  /// New output typing out (animations only): the buffer the grid renders.
+  @State private var reveal = TerminalOutputReveal()
 
   public var body: some View {
     // Read observable properties in body (not inside closures) so SwiftUI
-    // re-renders on every snapshot/selection change.
-    let snapshot = session.snapshot
+    // re-renders on every snapshot/selection change. With animations on, the
+    // grid renders the output reveal's buffer: the latest snapshot with the
+    // output not typed out yet held back (TerminalOutputReveal).
+    let snapshot = animationsEnabled ? (reveal.shown ?? session.snapshot) : session.snapshot
     let selectionStart = session.selectionStart
     let selectionEnd = session.selectionEnd
     // The on-screen keyboard (iOS only) is driven by the `showKeyboard` @State
@@ -255,6 +262,19 @@ public struct TerminalScreenView: View {
     }
     // The connecting message cross-fades into the live grid.
     .animation(animationsEnabled ? .smooth(duration: 0.3) : nil, value: snapshot.message == nil)
+    // New output types out while pinned to the bottom; scrolled up, or with
+    // animations off, it shows at once.
+    .onAppear { reveal.snap(to: session.snapshot) }
+    .onChange(of: session.snapshotGeneration) { _, _ in
+      // Pinned = at the bottom of what was shown BEFORE this output: output
+      // that scrolls the grid adds lines the scroll view hasn't followed yet,
+      // so measuring against the new snapshot would read every scroll as
+      // "scrolled up" and snap.
+      let shownLines = reveal.shown?.totalLines ?? session.snapshot.totalLines
+      let pinned = (anchorLine ?? 0) + session.snapshot.rows >= shownLines
+      reveal.update(to: session.snapshot, animate: animationsEnabled && pinned)
+    }
+    .onChange(of: animationsEnabled) { _, _ in reveal.snap(to: session.snapshot) }
   }
 
   /// The non-interactive status label (connecting / failed). Deliberately
@@ -335,10 +355,13 @@ public struct TerminalScreenView: View {
     selectionEnd: TerminalCursor?
   ) -> some View {
     let line = snapshot.totalLines - snapshot.rows + snapshot.cursor.row
-    let column = min(max(snapshot.cursor.column, 0), snapshot.columns - 1)
+    // While its line is still typing out, the cursor rides the typing head.
+    let revealLimit = reveal.limit(forLine: line) ?? Int.max
+    let column = min(max(min(snapshot.cursor.column, revealLimit), 0), snapshot.columns - 1)
     if atBottom, snapshot.showCursor, column >= 0, line >= 0, line < snapshot.totalLines,
        !isCellSelected(line: line, column: column, start: selectionStart, end: selectionEnd) {
-      let cell = snapshot.cell(atLine: line, column: column)
+      // The head's own cell isn't typed yet: the block shows it blank.
+      let cell = column < revealLimit ? snapshot.cell(atLine: line, column: column) : .space
       let style = Self.attributes(
         for: cell,
         isCursor: true,
@@ -473,6 +496,8 @@ public struct TerminalScreenView: View {
   ) -> [LinePiece] {
     let terminalBackground = TerminalPalette.windowBackground
     let screenRow = line - (snapshot.totalLines - snapshot.rows)
+    // Output not typed out yet renders blank (TerminalOutputReveal).
+    let revealLimit = animationsEnabled ? reveal.limit(forLine: line) ?? snapshot.columns : snapshot.columns
     var pieces: [LinePiece] = []
 
     for run in terminalCellRuns(
@@ -481,7 +506,8 @@ public struct TerminalScreenView: View {
       row: screenRow,
       atBottom: atBottom,
       selectionStart: selectionStart,
-      selectionEnd: selectionEnd
+      selectionEnd: selectionEnd,
+      revealLimit: revealLimit
     ) {
       let base = Self.attributes(
         for: run.cell,
@@ -520,7 +546,7 @@ public struct TerminalScreenView: View {
       }
 
       for column in run.column..<(run.column + run.length) {
-        let cell = snapshot.cell(atLine: line, column: column)
+        let cell = column < revealLimit ? snapshot.cell(atLine: line, column: column) : .space
         let cluster = cell.isBlank ? " " : String(cell.character)
         guard let pair = Self.segmentMetrics(cluster: cluster) else {
           // .clip: per-cell frame, overflow cut at the cell edge.
