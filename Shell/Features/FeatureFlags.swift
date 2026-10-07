@@ -9,6 +9,11 @@ import Observation
 /// app can turn on/off; `FeatureFlagsStore` is the sole persistence/read layer
 /// for it.
 enum FeatureID: String, CaseIterable, Identifiable {
+  /// Motion in the UI: the custom sidebar's hover, insert/remove, selection
+  /// and icon animations, detail-page transitions, the gliding terminal cursor
+  /// and output typing out. First, so it leads the features list. Also off
+  /// while the system's Reduce Motion is on.
+  case animations
   case sessions
   case screen
   case ssh
@@ -24,16 +29,13 @@ enum FeatureID: String, CaseIterable, Identifiable {
   case web
   /// Reserved for a future embedded database feature.
   case database
-  /// Motion in the UI: the custom sidebar's hover, insert/remove, selection
-  /// and icon animations, detail-page transitions and the gliding terminal
-  /// cursor. Also off while the system's Reduce Motion is on.
-  case animations
 
   var id: String { rawValue }
 
   /// Human-readable name, for surfacing a toggle in settings/UI.
   var label: String {
     switch self {
+    case .animations: return "Animations"
     case .sessions: return "Sessions"
     case .screen: return "Screen sessions"
     case .ssh: return "SSH"
@@ -47,7 +49,6 @@ enum FeatureID: String, CaseIterable, Identifiable {
     case .settings: return "Settings"
     case .web: return "Web"
     case .database: return "Database"
-    case .animations: return "Animations"
     }
   }
 
@@ -55,6 +56,7 @@ enum FeatureID: String, CaseIterable, Identifiable {
   /// alongside `label` on a settings toggle row.
   var description: String {
     switch self {
+    case .animations: return "Sidebar, page, cursor and output animations"
     case .sessions: return "Local terminal sessions"
     case .screen: return "GNU screen / tmux persistent sessions"
     case .ssh: return "SSH connections and remote terminals"
@@ -68,7 +70,6 @@ enum FeatureID: String, CaseIterable, Identifiable {
     case .settings: return "Shell settings"
     case .web: return "In-app web sessions"
     case .database: return "Database connections"
-    case .animations: return "Sidebar, page and cursor animations"
     }
   }
 }

@@ -364,9 +364,9 @@ struct FeatureTests {
   /// `web` and `database` lanes, and never silently drop one.
   @Test func featureIDRegistryCoversEveryToggleableFeature() {
     #expect(FeatureID.allCases.map(\.rawValue) == [
-      "sessions", "screen", "ssh", "notes", "history", "actions",
+      "animations", "sessions", "screen", "ssh", "notes", "history", "actions",
       "smartActions", "monitoring", "files", "authorizedKeys",
-      "settings", "web", "database", "animations"
+      "settings", "web", "database"
     ])
     #expect(FeatureID.allCases.count == 14)
     // Reserved lanes exist and round-trip through their rawValue.
