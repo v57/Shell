@@ -273,9 +273,8 @@ struct LocalSectionView: View {
         Text("\(String(format: "%3d", cpu))% \(String(format: "%3d", gpu))% \(String(format: "%2d", monitor.watts))W")
           .font(.caption.weight(.medium))
           .monospaced()
-          // The animated sidebar rolls the digits as the stats tick.
-          .contentTransition(.numericText())
-          .sidebarAnimation(value: [cpu, gpu, monitor.watts])
+          // Never animated: the stats tick every second, and digit-roll
+          // motion on every tick is pure distraction.
       }
       .buttonStyle(.plain)
       .help("CPU · GPU · System power draw — click for graphs")
