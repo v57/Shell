@@ -139,7 +139,8 @@ private struct ActionRunRow: View {
   }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 2) {
+    let line = statusLine
+    VStack(alignment: .leading, spacing: 0) {
       HStack(spacing: 8) {
         stateIcon
         Text(spec?.action.name ?? "Action")
@@ -151,7 +152,11 @@ private struct ActionRunRow: View {
           .font(.caption2)
           .foregroundStyle(.secondary)
       }
-      statusLine
+      SidebarRowLine(isShown: line != nil) {
+        line?
+          .lineLimit(1)
+          .truncationMode(.tail)
+      }
     }
     .sidebarAnimation(value: stateSymbol)
     .contentShape(Rectangle())
@@ -179,34 +184,30 @@ private struct ActionRunRow: View {
       .accessibilityLabel(stateSymbol == "play.fill" ? "Running" : stateSymbol == "checkmark.circle.fill" ? "Finished" : "Failed")
   }
 
-  @ViewBuilder
-  private var statusLine: some View {
+  /// The row's second line, or nil when it has none: the failure, a
+  /// non-zero exit code, or the action's live last output line.
+  private var statusLine: Text? {
     switch session.connectionState {
     case .failed(let message):
-      Text(message)
+      return Text(message)
         .font(.caption2)
         .foregroundStyle(.red)
-        .lineLimit(1)
     case .closed:
       if let code = session.actionExitCode, code != 0 {
-        Text("exit " + String(code))
+        return Text("exit " + String(code))
           .font(.caption2.monospaced())
           .foregroundStyle(.red)
-          .lineLimit(1)
-      } else if !session.statusAttributedString(disableBackgrounds: disableBackgrounds, scheme: colorScheme).characters.isEmpty {
-        Text(session.statusAttributedString(disableBackgrounds: disableBackgrounds, scheme: colorScheme))
-          .font(.caption2.monospaced())
-          .lineLimit(1)
-          .truncationMode(.tail)
       }
+      return outputLine
     default:
-      if !session.statusAttributedString(disableBackgrounds: disableBackgrounds, scheme: colorScheme).characters.isEmpty {
-        Text(session.statusAttributedString(disableBackgrounds: disableBackgrounds, scheme: colorScheme))
-          .font(.caption2.monospaced())
-          .lineLimit(1)
-          .truncationMode(.tail)
-      }
+      return outputLine
     }
+  }
+
+  private var outputLine: Text? {
+    let status = session.statusAttributedString(disableBackgrounds: disableBackgrounds, scheme: colorScheme)
+    guard !status.characters.isEmpty else { return nil }
+    return Text(status).font(.caption2.monospaced())
   }
 }
 
@@ -322,7 +323,8 @@ struct SessionRow: View {
   }
   
   var body: some View {
-    VStack(alignment: .leading, spacing: 2) {
+    let status = session.statusAttributedString(disableBackgrounds: disableBackgrounds, scheme: colorScheme)
+    VStack(alignment: .leading, spacing: 0) {
       HStack(spacing: 8) {
         Image(systemName: "terminal")
           .foregroundStyle(.secondary)
@@ -344,8 +346,8 @@ struct SessionRow: View {
       // Second line: the session's status (n-th non-empty terminal line
       // from the bottom, or the line pinned by clicking its last
       // character), rendered in the terminal's own colors.
-      if !session.statusAttributedString(disableBackgrounds: disableBackgrounds, scheme: colorScheme).characters.isEmpty {
-        Text(session.statusAttributedString(disableBackgrounds: disableBackgrounds, scheme: colorScheme)).font(.caption2.monospaced()).lineLimit(1).truncationMode(.middle)
+      SidebarRowLine(isShown: !status.characters.isEmpty) {
+        Text(status).font(.caption2.monospaced()).lineLimit(1).truncationMode(.middle)
           .clipShape(.capsule)
       }
     }

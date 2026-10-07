@@ -123,6 +123,71 @@ private struct SidebarAnimationModifier<V: Equatable>: ViewModifier {
   }
 }
 
+/// A row's optional second line (a session's live terminal line, an action's
+/// exit code) that grows the row open and closes it again, so the rows below
+/// slide instead of jumping when the line comes and goes.
+///
+/// An `.animation` on the row would animate only the row's own subtree — the
+/// container lays out its siblings outside it, unanimated — and the line's
+/// presence follows terminal output, so there is no `withAnimation` to wrap it
+/// in. Instead the line's slot is an animatable `Layout` whose REPORTED height
+/// interpolates, re-laying the container out every frame. Always present (and
+/// zero-high while hidden), so the row's stack must not space it: the slot
+/// carries the `spacing` above the line itself.
+struct SidebarRowLine<Content: View>: View {
+  @Environment(\.sidebarAnimations) private var animates
+  let isShown: Bool
+  var spacing: CGFloat = 2
+  @ViewBuilder let content: Content
+
+  var body: some View {
+    SidebarRevealLayout(progress: isShown ? 1 : 0, spacing: spacing) {
+      if isShown {
+        content.transition(.opacity)
+      }
+    }
+    .clipped()
+    .animation(animates ? SidebarMotion.rows : nil, value: isShown)
+  }
+}
+
+/// `SidebarRowLine`'s slot: as tall as its line (plus the spacing above it)
+/// times `progress`, the line pinned to the top and revealed downward. The
+/// cache keeps the line's last height for the frames of a collapse when the
+/// line has already left the tree.
+private struct SidebarRevealLayout: Layout {
+  var progress: Double
+  let spacing: CGFloat
+
+  var animatableData: Double {
+    get { progress }
+    set { progress = newValue }
+  }
+
+  func makeCache(subviews: Subviews) -> CGFloat { 0 }
+  func updateCache(_ cache: inout CGFloat, subviews: Subviews) {}
+
+  func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout CGFloat) -> CGSize {
+    var width: CGFloat = 0
+    if let line = subviews.first {
+      let size = line.sizeThatFits(ProposedViewSize(width: proposal.width, height: nil))
+      width = size.width
+      cache = size.height
+    }
+    return CGSize(width: width, height: (cache + spacing) * progress)
+  }
+
+  func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout CGFloat) {
+    for line in subviews {
+      line.place(
+        at: CGPoint(x: bounds.minX, y: bounds.minY + spacing),
+        anchor: .topLeading,
+        proposal: ProposedViewSize(width: bounds.width, height: nil)
+      )
+    }
+  }
+}
+
 /// The geometry a macOS sidebar `List` gives its rows and section headers,
 /// measured against the system one so the `.lazyStack` container reproduces it.
 enum SidebarMetrics {

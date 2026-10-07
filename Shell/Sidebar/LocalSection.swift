@@ -345,7 +345,10 @@ private struct ScreenSessionRow: View {
   }
   
   var body: some View {
-    VStack(alignment: .leading, spacing: 2) {
+    let status = attachedSession?.statusAttributedString(disableBackgrounds: disableBackgrounds, scheme: colorScheme) ?? AttributedString()
+    // No stack spacing: the status line's slot is always present and spaces
+    // itself (`SidebarRowLine`), so the subtitle does too.
+    VStack(alignment: .leading, spacing: 0) {
       HStack(spacing: 8) {
         Image(systemName: icon)
           .foregroundStyle(.secondary)
@@ -381,9 +384,10 @@ private struct ScreenSessionRow: View {
           .foregroundStyle(.secondary)
           .lineLimit(1)
           .truncationMode(.middle)
+          .padding(.top, 2)
       }
-      if let session = attachedSession, !session.statusAttributedString(disableBackgrounds: disableBackgrounds, scheme: colorScheme).characters.isEmpty {
-        Text(session.statusAttributedString(disableBackgrounds: disableBackgrounds, scheme: colorScheme))
+      SidebarRowLine(isShown: !status.characters.isEmpty) {
+        Text(status)
           .font(.caption2.monospaced())
           .lineLimit(1)
           .truncationMode(.tail)
