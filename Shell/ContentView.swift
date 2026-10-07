@@ -74,10 +74,16 @@ struct ContentView: View {
           }
         }
       } detail: {
-        detailPane
-          // Switching pages cross-fades the outgoing page into the incoming
-          // one (each page carries `detailTransition`).
-          .animation(animates ? .smooth(duration: 0.25) : nil, value: model.selection)
+        // A STABLE root for the detail column: `NavigationSplitView` swaps a
+        // new root view in without animation, so switching between kinds of
+        // page (a terminal → a note) changes branches INSIDE this container,
+        // where the pages' `detailTransition` cross-fades them.
+        ZStack {
+          detailPane
+        }
+        // Switching pages cross-fades the outgoing page into the incoming
+        // one (each page carries `detailTransition`).
+        .animation(animates ? .smooth(duration: 0.25) : nil, value: model.selection)
       }
       .sheet(isPresented: $model.showingNewConnection) {
         NewConnectionView()
