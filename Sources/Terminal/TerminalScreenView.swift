@@ -50,8 +50,9 @@ public func isCellSelected(line: Int, column: Int, start: TerminalCursor?, end: 
 
 /// Splits one logical line into attribute runs. `line` is the LOGICAL line
 /// (scrollback + grid); `row` is the screen row used for cursor hit-testing
-/// (only meaningful when `atBottom` is true). Cells `isHidden` reports
-/// (output not typed out yet — see `TerminalOutputReveal`) render blank.
+/// (only meaningful when `atBottom` is true). Columns `replacement` returns
+/// a cell for (output not typed out yet — see `TerminalOutputReveal`) render
+/// that cell, the text still on screen there, instead of the snapshot's.
 public func terminalCellRuns(
   snapshot: TerminalSnapshot,
   line: Int,
@@ -59,18 +60,18 @@ public func terminalCellRuns(
   atBottom: Bool,
   selectionStart: TerminalCursor?,
   selectionEnd: TerminalCursor?,
-  isHidden: (Int) -> Bool = { _ in false }
+  replacement: (Int) -> TerminalCell? = { _ in nil }
 ) -> [TerminalCellRun] {
   var runs: [TerminalCellRun] = []
   var column = 0
   while column < snapshot.columns {
-    let cell = isHidden(column) ? .space : snapshot.cell(atLine: line, column: column)
+    let cell = replacement(column) ?? snapshot.cell(atLine: line, column: column)
     let isCursor = atBottom && snapshot.showCursor && row == snapshot.cursor.row && column == snapshot.cursor.column
     let isSelected = isCellSelected(line: line, column: column, start: selectionStart, end: selectionEnd)
 
     var end = column + 1
     while end < snapshot.columns {
-      let next = isHidden(end) ? .space : snapshot.cell(atLine: line, column: end)
+      let next = replacement(end) ?? snapshot.cell(atLine: line, column: end)
       let nextCursor = atBottom && snapshot.showCursor && row == snapshot.cursor.row && end == snapshot.cursor.column
       let nextSelected = isCellSelected(line: line, column: end, start: selectionStart, end: selectionEnd)
       if next.foreground == cell.foreground,
@@ -358,8 +359,8 @@ public struct TerminalScreenView: View {
     let column = shownCursorColumn(snapshot: snapshot, line: line)
     if atBottom, snapshot.showCursor, column >= 0, line >= 0, line < snapshot.totalLines,
        !isCellSelected(line: line, column: column, start: selectionStart, end: selectionEnd) {
-      // A cell not typed yet shows the block blank.
-      let cell = reveal.isShown(line: line, column: column) ? snapshot.cell(atLine: line, column: column) : .space
+      // A cell not typed yet shows the block over its old text.
+      let cell = reveal.replacedCell(line: line, column: column) ?? snapshot.cell(atLine: line, column: column)
       let style = Self.attributes(
         for: cell,
         isCursor: true,
@@ -389,7 +390,7 @@ public struct TerminalScreenView: View {
 
   /// The cursor's column to draw at: while its line is still typing out, the
   /// cursor rides the typing head (the last already-shown column at or before
-  /// its own), so it never sits on a cell that is still blank.
+  /// its own), so it never sits on a cell still showing old text.
   private func shownCursorColumn(snapshot: TerminalSnapshot, line: Int) -> Int {
     var column = min(max(snapshot.cursor.column, 0), snapshot.columns - 1)
     while column > 0, !reveal.isShown(line: line, column: column) { column -= 1 }
@@ -503,11 +504,11 @@ public struct TerminalScreenView: View {
   ) -> [LinePiece] {
     let terminalBackground = TerminalPalette.windowBackground
     let screenRow = line - (snapshot.totalLines - snapshot.rows)
-    // Columns not typed out yet render blank (TerminalOutputReveal); with
-    // animations off everything shows at once.
-    let isHidden: (Int) -> Bool = animationsEnabled
-      ? { [reveal] column in !reveal.isShown(line: line, column: column) }
-      : { _ in false }
+    // Columns not typed out yet keep their old text (TerminalOutputReveal);
+    // with animations off everything shows at once.
+    let replacement: (Int) -> TerminalCell? = animationsEnabled
+      ? { [reveal] column in reveal.replacedCell(line: line, column: column) }
+      : { _ in nil }
     var pieces: [LinePiece] = []
 
     for run in terminalCellRuns(
@@ -517,7 +518,7 @@ public struct TerminalScreenView: View {
       atBottom: atBottom,
       selectionStart: selectionStart,
       selectionEnd: selectionEnd,
-      isHidden: isHidden
+      replacement: replacement
     ) {
       let base = Self.attributes(
         for: run.cell,
@@ -556,7 +557,7 @@ public struct TerminalScreenView: View {
       }
 
       for column in run.column..<(run.column + run.length) {
-        let cell = isHidden(column) ? .space : snapshot.cell(atLine: line, column: column)
+        let cell = replacement(column) ?? snapshot.cell(atLine: line, column: column)
         let cluster = cell.isBlank ? " " : String(cell.character)
         guard let pair = Self.segmentMetrics(cluster: cluster) else {
           // .clip: per-cell frame, overflow cut at the cell edge.

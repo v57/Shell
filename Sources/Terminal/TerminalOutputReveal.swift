@@ -4,7 +4,10 @@ import Observation
 /// Types a terminal's new output out instead of showing it all at once.
 ///
 /// Two buffers: the session publishes the TARGET snapshot; the view renders
-/// `shown`, minus each still-typing line's hidden range (see `PendingLine`).
+/// `shown`, except each still-typing line's hidden range (see `PendingLine`),
+/// which keeps showing what was on screen there BEFORE the update (`replaced`)
+/// until the typing head overwrites it — changed text is replaced in place,
+/// never blanked first and re-typed (which flashed on every repaint).
 /// Each new target is diffed against the previous one line by line, by
 /// CHARACTER only (attributes are ignored), as the cheaper of:
 /// - column-aligned hunks (an in-place repaint: only the disjointly changed
@@ -33,7 +36,8 @@ import Observation
 @Observable
 final class TerminalOutputReveal {
   /// One line's still-typing ranges: sorted non-overlapping half-open column
-  /// spans that render blank and fill in left to right, top line first.
+  /// spans that keep their old text and are overwritten left to right, top
+  /// line first.
   /// Everything OUTSIDE those spans — unchanged text between disjoint edits
   /// (a spinner tick plus a grown progress bar plus a changed digit on one
   /// rewritten line) — renders at once, so unchanged text never blanks and
@@ -62,6 +66,12 @@ final class TerminalOutputReveal {
   private(set) var shown: TerminalSnapshot?
   /// Lines still typing (logical line → their hidden range). Absent = fully shown.
   private(set) var pending: [Int: PendingLine] = [:]
+  /// What each still-typing line's hidden columns render meanwhile: the cell
+  /// that column displayed before the update that hid it (logical line →
+  /// cells by column). Columns past an array's end, and lines with no entry
+  /// (genuinely new lines), render blank. Entries of lines that finished
+  /// typing are stale but unread (only hidden columns consult it).
+  private(set) var replaced: [Int: [TerminalCell]] = [:]
   @ObservationIgnored private var ticker: Task<Void, Never>?
   /// Frames left before the typing must have caught up with the output —
   /// reset by every update that brings new output, counted down per frame.
@@ -73,9 +83,9 @@ final class TerminalOutputReveal {
   static let minimumCharactersPerFrame = 2
   private static let frame = Duration.milliseconds(16)
 
-  /// Whether `column` of `line` renders its cell already (false = still blank
-  /// while the line's changed middle types out). Lines with no pending entry
-  /// are fully shown.
+  /// Whether `column` of `line` renders its cell already (false = still
+  /// showing the old cell while the line's changed middle types out). Lines
+  /// with no pending entry are fully shown.
   func isShown(line: Int, column: Int) -> Bool {
     guard let p = pending[line] else { return true }
     for span in p.spans {
@@ -85,11 +95,20 @@ final class TerminalOutputReveal {
     return true
   }
 
+  /// The cell a not-yet-typed column renders in place of `shown`'s: what was
+  /// on screen there before (nil = the column is shown, render `shown`).
+  func replacedCell(line: Int, column: Int) -> TerminalCell? {
+    guard !isShown(line: line, column: column) else { return nil }
+    guard let cells = replaced[line], column < cells.count else { return .space }
+    return cells[column]
+  }
+
   /// Shows `snapshot` at once: nothing types.
   func snap(to snapshot: TerminalSnapshot) {
     ticker?.cancel()
     ticker = nil
     if !pending.isEmpty { pending = [:] }
+    if !replaced.isEmpty { replaced = [:] }
     shown = snapshot
   }
 
@@ -111,13 +130,14 @@ final class TerminalOutputReveal {
     // Only the visible grid types; anything above it is already history.
     let firstVisible = max(0, target.totalLines - target.rows)
     var pending = Self.shifted(self.pending, by: shift).filter { $0.key >= firstVisible }
+    var replaced: [Int: [TerminalCell]] = [:]
 
     for line in firstVisible..<target.totalLines {
       let end = Self.contentEnd(of: target, line: line)
       let previousLine = line + shift
       if end == 0 || previousLine >= previous.totalLines {
         // An emptied line snaps (a deletion has nothing to type); a genuinely
-        // new line types whole.
+        // new line types whole (over blank: nothing was there).
         pending[line] = end == 0 ? nil : PendingLine(cursor: 0, to: end)
         continue
       }
@@ -128,15 +148,21 @@ final class TerminalOutputReveal {
       let kept = pending[line].map { Self.clipped($0.spans, to: end) } ?? []
       let spans = Self.merged(kept + fresh)
       pending[line] = spans.isEmpty ? nil : PendingLine(spans: spans)
+      // Hidden columns keep what they displayed so far — the previous text,
+      // or a still-typing column's own old cell — until typed over.
+      if let upper = spans.last?.upperBound {
+        replaced[line] = (0..<upper).map { displayedCell(in: previous, line: previousLine, column: $0) }
+      }
     }
 
     shown = target
     // The animation's first characters show on the SAME frame the update
     // lands (not a ticker frame later): tiny rewrites — a spinner tick, a
-    // progress digit — never visibly blank, and every animation starts with
-    // something already visible.
+    // progress digit — never lag a frame behind, and every animation starts
+    // with something already typed.
     Self.revealImmediately(&pending)
     if pending != self.pending { self.pending = pending }
+    if replaced != self.replaced { self.replaced = replaced }
     framesLeft = Self.framesToCatchUp
     if pending.isEmpty {
       ticker?.cancel()
@@ -146,9 +172,16 @@ final class TerminalOutputReveal {
     }
   }
 
+  /// The cell `column` of `line` displays right now, against `previous` (the
+  /// current `shown`): its own cell once typed, else the old cell it still
+  /// keeps.
+  private func displayedCell(in previous: TerminalSnapshot, line: Int, column: Int) -> TerminalCell {
+    replacedCell(line: line, column: column) ?? previous.cell(atLine: line, column: column)
+  }
+
   // MARK: - Typing
 
-  /// Characters revealed synchronously inside `update()`, on the same frame.
+  /// Characters typed synchronously inside `update()`, on the same frame.
   private static let immediateCharacters = 2
 
   /// Reveals the animation's first characters at once, top line first (no

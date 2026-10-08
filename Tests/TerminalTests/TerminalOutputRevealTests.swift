@@ -66,6 +66,35 @@ struct TerminalOutputRevealTests {
     #expect(reveal(from: "hello", to: "\rXhello").pending.isEmpty)
   }
 
+  @Test func changedTextKeepsOldCharactersUntilTypedOver() {
+    // "status: idle" -> "status: running": the changed middle keeps showing
+    // the old text (never blanks) and is overwritten left to right; columns
+    // past the old text start blank.
+    let r = reveal(from: "status: idle", to: "\rstatus: running")
+    #expect(r.pending[0] == TerminalOutputReveal.PendingLine(cursor: 10, to: 15))
+    #expect(r.replacedCell(line: 0, column: 9) == nil) // typed on the same frame
+    #expect(r.replacedCell(line: 0, column: 10)?.character == "l")
+    #expect(r.replacedCell(line: 0, column: 11)?.character == "e")
+    #expect(r.replacedCell(line: 0, column: 12)?.isBlank == true)
+    #expect(r.replacedCell(line: 0, column: 0) == nil)
+  }
+
+  @Test func rewriteOfStillTypingLineKeepsItsOldCharacters() {
+    // A line rewritten again before it finished typing keeps showing what was
+    // on screen — the first update's OLD text, not its never-shown target.
+    let p = parser()
+    p.consume(Data("count: aaaaaaaa".utf8))
+    let r = TerminalOutputReveal()
+    r.snap(to: p.snapshot())
+    p.consume(Data("\rcount: bbbbbbbb".utf8))
+    r.update(to: p.snapshot(), animate: true)
+    p.consume(Data("\rcount: cccccccc".utf8))
+    r.update(to: p.snapshot(), animate: true)
+    let hidden = (0..<20).filter { !r.isShown(line: 0, column: $0) }
+    #expect(!hidden.isEmpty)
+    for c in hidden { #expect(r.replacedCell(line: 0, column: c)?.character == "a") }
+  }
+
   @Test func pureRecolorSettlesInstantly() {
     let r = reveal(from: "hello", to: "\r\u{1B}[1mhello\u{1B}[m")
     #expect(r.pending.isEmpty)
