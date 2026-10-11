@@ -119,6 +119,14 @@ struct AuthorizedKeysManagerTests {
     #expect(AuthorizedKeysManager.keyMaterial(of: "just-one-field") == nil)
   }
 
+  @Test func onlyPlainKeyLinesAreAppended() {
+    #expect(AuthorizedKeysManager.isPlainKeyLine("ecdsa-sha2-nistp256 AAAA123 Shell (v57@Mac)"))
+    // A synced line must not smuggle in a second key or options.
+    #expect(!AuthorizedKeysManager.isPlainKeyLine("ecdsa-sha2-nistp256 AAAA123 x\nssh-ed25519 AAAA999 y"))
+    #expect(!AuthorizedKeysManager.isPlainKeyLine("command=\"sh\" ecdsa-sha2-nistp256 AAAA123"))
+    #expect(!AuthorizedKeysManager.isPlainKeyLine("ecdsa-sha2-nistp256 AAAA123 x\r"))
+  }
+
   @Test func parseOutputStripsPtyCR() {
     #expect(AuthorizedKeysManager.parseOutput("line1\r\nline2\r\n") == ["line1", "line2"])
     #expect(AuthorizedKeysManager.parseOutput("no-cr\nhere") == ["no-cr", "here"])
