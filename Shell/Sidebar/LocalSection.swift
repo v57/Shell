@@ -337,9 +337,17 @@ private struct ScreenSessionRow: View {
   }
   
   private var icon: String {
-    "shield.fill"
+    info.isProtected ? "lock.fill" : "shield.fill"
   }
   
+  private var helpText: String {
+    switch info.kind {
+    case .tmux: "tmux session"
+    case .screen: "GNU screen session"
+    case .session: info.isProtected ? "Password-protected session" : "session"
+    }
+  }
+
   private var kindLabel: String {
     info.kind == .tmux ? "tmux" : "screen"
   }
@@ -371,9 +379,7 @@ private struct ScreenSessionRow: View {
           .frame(width: 7, height: 7)
           .sidebarAnimation(value: info.isAttached)
           .accessibilityLabel(info.state)
-          .help(info.kind == .tmux
-            ? "tmux session"
-            : "GNU screen session")
+          .help(helpText)
       }
       // Remote rows carry their SSH origin so they're distinguishable from
       // local rows in the same merged section (e.g. "swiftui-optimization"

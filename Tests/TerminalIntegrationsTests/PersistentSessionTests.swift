@@ -186,6 +186,22 @@ struct PersistentSessionTests {
     #expect(!rows[0].isAttached)
   }
 
+  @Test func sessionParsesProtectedFlag() {
+    let json = """
+    [
+      {"id": "vault", "title": "zsh", "attached": 0, "protected": true},
+      {"id": "open", "title": "zsh", "attached": 0, "protected": false},
+      {"id": "old", "title": "zsh", "attached": 0}
+    ]
+    """
+    let rows = ScreenSessionsParser.parseSessionOutput(json)
+    #expect(rows.map(\.isProtected) == [true, false, false])
+    let origin = ScreenRemoteOrigin(sshConfigID: UUID(), displayName: "box")
+    let remote = ScreenSessionsParser.parse(
+      command: ScreenSessionsParser.sessionListCommand, text: json, origin: origin)
+    #expect(remote.map(\.isProtected) == [true, false, false])
+  }
+
   @Test func sessionEmptyPayloadYieldsNothing() {
     #expect(ScreenSessionsParser.parseSessionOutput("").isEmpty)
     #expect(ScreenSessionsParser.parseSessionOutput("[]").isEmpty)

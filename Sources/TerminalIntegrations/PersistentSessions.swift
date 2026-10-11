@@ -42,14 +42,19 @@ public struct ScreenSessionInfo: Identifiable, Hashable {
   /// The SSH host this session lives on, nil for local. Defaults to nil so
   /// the existing local parsing (which produces local rows) is unchanged.
   public var remoteOrigin: ScreenRemoteOrigin? = nil
+  /// A password-protected `session`-tool session (`session -p`). Attaching
+  /// still runs `session <name>`, which asks for the password in the
+  /// terminal; kill, rename and cwd need it too. Always false for screen/tmux.
+  public var isProtected: Bool = false
 
   public init(name: String, pid: Int, state: String, kind: PersistentSessionKind,
-              remoteOrigin: ScreenRemoteOrigin? = nil) {
+              remoteOrigin: ScreenRemoteOrigin? = nil, isProtected: Bool = false) {
     self.name = name
     self.pid = pid
     self.state = state
     self.kind = kind
     self.remoteOrigin = remoteOrigin
+    self.isProtected = isProtected
   }
 
   public var isRemote: Bool { remoteOrigin != nil }
@@ -123,13 +128,15 @@ public enum ScreenSessionsParser {
     pattern: #"^\s*(\d+)\.(\S+)\s+\(([^)]+)\)\s*$"#
   )
 
-  /// The JSON shape the `session` tool serializes for `session list`. `title`
-  /// and `attached` are emitted with `#[serde(default)]`, so an absent field
-  /// must not fail the decode.
+  /// The JSON shape the `session` tool serializes for `session list`. `title`,
+  /// `attached` and `protected` are emitted with `#[serde(default)]` (and
+  /// `protected` is missing from older releases), so an absent field must not
+  /// fail the decode.
   private struct SessionListEntry: Decodable {
     let id: String
     let title: String?
     let attached: Int?
+    let protected: Bool?
   }
 
   /// Parses `tmux ls -F` output ("name 0"/"name 1" per line) into
@@ -182,7 +189,8 @@ public enum ScreenSessionsParser {
         name: entry.id,
         pid: 0,
         state: attached > 0 ? "attached" : "detached",
-        kind: .session
+        kind: .session,
+        isProtected: entry.protected ?? false
       )
     }
   }
@@ -199,7 +207,8 @@ public enum ScreenSessionsParser {
       base = parseScreenOutput(text)
     }
     return base.map { info in
-      ScreenSessionInfo(name: info.name, pid: info.pid, state: info.state, kind: info.kind, remoteOrigin: origin)
+      ScreenSessionInfo(name: info.name, pid: info.pid, state: info.state, kind: info.kind,
+                        remoteOrigin: origin, isProtected: info.isProtected)
     }
   }
 
