@@ -24,7 +24,6 @@ enum FeatureID: String, CaseIterable, Identifiable {
   case monitoring
   case files
   case authorizedKeys
-  case settings
   /// Reserved for a future built-in web-session/browser feature.
   case web
   /// Reserved for a future embedded database feature.
@@ -57,7 +56,6 @@ enum FeatureID: String, CaseIterable, Identifiable {
     case .monitoring: return "Monitoring"
     case .files: return "Files"
     case .authorizedKeys: return "Authorized Keys"
-    case .settings: return "Settings"
     case .web: return "Web"
     case .database: return "Database"
     }
@@ -78,7 +76,6 @@ enum FeatureID: String, CaseIterable, Identifiable {
     case .monitoring: return "Live CPU / GPU / wattage stats"
     case .files: return "Files panel and file browsing"
     case .authorizedKeys: return "SSH authorized keys"
-    case .settings: return "Shell settings"
     case .web: return "In-app web sessions"
     case .database: return "Database connections"
     }
