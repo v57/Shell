@@ -39,6 +39,9 @@ final class HistoryStore {
   var storageError: String?
 
   private let fileURL: URL
+  /// The history file exists but couldn't be read (keychain locked, file
+  /// damaged). Saving must not replace it with only this run's sessions.
+  private var loadFailed = false
 
   init(fileURL: URL? = nil) {
     self.fileURL = fileURL ?? Self.defaultFileURL()
@@ -59,6 +62,7 @@ final class HistoryStore {
 
   func removeAll() {
     sessions.removeAll()
+    loadFailed = false
     do {
       if FileManager.default.fileExists(atPath: fileURL.path) {
         try FileManager.default.removeItem(at: fileURL)
@@ -77,17 +81,31 @@ final class HistoryStore {
   private func load() {
     guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
     do {
-      let data = try SecureFileStore.read(from: fileURL, domain: .history)
-      sessions = try JSONDecoder().decode([HistorySession].self, from: data)
-        .sorted { $0.activityDate > $1.activityDate }
+      sessions = try readSessions().sorted { $0.activityDate > $1.activityDate }
+      loadFailed = false
       storageError = nil
     } catch {
+      loadFailed = true
       storageError = error.localizedDescription
       NSLog("HistoryStore: could not load history: \(error)")
     }
   }
 
+  private func readSessions() throws -> [HistorySession] {
+    let data = try SecureFileStore.read(from: fileURL, domain: .history)
+    return try JSONDecoder().decode([HistorySession].self, from: data)
+  }
+
   private func persist() {
+    if loadFailed {
+      // Merge in the history that failed to load, or leave the file alone
+      // until it can be read.
+      guard let earlier = try? readSessions() else { return }
+      let ids = Set(sessions.map(\.id))
+      sessions = (sessions + earlier.filter { !ids.contains($0.id) })
+        .sorted { $0.activityDate > $1.activityDate }
+      loadFailed = false
+    }
     do {
       if sessions.isEmpty {
         if FileManager.default.fileExists(atPath: fileURL.path) {
