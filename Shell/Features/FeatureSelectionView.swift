@@ -25,7 +25,7 @@ struct FeatureSelectionView: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
-      ForEach(FeatureID.allCases) { feature in
+      ForEach(FeatureID.available) { feature in
         // The row binds through an explicit get/set so the store stays the
         // sole writer of feature state (no local copy of the disabled set).
         FeatureRow(
@@ -36,7 +36,7 @@ struct FeatureSelectionView: View {
             store.setEnabled(newValue, for: feature)
           }
         }
-        if feature != FeatureID.allCases.last {
+        if feature != FeatureID.available.last {
           Divider()
         }
       }

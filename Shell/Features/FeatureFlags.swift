@@ -32,6 +32,17 @@ enum FeatureID: String, CaseIterable, Identifiable {
 
   var id: String { rawValue }
 
+  /// The features this platform has, in list order. iOS has no local
+  /// terminals (Sessions, Screen, History, Monitoring), Files panel or Smart
+  /// Actions, so their toggles would do nothing there.
+  static var available: [FeatureID] {
+    #if os(iOS)
+    allCases.filter { ![.sessions, .screen, .history, .smartActions, .monitoring, .files].contains($0) }
+    #else
+    allCases
+    #endif
+  }
+
   /// Human-readable name, for surfacing a toggle in settings/UI.
   var label: String {
     switch self {
