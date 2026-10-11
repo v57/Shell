@@ -49,7 +49,7 @@ struct ContentView: View {
   /// Whether the window appears active (key window). Animations freeze while
   /// the window is unfocused; the sidebar container choice below deliberately
   /// ignores it so focus never swaps the sidebar (state loss).
-  @Environment(\.appearsActive) private var appearsActive
+  @WindowAppearsActive private var appearsActive
 
   /// The Animations feature, unless the system asks for reduced motion.
   /// Decides only which sidebar CONTAINER mounts — stable across window
@@ -318,14 +318,10 @@ struct ContentView: View {
           // and Return — via `.onSubmit(of: .search)` — commits the
           // edited text to navigate the WebView.
           .searchable(text: $webAddressText, prompt: "URL")
-          .searchFocused($webAddressFocused)
-          // By default the search field hides the rest of the toolbar
-          // while it is active (on iOS the navigation bar's back button
-          // disappears until the field is cleared). Keep the toolbar's
-          // other controls visible so the user can always navigate away
-          // without cancelling the search first. Must come AFTER
-          // `.searchable` to apply to the toolbar search field.
-          .searchPresentationToolbarBehavior(.avoidHidingContent)
+          // Focus tracking, and keeping the toolbar visible while the
+          // field is active. Must come AFTER `.searchable` to apply to
+          // the toolbar search field.
+          .modifier(WebAddressSearchBehavior(focused: $webAddressFocused))
           .onSubmit(of: .search) {
             // Only navigate when the edited text actually differs from
             // what's displayed — submitting an unchanged address is a
@@ -836,3 +832,26 @@ private struct OpenWithMenu: View {
   }
 }
 #endif // os(macOS)
+
+/// The web address bar's focus binding and toolbar behavior. By default the
+/// search field hides the rest of the toolbar while it is active (on iOS the
+/// navigation bar's back button disappears until the field is cleared), so
+/// the toolbar's other controls are kept visible and the user can always
+/// navigate away without cancelling the search first. `searchFocused` needs
+/// macOS 15 / iOS 18: before that the focus isn't tracked, so a tunnel URL
+/// update can replace an address being typed.
+private struct WebAddressSearchBehavior: ViewModifier {
+  let focused: FocusState<Bool>.Binding
+
+  func body(content: Content) -> some View {
+    if #available(macOS 15.0, iOS 18.0, *) {
+      content
+        .searchFocused(focused)
+        .searchPresentationToolbarBehavior(.avoidHidingContent)
+    } else if #available(macOS 14.1, iOS 17.1, *) {
+      content.searchPresentationToolbarBehavior(.avoidHidingContent)
+    } else {
+      content
+    }
+  }
+}

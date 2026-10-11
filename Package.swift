@@ -5,7 +5,7 @@ import PackageDescription
 
 let package = Package(
     name: "Terminal",
-    platforms: [.macOS(.v15), .iOS(.v18)],
+    platforms: [.macOS(.v14), .iOS(.v17)],
     products: [.library(name: "Terminal", targets: ["Terminal"]), .library(name: "TerminalIntegrations", targets: ["TerminalIntegrations"]), .library(name: "Monitoring", targets: ["Monitoring"]), .library(name: "DatabaseEngines", targets: ["DatabaseEngines"])],
     dependencies: [
         // Local Database package (MongoDB / PostgreSQL / Redis / SQLite engine

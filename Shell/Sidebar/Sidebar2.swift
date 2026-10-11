@@ -38,7 +38,7 @@ struct SidebarView2: View {
   /// While the window is unfocused every animation in here goes still — but
   /// the container stays mounted (ContentView picks the container from the
   /// feature flag alone, so focus never swaps SidebarView2 for SidebarView).
-  @Environment(\.appearsActive) private var appearsActive
+  @WindowAppearsActive private var appearsActive
   /// Where the selection highlight glides between rows.
   @Namespace private var selectionNamespace
 
