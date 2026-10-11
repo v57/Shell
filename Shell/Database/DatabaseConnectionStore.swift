@@ -134,7 +134,7 @@ final class DatabaseConnectionStore {
         try SSHKeychain.savePassword(password, account: connection.passwordAccount)
       } catch {
         storageError = error.localizedDescription
-        NSLog("DatabaseConnectionStore: could not save password for \(connection.displayName): \(error)")
+        NSLog("DatabaseConnectionStore: could not save a connection's password: \(error)")
       }
     }
     reload()
