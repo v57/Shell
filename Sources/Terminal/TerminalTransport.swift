@@ -3,20 +3,35 @@ import Foundation
 
 // MARK: - Auth prompts
 
-/// Shown when an SSH server presents an unknown host key.
+/// Shown when an SSH server presents an unknown host key, or a different key
+/// than the one remembered for it.
 public struct TerminalHostKeyPrompt: Identifiable {
   public let id = UUID()
   public let host: String
   public let port: Int
   public let fingerprint: String
+  /// The fingerprint remembered for this host when the server now presents a
+  /// different key: someone may be intercepting the connection. Nil on first
+  /// contact.
+  public let previousFingerprint: String?
   /// Call with `true` to accept (and remember) the key, `false` to reject.
   public let respond: (Bool) -> Void
 
-  public init(host: String, port: Int, fingerprint: String, respond: @escaping (Bool) -> Void) {
+  public init(host: String, port: Int, fingerprint: String, previousFingerprint: String? = nil, respond: @escaping (Bool) -> Void) {
     self.host = host
     self.port = port
     self.fingerprint = fingerprint
+    self.previousFingerprint = previousFingerprint
     self.respond = respond
+  }
+
+  /// Answers for connections that run without a visible prompt (file
+  /// browser, tunnels, the authorized-keys panel): trusts a host on first
+  /// contact, rejects a changed key. A changed key must never be accepted
+  /// silently: the saved password would go to whoever answered, and the
+  /// remembered key would be replaced.
+  public func respondTrustingFirstUse() {
+    respond(previousFingerprint == nil)
   }
 }
 

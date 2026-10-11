@@ -79,10 +79,11 @@ final class SSHCommandRunner: FileCommandExecutor {
         self?.terminationMessage = message
         self?.complete(continuation)
       }
-      // Trust on first use — the user explicitly opened the file browser for
-      // this host (the engine also auto-accepts known hosts).
+      // Trust on first use, never a changed key — the user explicitly opened
+      // the file browser for this host (the engine also auto-accepts known
+      // hosts).
       session.onHostKeyPrompt = { prompt in
-        prompt.respond(true)
+        prompt.respondTrustingFirstUse()
       }
       // Saved passwords answer silently; without one, auth fails and the
       // caller surfaces the termination error.

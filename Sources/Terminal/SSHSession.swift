@@ -63,6 +63,7 @@ public final class SSHSession: TerminalTransport {
         host: self.config.host,
         port: self.config.port,
         fingerprint: challenge.fingerprint,
+        previousFingerprint: challenge.previousFingerprint,
         respond: challenge.respond
       ))
     }

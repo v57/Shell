@@ -6,7 +6,8 @@ import Terminal
 /// file (direct FileManager access) or a remote machine's, reached through
 /// a headless SSH exec (the same `SSHSession` transport the app uses for
 /// action sessions; saved passwords are used automatically, host keys are
-/// trusted on first use because opening this panel IS the intent to connect).
+/// trusted on first use because opening this panel IS the intent to connect;
+/// a changed host key is refused).
 ///
 /// The panel never deals in raw lines: entries are key-material-matched
 /// (`"type base64"`), so the same key is recognized regardless of its

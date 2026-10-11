@@ -287,10 +287,11 @@ final class DatabaseSession {
     let session = SSHSession(config: config, forwardingOnly: true)
     self.sshSession = session
 
-    // Trust on first use — opening a database connection bound to a host IS the
-    // intent to connect (same policy as the web card / file browser).
+    // Trust on first use, never a changed key — opening a database connection
+    // bound to a host IS the intent to connect (same policy as the web card /
+    // file browser).
     session.onHostKeyPrompt = { prompt in
-      prompt.respond(true)
+      prompt.respondTrustingFirstUse()
     }
     session.onPasswordPrompt = { [config] prompt in
       let saved = (try? SSHKeychain.loadPassword(account: config.passwordAccount)) ?? nil

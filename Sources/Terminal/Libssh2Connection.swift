@@ -29,9 +29,12 @@ public struct RemoteCommandResult: Sendable {
 /// The socket is non-blocking and the session is driven in non-blocking mode
 /// with a `poll()` loop, so no libssh2 call stalls the owning thread.
 nonisolated final class Libssh2Connection: @unchecked Sendable {
-  /// A request to the UI to verify an unknown host key.
+  /// A request to the UI to verify an unknown or changed host key.
   struct HostKeyChallenge {
     let fingerprint: String
+    /// The fingerprint remembered for this host when the server now presents
+    /// a different key (possible man-in-the-middle); nil on first contact.
+    let previousFingerprint: String?
     /// Call with `true` to accept (and remember) the key, `false` to reject.
     let respond: @Sendable (Bool) -> Void
   }
@@ -441,11 +444,12 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
     let base64 = hashData.base64EncodedString().replacingOccurrences(of: "=", with: "")
     let fingerprint = "SHA256:\(base64)"
 
-    if knownHosts.fingerprint(for: config.host, port: config.port) == fingerprint {
+    let known = knownHosts.fingerprint(for: config.host, port: config.port)
+    if known == fingerprint {
       return
     }
 
-    // Unknown host key — ask the UI. The prompt saves (or not) and signals; we
+    // Unknown or changed host key — ask the UI. The prompt saves (or not) and signals; we
     // then re-check the store to learn the user's decision without a mutable
     // flag racing across threads.
     let sem = DispatchSemaphore(value: 0)
@@ -456,7 +460,7 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
       sem.signal()
     }
     DispatchQueue.main.async { [weak self] in
-      self?.onHostKeyChallenge?(HostKeyChallenge(fingerprint: fingerprint, respond: respond))
+      self?.onHostKeyChallenge?(HostKeyChallenge(fingerprint: fingerprint, previousFingerprint: known, respond: respond))
     }
     _ = sem.wait(timeout: .now() + .seconds(60))
     if knownHosts.fingerprint(for: config.host, port: config.port) != fingerprint {

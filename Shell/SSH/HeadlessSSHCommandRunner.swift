@@ -8,7 +8,7 @@ import Terminal
 /// Authentication mirrors interactive sessions: the Secure Enclave key
 /// first (via `SSHSession`), saved password as fallback. Host keys are
 /// trusted on first use — opening the authorized-keys panel for a host IS
-/// the intent to connect to it.
+/// the intent to connect to it. A changed host key fails the command.
 @MainActor
 final class HeadlessSSHCommandRunner {
   struct Result {
@@ -48,10 +48,11 @@ final class HeadlessSSHCommandRunner {
         self?.terminationMessage = message
         self?.complete(continuation)
       }
-      // Trust on first use — the user explicitly opened the keys panel for
-      // this host (the engine also auto-accepts known hosts).
+      // Trust on first use, never a changed key — the user explicitly opened
+      // the keys panel for this host (the engine also auto-accepts known
+      // hosts).
       session.onHostKeyPrompt = { prompt in
-        prompt.respond(true)
+        prompt.respondTrustingFirstUse()
       }
       // Saved passwords answer silently; without one, auth fails and the
       // panel surfaces the termination message.
