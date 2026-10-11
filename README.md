@@ -15,7 +15,7 @@ Modern terminal for your needs. Pure SwiftUI, no electron-type bullshit
 - Quick actions `cmd + r`
 
 ## Platforms
-One SwiftUI app target builds for both macOS and iOS (iOS 18+):
+One SwiftUI app target builds for both macOS 14+ (Apple silicon) and iOS 17+:
 
 - **macOS** — everything: local zsh terminals, persistent `screen`/`tmux`
   sessions, SSH, notes, actions, history.
