@@ -89,6 +89,11 @@ public protocol TerminalTransport: AnyObject {
   /// the session read live child state — e.g. the current working
   /// directory via `proc_pidinfo`.
   var childProcessID: pid_t? { get }
+
+  /// False while the child has terminal echo off: a password prompt
+  /// (`sudo`, `ssh`, `read -s`). Input typed then is never recorded as a
+  /// command. Only a local pty can tell; other transports report true.
+  var echoesInput: Bool { get }
 }
 
 /// Non-SSH transports never produce auth prompts — default no-ops so
@@ -111,6 +116,9 @@ public extension TerminalTransport {
 
   /// Transports without a child process (SSH, test doubles) report nil.
   var childProcessID: pid_t? { nil }
+
+  /// Transports without a local pty can't see the child's echo setting.
+  var echoesInput: Bool { true }
 }
 
 // MARK: - Local pty transport
@@ -137,6 +145,14 @@ public final class LocalPTYTransport: TerminalTransport {
   /// exit/close). The session uses it to read live child state such as
   /// the current working directory.
   public var childProcessID: pid_t? { childPID >= 0 ? childPID : nil }
+
+  /// The pty's ECHO flag; the master reports the slave's termios.
+  public var echoesInput: Bool {
+    guard masterFD >= 0 else { return true }
+    var attributes = termios()
+    guard tcgetattr(masterFD, &attributes) == 0 else { return true }
+    return attributes.c_lflag & tcflag_t(ECHO) != 0
+  }
 
   /// The pty's size at spawn. WIDE (not 80 cols): output can arrive before
   /// the view lays out and resizes the pty to the real size, and a wider

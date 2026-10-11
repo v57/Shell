@@ -183,6 +183,10 @@ public final class TerminalSession: Identifiable {
   private var inputAnchor: TerminalCursor?
   @ObservationIgnored
   private var inputFallback = ""
+  /// Input went in while the child had echo off (a password prompt), so the
+  /// typed keys are never recorded as a command.
+  @ObservationIgnored
+  private var inputHidden = false
   @ObservationIgnored
   private var didCloseTransport = false
   /// The size the parser grid currently has. `resize` compares against it to
@@ -433,6 +437,7 @@ public final class TerminalSession: Identifiable {
     guard !string.isEmpty else { return }
 
     beginInputIfNeeded()
+    if !transport.echoesInput { inputHidden = true }
     inputFallback.append(
       string.replacingOccurrences(of: "\r\n", with: "\n")
         .replacingOccurrences(of: "\r", with: "\n")
@@ -735,12 +740,16 @@ public final class TerminalSession: Identifiable {
     modifierFlags: TerminalModifierFlags
   ) {
     beginInputIfNeeded()
+    if !transport.echoesInput { inputHidden = true }
 
     if modifierFlags.contains(.control) {
       switch charactersIgnoringModifiers?.lowercased() {
       case "c", "u":
         inputFallback = ""
-        if charactersIgnoringModifiers?.lowercased() == "c" { inputAnchor = nil }
+        if charactersIgnoringModifiers?.lowercased() == "c" {
+          inputAnchor = nil
+          inputHidden = false
+        }
       case "w":
         while inputFallback.last?.isWhitespace == true { inputFallback.removeLast() }
         while inputFallback.last?.isWhitespace == false { inputFallback.removeLast() }
@@ -772,6 +781,7 @@ public final class TerminalSession: Identifiable {
     defer {
       inputAnchor = nil
       inputFallback = ""
+      inputHidden = false
     }
 
     let rendered: String
@@ -786,13 +796,36 @@ public final class TerminalSession: Identifiable {
       rendered = ""
     }
 
+    // Nothing echoed: either the echo hasn't been published yet (fast typing
+    // over a slow link), so the typed keys stand in, or the input was hidden
+    // (a password), which must never reach history or the actions list.
+    var hidden = inputHidden || !transport.echoesInput
+    if let inputAnchor, inputAnchor.column > 0 {
+      let prompt = snapshot.plainText(
+        logicalFrom: TerminalCursor(row: inputAnchor.row, column: 0),
+        to: TerminalCursor(row: inputAnchor.row, column: inputAnchor.column - 1)
+      )
+      hidden = hidden || Self.looksLikeSecretPrompt(prompt)
+    }
     let command = rendered.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-      ? inputFallback
+      ? (hidden ? "" : inputFallback)
       : rendered
     let normalized = command.trimmingCharacters(in: .whitespacesAndNewlines)
     if !normalized.isEmpty {
       commandSubmittedHandler?(normalized)
     }
+  }
+
+  /// Whether the text before the input reads like a prompt for a secret
+  /// ("Password:", "[sudo] password for v57:", "Enter passphrase for key
+  /// '…':", "Enter PIN:"). Covers SSH sessions, whose echo state is remote.
+  static func looksLikeSecretPrompt(_ prompt: String) -> Bool {
+    let text = prompt.trimmingCharacters(in: .whitespaces).lowercased()
+    guard text.hasSuffix(":") || text.hasSuffix("?") else { return false }
+    return text.range(
+      of: #"\b(password|passphrase|passcode|pin|otp|token|secret|verification code)\b"#,
+      options: .regularExpression
+    ) != nil
   }
 }
 
