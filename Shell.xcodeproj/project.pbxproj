@@ -563,7 +563,7 @@
 		};
 		26C2D065302C066C008363F2 /* XCLocalSwiftPackageReference "../Shell" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = ../Shell;
+			relativePath = .;
 		};
 		A200000000000000000000E1 /* XCLocalSwiftPackageReference "../Database" */ = {
 			isa = XCLocalSwiftPackageReference;
