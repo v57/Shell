@@ -11,10 +11,12 @@
 # mbedTLS headers are staged alongside so the module can resolve any types it
 # needs if a future consumer opts in).
 #
-# WHY ONE MERGED XCFRAMEWORK: same rationale as Binary/C-drivers/build-c-drivers.sh —
-# a single XCFramework with ONE module.modulemap (declaring module CLibssh2) is
-# the layout SwiftPM 6.4 can host as a binaryTarget without the
-# Build/Products/<arch>/include/module.modulemap collision.
+# MODULEMAP LAYOUT: Xcode and SwiftPM copy every library XCFramework's Headers/
+# into ONE shared Build/Products/<config>/include/ folder, next to the Database
+# package's driver XCFrameworks. The modulemap therefore sits at
+# Headers/CLibssh2/module.modulemap (pointing at "../libssh2.h"); a second
+# Headers/module.modulemap anywhere in the build would collide ("Multiple
+# commands produce .../include/module.modulemap").
 #
 # PREREQUISITES:
 #   - Xcode 16+ (xcrun --sdk iphoneos / iphonesimulator / macosx)
@@ -155,7 +157,7 @@ build_libssh2_slice() {
     || die "libssh2+mbedTLS merge $name"
 }
 
-# --- stage unified headers + ONE module.modulemap -------------------------------
+# --- stage headers + the CLibssh2 module.modulemap -------------------------------
 stage_headers() {
   local hdr="$BUILD_DIR/headers"
   info "staging headers + module.modulemap"
@@ -168,9 +170,11 @@ stage_headers() {
   # public libssh2 API does not require them at consume time, but keeping them
   # makes the module self-sufficient).
   cp -R "$BUILD_DIR/mbedtls/include/mbedtls" "$BUILD_DIR/mbedtls/include/psa" "$hdr/"
-  cat > "$hdr/module.modulemap" <<'EOF'
+  mkdir -p "$hdr/CLibssh2"
+  cat > "$hdr/CLibssh2/module.modulemap" <<'EOF'
 module CLibssh2 [system] {
-    header "libssh2.h"
+    header "../libssh2.h"
+    header "../libssh2_sftp.h"
     export *
 }
 EOF
