@@ -210,13 +210,16 @@ struct ContentView: View {
     .onReceive(directoryTimer) { _ in
       refreshLocalDirectory()
       // Keep the Files panel's directory in sync with the live session.
-      model.directoryBrowser.syncTick()
+      if flags.isEnabled(.files) { model.directoryBrowser.syncTick() }
     }
     // Kick the directory refresh the moment the selected session changes
     // (the timer alone adds up to a second of lag before the toolbar
     // actions refresh when switching sessions in the sidebar).
     .onChange(of: model.selection) { _, _ in
       refreshLocalDirectory()
+      syncFileBrowser()
+    }
+    .onChange(of: flags.isEnabled(.files)) { _, _ in
       syncFileBrowser()
     }
     .onChange(of: model.directoryBrowser.visible) { _, nowVisible in
@@ -612,7 +615,9 @@ struct ContentView: View {
   /// (or clears it when nothing terminal-ish is selected), so the Files panel
   /// rebuilds its context and lists the right directory for the right runner.
   private func syncFileBrowser() {
-    if let session = presentedSession {
+    // With Files off the browser holds no session, so nothing lists a
+    // directory (remotely that's an SSH connection per command).
+    if flags.isEnabled(.files), let session = presentedSession {
       model.directoryBrowser.setSession(session, kind: model.kind(of: session))
     } else {
       model.directoryBrowser.setSession(nil, kind: .local)

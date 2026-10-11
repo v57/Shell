@@ -96,7 +96,7 @@ struct SidebarChrome: ViewModifier {
       // The authorized-keys panel (key.2.on.ring in the Local/Remote
       // headers); opens for this Mac or the selected SSH connection.
       .sheet(isPresented: $model.showingAuthorizedKeys) {
-        if let target = model.authorizedKeysTarget {
+        if let target = model.authorizedKeysTarget, flags.isEnabled(.authorizedKeys) {
           AuthorizedKeysView(target: target)
             .environment(model)
         }
