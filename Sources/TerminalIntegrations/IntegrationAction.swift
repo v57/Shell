@@ -14,18 +14,29 @@ public struct IntegrationAction: Hashable, Sendable, Codable, Identifiable {
   public let target: String?
   /// Shell snippet executed in the directory.
   public let command: String
+  /// Setup the app checks before running the action; nil = none.
+  public let requirement: IntegrationActionRequirement?
 
   public init(
     id: UUID = UUID(),
     kind: IntegrationActionKind,
     title: String,
     target: String?,
-    command: String
+    command: String,
+    requirement: IntegrationActionRequirement? = nil
   ) {
     self.id = id
     self.kind = kind
     self.title = title
     self.target = target
     self.command = command
+    self.requirement = requirement
   }
+}
+
+/// Setup an action needs before it can run, checked by the app.
+public enum IntegrationActionRequirement: String, Hashable, Sendable, Codable {
+  /// A Developer ID Application identity and a notarytool keychain profile;
+  /// the app passes the chosen profile as `NOTARY_PROFILE` (see `Notarization`).
+  case notarization
 }

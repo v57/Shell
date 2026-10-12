@@ -270,6 +270,15 @@ final class AppModel {
     let actions: [IntegrationAction]
     let openKinds: [OpenWithKind]
   }
+  /// The Notarization sheet: shown by the first Export (or from the
+  /// Distribute menu) until a Developer ID and a working notary profile are set.
+  var notarizationSetup: NotarizationSetupRequest?
+  private static let notaryProfileKey = "notarization.profile"
+  /// The notarytool keychain profile Export passes as `NOTARY_PROFILE`; set by
+  /// the Notarization sheet once it validated it. nil = not set up yet.
+  var notaryProfile: String? = UserDefaults.standard.string(forKey: notaryProfileKey) {
+    didSet { UserDefaults.standard.set(notaryProfile, forKey: Self.notaryProfileKey) }
+  }
   #endif
 
   private struct LocalHistoryDraft {
@@ -2370,11 +2379,22 @@ final class AppModel {
   /// focus. Replaces any current run for that directory (stops it first);
   /// archives to history on completion via `actionSessionCompleted`.
   func runSmartAction(_ action: IntegrationAction, in directory: URL) {
+    // An Export needs notarization set up first: the sheet checks it and
+    // runs the action again once a profile is saved.
+    var environment = ""
+    if action.requirement == .notarization {
+      guard let notaryProfile else {
+        notarizationSetup = NotarizationSetupRequest(action: action, directory: directory)
+        return
+      }
+      environment = "export NOTARY_PROFILE=\(shellQuote(notaryProfile)) && "
+    }
+
     // Replace semantics: stop the current run for this dir before starting.
     stopSmartAction(in: directory)
 
     // LocalPTYTransport has no working-dir parameter, so cd into the project.
-    let command = "cd \(shellQuote(directory.path)) && \(action.command)"
+    let command = "\(environment)cd \(shellQuote(directory.path)) && \(action.command)"
     let spec = ActionSpec(
       action: Action(
         id: action.id,

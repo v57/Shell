@@ -25,8 +25,8 @@ struct XcodeIntegrationTests {
       files: files
     )
 
-    #expect(actions.count == 5)
-    #expect(actions.filter { $0.target == "Demo" }.count == 5)
+    #expect(actions.count == 6)
+    #expect(actions.filter { $0.target == "Demo" }.count == 6)
 
     let build = actions.first { $0.kind == .build }
     #expect(build?.command.contains("-project") == true)
@@ -41,7 +41,7 @@ struct XcodeIntegrationTests {
     #expect(run?.command.hasSuffix("Demo.app'") == true)
 
     let distribute = actions.filter { $0.kind == .distribute }
-    #expect(distribute.count == 2)
+    #expect(distribute.count == 3)
 
     let install = distribute.first { $0.title == "Install · Demo" }
     #expect(install?.command.contains("rm -rf '/Applications/Demo.app'") == true)
@@ -52,6 +52,16 @@ struct XcodeIntegrationTests {
     #expect(install?.command.contains("-exportOptionsPlist 'build/Demo/DeveloperID.plist' -exportPath 'build/Demo/DeveloperID'") == true)
     #expect(install?.command.contains("developer-id") == true)
     #expect(install?.command.contains("ditto 'build/Demo/DeveloperID/Demo.app' '/Applications/Demo.app'; else") == true)
+
+    let export = distribute.first { $0.title == "Export · Demo" }
+    #expect(export?.command.contains("-destination 'generic/platform=macOS'") == true)
+    #expect(export?.command.contains("-exportOptionsPlist 'build/Demo/DeveloperID.plist' -exportPath 'build/Demo/DeveloperID'") == true)
+    #expect(export?.command.contains("xcrun notarytool submit 'build/Demo/Export/notarize.zip' --keychain-profile \"${NOTARY_PROFILE:-notary}\" --wait") == true)
+    #expect(export?.command.contains("xcrun stapler staple 'build/Demo/DeveloperID/Demo.app'") == true)
+    #expect(export?.command.contains("ditto -c -k --keepParent 'build/Demo/DeveloperID/Demo.app' 'build/Demo/Export/Demo.zip' && open -R 'build/Demo/Export/Demo.zip'") == true)
+    #expect(export?.command.hasSuffix("&& false; fi") == true)
+    #expect(export?.requirement == .notarization)
+    #expect(install?.requirement == nil)
 
     let upload = distribute.first { $0.title == "Upload to App Store · Demo" }
     #expect(upload?.command.contains("-archivePath 'build/Demo/Demo.xcarchive' archive -allowProvisioningUpdates") == true)

@@ -123,6 +123,11 @@ struct ContentView: View {
       .sheet(isPresented: $model.showingThemes) {
         ThemesView()
       }
+#if os(macOS)
+      .sheet(item: $model.notarizationSetup) { request in
+        NotarizationSetupView(request: request)
+      }
+#endif
       // First-launch "choose your features" welcome (FeatureSelectionView as a
       // sheet). Present once, when the feature-flags store has never been
       // configured; Continue records the selection via markConfigured().
@@ -767,7 +772,7 @@ private struct SmartActionMenu: View {
 
 /// A smart-action control for the `.distribute` kind: a plain Menu labeled
 /// "Distribute" whose items each run their action immediately on click.
-/// Distribute actions (Install / Upload) are one-shot — unlike
+/// Distribute actions (Install / Export / Upload) are one-shot — unlike
 /// build/run/test they never toggle to a stop state.
 private struct DistributeMenu: View {
   let actions: [IntegrationAction]
@@ -781,6 +786,12 @@ private struct DistributeMenu: View {
           model.runSmartAction(action, in: directory)
         } label: {
           Label(action.title, systemImage: "square.and.arrow.up")
+        }
+      }
+      if actions.contains(where: { $0.requirement == .notarization }) {
+        Divider()
+        Button("Notarization Settings…") {
+          model.notarizationSetup = NotarizationSetupRequest()
         }
       }
     } label: {

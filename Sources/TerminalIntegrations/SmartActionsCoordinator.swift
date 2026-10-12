@@ -60,7 +60,7 @@ public final class SmartActionsCoordinator {
   /// the `.distribute` kind left every cached Xcode dir showing stale
   /// run/build/test actions until this was added.) (2026-09-06: PATH-based
   /// probe + `.lint` kind + ToolIntegrationBase.) (2026-10-12: Xcode Install
-  /// exports with Developer ID when available.)
+  /// exports with Developer ID when available, notarized Export action.)
   static let cacheVersion = "4"
 
   /// Returns the smart actions for `directory`, reading from the encrypted

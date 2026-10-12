@@ -69,10 +69,10 @@ public final class XcodeIntegration: TerminalIntegration {
         command: "xcodebuild \(flag) \(projectArg) -scheme \(schemeArg) -derivedDataPath \(derivedArg) build && open \(appPath)"
       ))
       // Distribute actions: Install (archive + ditto the built .app into
-      // /Applications) and Upload to App Store (archive + exportArchive with
+      // /Applications), Export (notarized zip, below) and Upload to App Store (archive + exportArchive with
       // a generated exportOptions.plist using method app-store-connect). Both
       // run `xcodebuild ... archive` internally as their first step.
-      // Install MUST pin -destination 'generic/platform=macOS': a MULTIPLATFORM
+      // Install and Export MUST pin -destination 'generic/platform=macOS': a MULTIPLATFORM
       // app target (SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx",
       // e.g. the sibling Database project) archives for iOS by default when no
       // destination is given, and ditto would copy that iOS .app into
@@ -92,6 +92,16 @@ public final class XcodeIntegration: TerminalIntegration {
       let developerIDAppPath = Self.quote("build/\(scheme)/DeveloperID/\(scheme).app")
       let hasDeveloperID = "security find-identity -v -p codesigning | grep -q \"Developer ID Application: .*($(/usr/libexec/PlistBuddy -c 'Print :ApplicationProperties:Team' \(archiveInfoPlist)))\""
       let developerIDExport = "echo '{\"method\":\"developer-id\"}' | plutil -convert xml1 -o \(developerIDPlist) - && rm -rf \(developerIDPath) && xcodebuild -exportArchive -archivePath \(archivePath) -exportOptionsPlist \(developerIDPlist) -exportPath \(developerIDPath) -allowProvisioningUpdates"
+      // Export: the Developer ID copy, notarized and stapled, zipped into
+      // build/<scheme>/Export and revealed in Finder, ready to send to another
+      // Mac. Requires the Developer ID identity (never lets Xcode create one)
+      // and a notarytool keychain profile, "notary" unless NOTARY_PROFILE is
+      // set (the convention of the v57 release scripts), created once with
+      // `xcrun notarytool store-credentials notary --apple-id <id> --team-id <team>`.
+      let notarizeZip = Self.quote("build/\(scheme)/Export/notarize.zip")
+      let exportZip = Self.quote("build/\(scheme)/Export/\(scheme).zip")
+      let exportDir = Self.quote("build/\(scheme)/Export")
+      let notarize = "rm -rf \(exportDir) && mkdir -p \(exportDir) && ditto -c -k --keepParent \(developerIDAppPath) \(notarizeZip) && xcrun notarytool submit \(notarizeZip) --keychain-profile \"${NOTARY_PROFILE:-notary}\" --wait && xcrun stapler staple \(developerIDAppPath) && rm \(notarizeZip) && ditto -c -k --keepParent \(developerIDAppPath) \(exportZip) && open -R \(exportZip)"
       let exportPlist = Self.quote("exportOptions.plist")
       let exportPath = Self.quote("build/\(scheme)/Upload")
       actions.append(IntegrationAction(
@@ -99,6 +109,13 @@ public final class XcodeIntegration: TerminalIntegration {
         title: "Install · \(scheme)",
         target: scheme,
         command: "xcodebuild \(flag) \(projectArg) -scheme \(schemeArg) -destination 'generic/platform=macOS' -archivePath \(archivePath) archive && if \(hasDeveloperID); then \(developerIDExport) && rm -rf \(installAppPath) && ditto \(developerIDAppPath) \(installAppPath); else rm -rf \(installAppPath) && ditto \(installSourcePath) \(installAppPath); fi"
+      ))
+      actions.append(IntegrationAction(
+        kind: .distribute,
+        title: "Export · \(scheme)",
+        target: scheme,
+        command: "xcodebuild \(flag) \(projectArg) -scheme \(schemeArg) -destination 'generic/platform=macOS' -archivePath \(archivePath) archive && if \(hasDeveloperID); then \(developerIDExport) && \(notarize); else echo 'Export needs a Developer ID Application certificate for the archive team in the keychain.' && false; fi",
+        requirement: .notarization
       ))
       actions.append(IntegrationAction(
         kind: .distribute,
