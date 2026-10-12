@@ -29,3 +29,20 @@ graphify-out/
 /Binary/SSH-libssh2/build/
 CLAUDE.md
 /.claude
+
+# macOS
+# Finder folder icon: a file named Icon plus a carriage return
+Icon[]
+
+# Build
+*.xcuserstate
+
+# Secrets
+.env
+
+# Agents (local agent instructions, settings and boards)
+AGENTS.md
+.claude/
+.codex/
+.commandcode/
+KANBAN*.md
