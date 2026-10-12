@@ -59,8 +59,9 @@ public final class SmartActionsCoordinator {
   /// what forces a re-scan when the logic itself changes. (2026-09-05: adding
   /// the `.distribute` kind left every cached Xcode dir showing stale
   /// run/build/test actions until this was added.) (2026-09-06: PATH-based
-  /// probe + `.lint` kind + ToolIntegrationBase.)
-  static let cacheVersion = "3"
+  /// probe + `.lint` kind + ToolIntegrationBase.) (2026-10-12: Xcode Install
+  /// exports with Developer ID when available.)
+  static let cacheVersion = "4"
 
   /// Returns the smart actions for `directory`, reading from the encrypted
   /// cache when the fingerprint is unchanged and scanning otherwise.

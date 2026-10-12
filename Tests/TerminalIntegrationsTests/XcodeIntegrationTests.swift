@@ -48,6 +48,10 @@ struct XcodeIntegrationTests {
     #expect(install?.command.contains("-destination 'generic/platform=macOS'") == true)
     #expect(install?.command.contains("ditto 'build/Demo/Demo.xcarchive/Products/Applications/Demo.app' '/Applications/Demo.app'") == true)
     #expect(install?.command.contains("-archivePath 'build/Demo/Demo.xcarchive'") == true)
+    #expect(install?.command.contains("grep -q \"Developer ID Application: .*($(/usr/libexec/PlistBuddy -c 'Print :ApplicationProperties:Team' 'build/Demo/Demo.xcarchive/Info.plist'))\"") == true)
+    #expect(install?.command.contains("-exportOptionsPlist 'build/Demo/DeveloperID.plist' -exportPath 'build/Demo/DeveloperID'") == true)
+    #expect(install?.command.contains("developer-id") == true)
+    #expect(install?.command.contains("ditto 'build/Demo/DeveloperID/Demo.app' '/Applications/Demo.app'; else") == true)
 
     let upload = distribute.first { $0.title == "Upload to App Store · Demo" }
     #expect(upload?.command.contains("-archivePath 'build/Demo/Demo.xcarchive' archive -allowProvisioningUpdates") == true)

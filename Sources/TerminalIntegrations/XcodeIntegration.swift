@@ -77,16 +77,28 @@ public final class XcodeIntegration: TerminalIntegration {
       // e.g. the sibling Database project) archives for iOS by default when no
       // destination is given, and ditto would copy that iOS .app into
       // /Applications. macOS-only targets are unaffected by the pin.
+      // When the keychain holds a "Developer ID Application" identity for the
+      // archive's team (read from the archive's Info.plist), Install exports
+      // the archive with method developer-id and installs that copy, so the
+      // app can be shared with other Macs. Otherwise it installs the archived
+      // (development-signed) .app as before. Checked when the action runs,
+      // not at scan time, so a newly added certificate needs no re-scan.
       let archivePath = Self.quote("build/\(scheme)/\(scheme).xcarchive")
       let installAppPath = Self.quote("/Applications/\(scheme).app")
       let installSourcePath = Self.quote("build/\(scheme)/\(scheme).xcarchive/Products/Applications/\(scheme).app")
+      let archiveInfoPlist = Self.quote("build/\(scheme)/\(scheme).xcarchive/Info.plist")
+      let developerIDPlist = Self.quote("build/\(scheme)/DeveloperID.plist")
+      let developerIDPath = Self.quote("build/\(scheme)/DeveloperID")
+      let developerIDAppPath = Self.quote("build/\(scheme)/DeveloperID/\(scheme).app")
+      let hasDeveloperID = "security find-identity -v -p codesigning | grep -q \"Developer ID Application: .*($(/usr/libexec/PlistBuddy -c 'Print :ApplicationProperties:Team' \(archiveInfoPlist)))\""
+      let developerIDExport = "echo '{\"method\":\"developer-id\"}' | plutil -convert xml1 -o \(developerIDPlist) - && rm -rf \(developerIDPath) && xcodebuild -exportArchive -archivePath \(archivePath) -exportOptionsPlist \(developerIDPlist) -exportPath \(developerIDPath) -allowProvisioningUpdates"
       let exportPlist = Self.quote("exportOptions.plist")
       let exportPath = Self.quote("build/\(scheme)/Upload")
       actions.append(IntegrationAction(
         kind: .distribute,
         title: "Install · \(scheme)",
         target: scheme,
-        command: "xcodebuild \(flag) \(projectArg) -scheme \(schemeArg) -destination 'generic/platform=macOS' -archivePath \(archivePath) archive && rm -rf \(installAppPath) && ditto \(installSourcePath) \(installAppPath)"
+        command: "xcodebuild \(flag) \(projectArg) -scheme \(schemeArg) -destination 'generic/platform=macOS' -archivePath \(archivePath) archive && if \(hasDeveloperID); then \(developerIDExport) && rm -rf \(installAppPath) && ditto \(developerIDAppPath) \(installAppPath); else rm -rf \(installAppPath) && ditto \(installSourcePath) \(installAppPath); fi"
       ))
       actions.append(IntegrationAction(
         kind: .distribute,
