@@ -215,7 +215,8 @@ public struct TerminalScreenView: View {
             snapshot: snapshot,
             selectionStart: selectionStart,
             selectionEnd: selectionEnd,
-            topInset: geo.safeAreaInsets.top
+            topInset: geo.safeAreaInsets.top,
+            containerHeight: geo.size.height
           )
           .frame(maxWidth: .infinity, maxHeight: .infinity)
           .contentShape(Rectangle())
@@ -295,7 +296,8 @@ public struct TerminalScreenView: View {
     snapshot: TerminalSnapshot,
     selectionStart: TerminalCursor?,
     selectionEnd: TerminalCursor?,
-    topInset: CGFloat
+    topInset: CGFloat,
+    containerHeight: CGFloat
   ) -> some View {
     let rows = snapshot.rows
     let totalLines = snapshot.totalLines
@@ -335,7 +337,7 @@ public struct TerminalScreenView: View {
     }
     // Scrolling behavior (anchor tracking, content-offset reporting,
     // bottom-tailing) lives in ScrollModifier.
-    .modifier(ScrollModifier(session: session, anchorLine: $anchorLine, scrollOffset: $scrollOffset, topInset: topInset))
+    .modifier(ScrollModifier(session: session, anchorLine: $anchorLine, scrollOffset: $scrollOffset, topInset: topInset, containerHeight: containerHeight))
   }
 
   // MARK: - Gliding cursor
@@ -809,6 +811,9 @@ extension TerminalScreenView {
     @Binding var anchorLine: Int?
     @Binding var scrollOffset: CGFloat
     let topInset: CGFloat
+    /// The scroll view's height (the grid's safe-area height), for the
+    /// macOS 14 / iOS 17 content-offset fallback.
+    let containerHeight: CGFloat
 
     func body(content: Content) -> some View {
       content
@@ -828,11 +833,13 @@ extension TerminalScreenView {
         // view moves the content without re-evaluating the reader, so a
         // preference only fires at initial layout and hit-testing silently
         // falls back to "scrolled to the top" (verified empirically Aug 2026).
-        .onScrollGeometryChange(for: CGFloat.self) { geometry in
-          geometry.contentOffset.y
-        } action: { _, newOffset in
-          scrollOffset = -newOffset - topInset
-        }
+        .modifier(ContentOffsetModifier(
+          session: session,
+          anchorLine: anchorLine,
+          scrollOffset: $scrollOffset,
+          topInset: topInset,
+          containerHeight: containerHeight
+        ))
         .onChange(of: session.snapshot.totalLines) { oldTotal, _ in
           // New output: keep following the bottom only when already at bottom.
           // The at-bottom test must use the PREVIOUS total — after a line is
@@ -854,6 +861,55 @@ extension TerminalScreenView {
         .onAppear {
           Self.snapToBottom(session: session, anchorLine: $anchorLine)
         }
+    }
+
+    /// Keeps `scrollOffset` in sync with the scroll view. macOS 15 / iOS 18
+    /// report the live content offset. macOS 14 / iOS 17 can't, so the offset
+    /// is derived from the anchor line: exact at the bottom (the grid sits
+    /// `containerHeight - contentHeight` above the viewport top, the
+    /// `H mod lineHeight` case `cell(at:)` documents) and at the top, within
+    /// one line while scrolled part-way through a line.
+    struct ContentOffsetModifier: ViewModifier {
+      let session: TerminalSession
+      let anchorLine: Int?
+      @Binding var scrollOffset: CGFloat
+      let topInset: CGFloat
+      let containerHeight: CGFloat
+
+      func body(content: Content) -> some View {
+        if #available(macOS 15.0, iOS 18.0, *) {
+          content.onScrollGeometryChange(for: CGFloat.self) { geometry in
+            geometry.contentOffset.y
+          } action: { _, newOffset in
+            scrollOffset = -newOffset - topInset
+          }
+        } else {
+          content
+            .onChange(of: anchorLine, initial: true) { _, _ in updateFallback() }
+            .onChange(of: session.snapshot.totalLines) { _, _ in updateFallback() }
+            .onChange(of: containerHeight) { _, _ in updateFallback() }
+        }
+      }
+
+      private func updateFallback() {
+        scrollOffset = Self.fallbackOffset(
+          anchorLine: anchorLine ?? 0,
+          rows: session.snapshot.rows,
+          totalLines: session.snapshot.totalLines,
+          lineHeight: TerminalScreenView.metrics.lineHeight,
+          containerHeight: containerHeight
+        )
+      }
+
+      /// The content offset `onScrollGeometryChange` would report, derived
+      /// from the anchor line (unit-tested against measured macOS values).
+      static func fallbackOffset(anchorLine: Int, rows: Int, totalLines: Int, lineHeight: CGFloat, containerHeight: CGFloat) -> CGFloat {
+        if anchorLine + rows >= totalLines {
+          let contentHeight = CGFloat(totalLines) * lineHeight + TerminalScreenView.gridPadding * 2
+          return min(0, containerHeight - contentHeight)
+        }
+        return -CGFloat(anchorLine) * lineHeight
+      }
     }
 
     /// Re-anchors to the new bottom when output arrived while the viewport was

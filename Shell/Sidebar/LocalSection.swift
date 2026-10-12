@@ -107,9 +107,11 @@ struct LocalSectionView: View {
             }
             .contextMenu {
               Button("Rename…") { state.renamingSessionID = session.id }
-              Button("Authorized Keys", systemImage: "key.2.on.ring.fill") {
-                model.openLocalAuthorizedKeys()
-              }.buttonStyle(.borderless).help("Manage this Mac's authorized keys")
+              if flags.isEnabled(.authorizedKeys) {
+                Button("Authorized Keys", systemImage: "key.2.on.ring.fill") {
+                  model.openLocalAuthorizedKeys()
+                }.buttonStyle(.borderless).help("Manage this Mac's authorized keys")
+              }
               Divider()
               Button("Close Terminal", role: .destructive) {
                 model.removeSession(session.id)

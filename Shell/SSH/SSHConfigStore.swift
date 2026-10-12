@@ -183,7 +183,7 @@ final class SSHConfigStore {
         ))
         imported += 1
       } catch {
-        NSLog("SSHConfigStore: could not import \(config.displayName): \(error)")
+        NSLog("SSHConfigStore: could not import a config: \(error)")
       }
     }
     if imported == legacy.count {

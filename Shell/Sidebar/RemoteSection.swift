@@ -153,10 +153,12 @@ private struct SSHConfigGroup: View {
         Divider()
         Button("Edit…") { onEdit(config) }
         Button("Copy Public Key") { model.copyPublicKey() }
-        Button("Authorized Keys", systemImage: "key.2.on.ring") {
-          model.showAuthorizedKeys(for: .ssh(config))
-        }.buttonStyle(.borderless).help("Manage the selected connection's authorized keys")
-          .accessibilityIdentifier("ssh-cell-\(config.host)")
+        if flags.isEnabled(.authorizedKeys) {
+          Button("Authorized Keys", systemImage: "key.2.on.ring") {
+            model.showAuthorizedKeys(for: .ssh(config))
+          }.buttonStyle(.borderless).help("Manage the selected connection's authorized keys")
+            .accessibilityIdentifier("ssh-cell-\(config.host)")
+        }
         Divider()
         Button("Delete Connection", role: .destructive) {
           model.deleteConnection(config)

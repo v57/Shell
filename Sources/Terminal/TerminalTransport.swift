@@ -3,20 +3,35 @@ import Foundation
 
 // MARK: - Auth prompts
 
-/// Shown when an SSH server presents an unknown host key.
+/// Shown when an SSH server presents an unknown host key, or a different key
+/// than the one remembered for it.
 public struct TerminalHostKeyPrompt: Identifiable {
   public let id = UUID()
   public let host: String
   public let port: Int
   public let fingerprint: String
+  /// The fingerprint remembered for this host when the server now presents a
+  /// different key: someone may be intercepting the connection. Nil on first
+  /// contact.
+  public let previousFingerprint: String?
   /// Call with `true` to accept (and remember) the key, `false` to reject.
   public let respond: (Bool) -> Void
 
-  public init(host: String, port: Int, fingerprint: String, respond: @escaping (Bool) -> Void) {
+  public init(host: String, port: Int, fingerprint: String, previousFingerprint: String? = nil, respond: @escaping (Bool) -> Void) {
     self.host = host
     self.port = port
     self.fingerprint = fingerprint
+    self.previousFingerprint = previousFingerprint
     self.respond = respond
+  }
+
+  /// Answers for connections that run without a visible prompt (file
+  /// browser, tunnels, the authorized-keys panel): trusts a host on first
+  /// contact, rejects a changed key. A changed key must never be accepted
+  /// silently: the saved password would go to whoever answered, and the
+  /// remembered key would be replaced.
+  public func respondTrustingFirstUse() {
+    respond(previousFingerprint == nil)
   }
 }
 
@@ -74,6 +89,11 @@ public protocol TerminalTransport: AnyObject {
   /// the session read live child state — e.g. the current working
   /// directory via `proc_pidinfo`.
   var childProcessID: pid_t? { get }
+
+  /// False while the child has terminal echo off: a password prompt
+  /// (`sudo`, `ssh`, `read -s`). Input typed then is never recorded as a
+  /// command. Only a local pty can tell; other transports report true.
+  var echoesInput: Bool { get }
 }
 
 /// Non-SSH transports never produce auth prompts — default no-ops so
@@ -96,6 +116,9 @@ public extension TerminalTransport {
 
   /// Transports without a child process (SSH, test doubles) report nil.
   var childProcessID: pid_t? { nil }
+
+  /// Transports without a local pty can't see the child's echo setting.
+  var echoesInput: Bool { true }
 }
 
 // MARK: - Local pty transport
@@ -122,6 +145,14 @@ public final class LocalPTYTransport: TerminalTransport {
   /// exit/close). The session uses it to read live child state such as
   /// the current working directory.
   public var childProcessID: pid_t? { childPID >= 0 ? childPID : nil }
+
+  /// The pty's ECHO flag; the master reports the slave's termios.
+  public var echoesInput: Bool {
+    guard masterFD >= 0 else { return true }
+    var attributes = termios()
+    guard tcgetattr(masterFD, &attributes) == 0 else { return true }
+    return attributes.c_lflag & tcflag_t(ECHO) != 0
+  }
 
   /// The pty's size at spawn. WIDE (not 80 cols): output can arrive before
   /// the view lays out and resizes the pty to the real size, and a wider

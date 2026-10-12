@@ -433,7 +433,7 @@ private struct SidebarRowModifier: ViewModifier {
   @Environment(\.sidebarDragState) private var drag
   @Environment(\.sidebarFocused) private var sidebarFocused
   @Environment(\.sidebarRowSize) private var rowSize
-  @Environment(\.appearsActive) private var appearsActive
+  @WindowAppearsActive private var appearsActive
   @Environment(\.sidebarAnimations) private var animates
   @Environment(\.sidebarSelectionNamespace) private var selectionNamespace
   let selection: AppModel.Selection

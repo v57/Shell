@@ -6,7 +6,8 @@ import Terminal
 /// file (direct FileManager access) or a remote machine's, reached through
 /// a headless SSH exec (the same `SSHSession` transport the app uses for
 /// action sessions; saved passwords are used automatically, host keys are
-/// trusted on first use because opening this panel IS the intent to connect).
+/// trusted on first use because opening this panel IS the intent to connect;
+/// a changed host key is refused).
 ///
 /// The panel never deals in raw lines: entries are key-material-matched
 /// (`"type base64"`), so the same key is recognized regardless of its
@@ -76,6 +77,9 @@ final class AuthorizedKeysManager {
   /// is harmless (ssh ignores duplicates), but the panel hides Add when
   /// the key is already added.
   func append(keyLine: String) async throws {
+    // Key lines arrive through iCloud: one that carries a newline or
+    // options (`command=`, `from=`) would add more than this key.
+    guard Self.isPlainKeyLine(keyLine) else { throw AuthorizedKeysError.invalidKeyLine }
     switch target {
     case .local:
       try Self.appendLocal(keyLine: keyLine, homeURL: homeURL)
@@ -196,6 +200,11 @@ final class AuthorizedKeysManager {
     return "\(type) \(parts[1])"
   }
 
+  /// One line holding just a key: type, base64 and an optional comment.
+  static func isPlainKeyLine(_ line: String) -> Bool {
+    !line.contains(where: { $0.isNewline || $0 == "\0" }) && keyMaterial(of: line) != nil
+  }
+
   // MARK: - Headless SSH exec
 
   private func runRemote(config: SSHConfig, command: String) async throws -> String {
@@ -216,6 +225,7 @@ final class AuthorizedKeysManager {
 enum AuthorizedKeysError: LocalizedError {
   case remoteCommandFailed(host: String, code: Int32, output: String?)
   case connectionFailed(String)
+  case invalidKeyLine
 
   var errorDescription: String? {
     switch self {
@@ -224,6 +234,8 @@ enum AuthorizedKeysError: LocalizedError {
       return "The command failed on \(host) (exit \(code))\(detail)."
     case .connectionFailed(let message):
       return "Could not connect: \(message)"
+    case .invalidKeyLine:
+      return "The key is not a single public key line."
     }
   }
 }

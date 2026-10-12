@@ -24,13 +24,23 @@ enum FeatureID: String, CaseIterable, Identifiable {
   case monitoring
   case files
   case authorizedKeys
-  case settings
   /// Reserved for a future built-in web-session/browser feature.
   case web
   /// Reserved for a future embedded database feature.
   case database
 
   var id: String { rawValue }
+
+  /// The features this platform has, in list order. iOS has no local
+  /// terminals (Sessions, Screen, History, Monitoring), Files panel or Smart
+  /// Actions, so their toggles would do nothing there.
+  static var available: [FeatureID] {
+    #if os(iOS)
+    allCases.filter { ![.sessions, .screen, .history, .smartActions, .monitoring, .files].contains($0) }
+    #else
+    allCases
+    #endif
+  }
 
   /// Human-readable name, for surfacing a toggle in settings/UI.
   var label: String {
@@ -46,7 +56,6 @@ enum FeatureID: String, CaseIterable, Identifiable {
     case .monitoring: return "Monitoring"
     case .files: return "Files"
     case .authorizedKeys: return "Authorized Keys"
-    case .settings: return "Settings"
     case .web: return "Web"
     case .database: return "Database"
     }
@@ -67,7 +76,6 @@ enum FeatureID: String, CaseIterable, Identifiable {
     case .monitoring: return "Live CPU / GPU / wattage stats"
     case .files: return "Files panel and file browsing"
     case .authorizedKeys: return "SSH authorized keys"
-    case .settings: return "Shell settings"
     case .web: return "In-app web sessions"
     case .database: return "Database connections"
     }

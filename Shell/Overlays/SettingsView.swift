@@ -93,47 +93,69 @@ private struct SettingsCard<Content: View>: View {
 /// bar. If you add a row, call the exact `AppModel` method the menu item calls.
 private struct SettingsActionsCard: View {
   @Environment(AppModel.self) private var model
+  private var flags: FeatureFlagsStore { .shared }
+
+  private struct Row: Identifiable {
+    let title: String
+    let systemImage: String
+    var disabled = false
+    let action: () -> Void
+    var id: String { title }
+  }
+
+  /// The rows whose feature is on: a disabled feature's actions are hidden
+  /// here exactly like its menu items.
+  private var rows: [Row] {
+    var rows: [Row] = []
+    if flags.isEnabled(.ssh) {
+      rows.append(Row(title: "New Connection", systemImage: "plus") {
+        model.showingNewConnection = true
+      })
+    }
+    if flags.isEnabled(.actions) {
+      rows.append(Row(title: "Actions…", systemImage: "folder") {
+        model.showingActions = true
+      })
+      rows.append(Row(title: "Create Action from Session", systemImage: "calendar.badge.plus",
+                      disabled: !model.canCreateActionFromCurrentSession) {
+        model.createActionFromCurrentSession()
+      })
+    }
+    rows.append(Row(title: "Insert into Terminal…", systemImage: "arrow.down.to.line",
+                    disabled: model.selectedSession == nil) {
+      model.showingCommandInsert = true
+    })
+    rows.append(Row(title: "Themes…", systemImage: "paintpalette") {
+      model.showingThemes = true
+    })
+    if flags.isEnabled(.files) {
+      rows.append(Row(title: "Toggle Files Panel", systemImage: "sidebar.left",
+                      disabled: model.selectedSession == nil) {
+        model.directoryBrowser.visible.toggle()
+      })
+      rows.append(Row(title: "Navigate Up", systemImage: "arrow.up.to.line",
+                      disabled: model.selectedSession == nil || !model.directoryBrowser.canNavigateUp) {
+        model.directoryBrowser.navigateUp()
+      })
+    }
+    if flags.isEnabled(.ssh) {
+      rows.append(Row(title: "Copy SSH Public Key", systemImage: "key") {
+        model.copyPublicKey()
+      })
+    }
+    if flags.isEnabled(.authorizedKeys) {
+      rows.append(Row(title: "Authorized Keys", systemImage: "key.2.on.ring") {
+        model.openLocalAuthorizedKeys()
+      })
+    }
+    return rows
+  }
 
   var body: some View {
     VStack(spacing: 0) {
-      actionRow("New Connection", systemImage: "plus") {
-        model.showingNewConnection = true
-      }
-      Divider()
-      actionRow("Actions…", systemImage: "folder") {
-        model.showingActions = true
-      }
-      Divider()
-      actionRow("Create Action from Session", systemImage: "calendar.badge.plus",
-                disabled: !model.canCreateActionFromCurrentSession) {
-        model.createActionFromCurrentSession()
-      }
-      Divider()
-      actionRow("Insert into Terminal…", systemImage: "arrow.down.to.line",
-                disabled: model.selectedSession == nil) {
-        model.showingCommandInsert = true
-      }
-      Divider()
-      actionRow("Themes…", systemImage: "paintpalette") {
-        model.showingThemes = true
-      }
-      Divider()
-      actionRow("Toggle Files Panel", systemImage: "sidebar.left",
-                disabled: model.selectedSession == nil) {
-        model.directoryBrowser.visible.toggle()
-      }
-      Divider()
-      actionRow("Navigate Up", systemImage: "arrow.up.to.line",
-                disabled: model.selectedSession == nil || !model.directoryBrowser.canNavigateUp) {
-        model.directoryBrowser.navigateUp()
-      }
-      Divider()
-      actionRow("Copy SSH Public Key", systemImage: "key") {
-        model.copyPublicKey()
-      }
-      Divider()
-      actionRow("Authorized Keys", systemImage: "key.2.on.ring") {
-        model.openLocalAuthorizedKeys()
+      ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+        if index > 0 { Divider() }
+        actionRow(row.title, systemImage: row.systemImage, disabled: row.disabled, action: row.action)
       }
     }
   }

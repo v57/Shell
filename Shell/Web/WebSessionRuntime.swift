@@ -53,10 +53,11 @@ final class WebSessionRuntime {
     let session = SSHSession(config: config, forwardingOnly: true)
     self.session = session
 
-    // Trust on first use — opening a web page bound to a host IS the intent to
-    // connect (same policy as the file browser / authorized-keys panel).
+    // Trust on first use, never a changed key — opening a web page bound to a
+    // host IS the intent to connect (same policy as the file browser /
+    // authorized-keys panel).
     session.onHostKeyPrompt = { prompt in
-      prompt.respond(true)
+      prompt.respondTrustingFirstUse()
     }
     session.onPasswordPrompt = { [config, weak self] prompt in
       let saved = (try? SSHKeychain.loadPassword(account: config.passwordAccount)) ?? nil

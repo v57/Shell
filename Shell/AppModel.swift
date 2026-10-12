@@ -431,8 +431,10 @@ final class AppModel {
     notesFeatureEnabled = notesFlag
     // Publish this device's identity key to iCloud (no-op when the Secure
     // Enclave key is unreachable, e.g. locked screen — retried when the
-    // authorized-keys panel opens).
-    deviceKeys.publishThisDevice()
+    // authorized-keys panel opens). Part of the Authorized Keys feature.
+    if features.isEnabled(.authorizedKeys) {
+      deviceKeys.publishThisDevice()
+    }
     #if os(macOS)
     // Probe toolchains (xcodebuild/swift) only when Smart Actions is enabled
     // — the probe is background work and must not run when the feature is off.
@@ -445,9 +447,12 @@ final class AppModel {
     configureGatedBackgroundWork()
     // React to runtime feature-flag flips (start/stop pollers, re-probe).
     startFeatureFlagReactivity()
-    // Start with a local terminal so the window is never empty. iOS has no
-    // local terminals — it starts with just the sidebar (SSH + notes).
-    _ = addLocalTerminal()
+    // Start with a local terminal so the window is never empty, unless
+    // Sessions is off (no shell may be spawned then). iOS has no local
+    // terminals — it starts with just the sidebar (SSH + notes).
+    if features.isEnabled(.sessions) {
+      _ = addLocalTerminal()
+    }
     #endif
   }
 
@@ -2026,7 +2031,8 @@ final class AppModel {
 
   private func registerCapture(for session: TerminalSession, archiveLocally: Bool) {
     sessionCommands[session.id] = []
-    if archiveLocally {
+    // With History off nothing is captured for the archive.
+    if archiveLocally, features.isEnabled(.history) {
       localHistoryDrafts[session.id] = LocalHistoryDraft(capture: TerminalHistoryCapture(seed: session.snapshot))
     }
 
@@ -2057,7 +2063,9 @@ final class AppModel {
 
   private func archiveLocalSession(_ id: UUID) {
     guard let draft = localHistoryDrafts.removeValue(forKey: id),
-          !draft.commands.isEmpty
+          !draft.commands.isEmpty,
+          // Turned off while the session ran: drop what was captured.
+          features.isEnabled(.history)
     else { return }
     history.archive(HistorySession(
       id: id,
@@ -2474,6 +2482,7 @@ final class AppModel {
 
   /// Opens the authorized-keys panel for a target machine.
   func showAuthorizedKeys(for target: AuthorizedKeysManager.Target) {
+    guard features.isEnabled(.authorizedKeys) else { return }
     authorizedKeysTarget = target
     showingAuthorizedKeys = true
   }
@@ -2540,7 +2549,7 @@ final class AppModel {
     // re-enabling restores it). SSH configs and device keys always refresh.
     if features.isEnabled(.notes) { notes.refreshOnActivation() }
     connectionStore.refreshOnActivation()
-    deviceKeys.refreshOnActivation()
+    if features.isEnabled(.authorizedKeys) { deviceKeys.refreshOnActivation() }
     databaseStore.refreshOnActivation()
   }
 }

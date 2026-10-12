@@ -49,7 +49,7 @@ struct ContentView: View {
   /// Whether the window appears active (key window). Animations freeze while
   /// the window is unfocused; the sidebar container choice below deliberately
   /// ignores it so focus never swaps the sidebar (state loss).
-  @Environment(\.appearsActive) private var appearsActive
+  @WindowAppearsActive private var appearsActive
 
   /// The Animations feature, unless the system asks for reduced motion.
   /// Decides only which sidebar CONTAINER mounts — stable across window
@@ -210,13 +210,16 @@ struct ContentView: View {
     .onReceive(directoryTimer) { _ in
       refreshLocalDirectory()
       // Keep the Files panel's directory in sync with the live session.
-      model.directoryBrowser.syncTick()
+      if flags.isEnabled(.files) { model.directoryBrowser.syncTick() }
     }
     // Kick the directory refresh the moment the selected session changes
     // (the timer alone adds up to a second of lag before the toolbar
     // actions refresh when switching sessions in the sidebar).
     .onChange(of: model.selection) { _, _ in
       refreshLocalDirectory()
+      syncFileBrowser()
+    }
+    .onChange(of: flags.isEnabled(.files)) { _, _ in
       syncFileBrowser()
     }
     .onChange(of: model.directoryBrowser.visible) { _, nowVisible in
@@ -318,14 +321,10 @@ struct ContentView: View {
           // and Return — via `.onSubmit(of: .search)` — commits the
           // edited text to navigate the WebView.
           .searchable(text: $webAddressText, prompt: "URL")
-          .searchFocused($webAddressFocused)
-          // By default the search field hides the rest of the toolbar
-          // while it is active (on iOS the navigation bar's back button
-          // disappears until the field is cleared). Keep the toolbar's
-          // other controls visible so the user can always navigate away
-          // without cancelling the search first. Must come AFTER
-          // `.searchable` to apply to the toolbar search field.
-          .searchPresentationToolbarBehavior(.avoidHidingContent)
+          // Focus tracking, and keeping the toolbar visible while the
+          // field is active. Must come AFTER `.searchable` to apply to
+          // the toolbar search field.
+          .modifier(WebAddressSearchBehavior(focused: $webAddressFocused))
           .onSubmit(of: .search) {
             // Only navigate when the edited text actually differs from
             // what's displayed — submitting an unchanged address is a
@@ -616,7 +615,9 @@ struct ContentView: View {
   /// (or clears it when nothing terminal-ish is selected), so the Files panel
   /// rebuilds its context and lists the right directory for the right runner.
   private func syncFileBrowser() {
-    if let session = presentedSession {
+    // With Files off the browser holds no session, so nothing lists a
+    // directory (remotely that's an SSH connection per command).
+    if flags.isEnabled(.files), let session = presentedSession {
       model.directoryBrowser.setSession(session, kind: model.kind(of: session))
     } else {
       model.directoryBrowser.setSession(nil, kind: .local)
@@ -836,3 +837,26 @@ private struct OpenWithMenu: View {
   }
 }
 #endif // os(macOS)
+
+/// The web address bar's focus binding and toolbar behavior. By default the
+/// search field hides the rest of the toolbar while it is active (on iOS the
+/// navigation bar's back button disappears until the field is cleared), so
+/// the toolbar's other controls are kept visible and the user can always
+/// navigate away without cancelling the search first. `searchFocused` needs
+/// macOS 15 / iOS 18: before that the focus isn't tracked, so a tunnel URL
+/// update can replace an address being typed.
+private struct WebAddressSearchBehavior: ViewModifier {
+  let focused: FocusState<Bool>.Binding
+
+  func body(content: Content) -> some View {
+    if #available(macOS 15.0, iOS 18.0, *) {
+      content
+        .searchFocused(focused)
+        .searchPresentationToolbarBehavior(.avoidHidingContent)
+    } else if #available(macOS 14.1, iOS 17.1, *) {
+      content.searchPresentationToolbarBehavior(.avoidHidingContent)
+    } else {
+      content
+    }
+  }
+}
