@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-import Terminal
+import ShellKit
 @testable import Shell
 
 /// Regression: the Remote section emits ONE terminal row per SSH shell session.

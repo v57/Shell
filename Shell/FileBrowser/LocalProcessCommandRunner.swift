@@ -1,5 +1,5 @@
 import Foundation
-import TerminalIntegrations
+import ShellIntegrations
 
 /// Runs a single shell command locally and invisibly, capturing its output.
 ///

@@ -1,6 +1,6 @@
 import CryptoKit
 import Foundation
-import Terminal
+import ShellKit
 
 /// Manages a machine's `~/.ssh/authorized_keys` — either the local Mac's
 /// file (direct FileManager access) or a remote machine's, reached through

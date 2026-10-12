@@ -1,7 +1,7 @@
 #if os(macOS)
 import SwiftUI
-import Terminal
-import TerminalIntegrations
+import ShellKit
+import ShellIntegrations
 import UniformTypeIdentifiers
 
 /// What opened the Notarization sheet: an Export waiting to run, or the

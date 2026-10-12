@@ -1,5 +1,5 @@
 import SwiftUI
-import TerminalIntegrations
+import ShellIntegrations
 
 /// The Files panel: binds a `DirectoryBrowserModel` into the dumb
 /// `DirectoryBrowserView`, and owns the file-operation UI — a selection-aware

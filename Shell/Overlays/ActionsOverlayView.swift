@@ -1,5 +1,5 @@
 import SwiftUI
-import Terminal
+import ShellKit
 
 /// The actions list: a non-modal overlay panel over the main window
 /// (NOT a sheet) so it appears/closes instantly. A search bar at the top

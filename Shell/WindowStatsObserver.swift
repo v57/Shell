@@ -1,7 +1,7 @@
 #if os(macOS)
 import SwiftUI
 import AppKit
-import Monitoring
+import ShellMonitoring
 
 /// Applies the sidebar stats policy to the hosting window: sampling runs
 /// while the window is key, stops 10 minutes after it resigns key (or

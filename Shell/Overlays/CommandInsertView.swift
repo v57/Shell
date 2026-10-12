@@ -1,5 +1,5 @@
 import SwiftUI
-import Terminal
+import ShellKit
 
 /// The ⌘E "insert into terminal" overlay: a multiline text area plus Apply.
 ///

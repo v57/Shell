@@ -1,5 +1,5 @@
 import Foundation
-import Terminal
+import ShellKit
 
 /// Runs ONE command over SSH without a visible terminal session, returning
 /// its output and exit status. Used by `AuthorizedKeysManager` to read and

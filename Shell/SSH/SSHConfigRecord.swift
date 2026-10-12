@@ -1,6 +1,6 @@
 import Foundation
 import SwiftData
-import Terminal
+import ShellKit
 
 /// A synced SSH connection config: one CloudKit record per saved host.
 ///

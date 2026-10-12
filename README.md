@@ -23,7 +23,7 @@ One SwiftUI app target builds for both macOS 14+ (Apple silicon) and iOS 17+:
   macOS-only), so the Local and Persistent sidebar sections are hidden and
   local-only actions are filtered out.
 
-The `Terminal` library is cross-platform; the local-pty pieces
+The `ShellKit` library is cross-platform; the local-pty pieces
 (`LocalPTYTransport` + its `.zsh`/`.tmux`/`.screen` presets) are compiled
 only on macOS.
 
@@ -80,7 +80,7 @@ removed, keys not yet added can be added — one click each.
 presets — `.zsh` for an interactive login shell, `.screen(name)` /
 `.tmux(name)` to attach to a persistent multiplexer session:
 ```swift
-import Terminal
+import ShellKit
 
 // Interactive zsh login shell — the default local terminal.
 let session = TerminalSession(session: .zsh)

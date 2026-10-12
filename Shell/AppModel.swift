@@ -9,8 +9,8 @@ import Foundation
 import Observation
 import SwiftData
 import SwiftUI
-import Terminal
-import TerminalIntegrations
+import ShellKit
+import ShellIntegrations
 
 /// Application-wide state: the list of terminal sessions, the sidebar
 /// selection, and the persisted SSH connection store.

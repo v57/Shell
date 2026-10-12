@@ -1,5 +1,5 @@
 import Foundation
-import Terminal
+import ShellKit
 
 /// A user-defined action: a named multi-line script. Running it opens a
 /// separate terminal session in the current environment.

@@ -1,5 +1,5 @@
 import SwiftUI
-import Monitoring
+import ShellMonitoring
 
 /// The sidebar's SHARED state: what its sections and its own presentation need,
 /// in ONE object, so the `List` sidebar (`SidebarView`) and the `LazyVStack` one

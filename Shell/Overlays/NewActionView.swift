@@ -1,6 +1,6 @@
 import SwiftUI
-import Terminal
-import TerminalIntegrations
+import ShellKit
+import ShellIntegrations
 
 /// Sheet for creating a new action: name, optional category, where to
 /// display (local / specific SSH connections / future SSH connections),

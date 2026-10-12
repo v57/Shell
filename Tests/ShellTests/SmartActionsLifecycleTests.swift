@@ -1,5 +1,5 @@
 import Foundation
-import TerminalIntegrations
+import ShellIntegrations
 import Testing
 @testable import Shell
 

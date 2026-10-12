@@ -1,6 +1,6 @@
 import Foundation
 import Observation
-import Terminal
+import ShellKit
 
 import MongoDB
 import PostgreSQL

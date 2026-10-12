@@ -1,5 +1,5 @@
 import SwiftUI
-import Terminal
+import ShellKit
 
 /// The per-engine documents/tables browser shown in the detail pane for a
 /// `.database` session. Reads a live `DatabaseSession` (an `@Observable`

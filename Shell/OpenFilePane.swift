@@ -2,7 +2,7 @@
 import AppKit
 import Foundation
 import SwiftUI
-import Md
+import MarkdownKit
 
 /// A transient, scratch document for a local text file opened into Shell.
 ///
@@ -49,7 +49,7 @@ struct OpenedFile: Identifiable, Equatable {
 
 /// Read-write editor pane for an opened local text file.
 ///
-/// - `.md`/`.markdown` renders with `Md.MarkdownEditorView` (live preview,
+/// - `.md`/`.markdown` renders with `MarkdownKit.MarkdownEditorView` (live preview,
 ///   same editor as Notes) and writes back through `onChange`.
 /// - Other text extensions render in a monospaced `TextEditor` with smart
 ///   quotes/dashes disabled (plain-text files must be stored verbatim).

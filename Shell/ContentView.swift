@@ -1,7 +1,7 @@
 import Combine
 import SwiftUI
-import Terminal
-import TerminalIntegrations
+import ShellKit
+import ShellIntegrations
 #if os(macOS)
 import AppKit
 #endif

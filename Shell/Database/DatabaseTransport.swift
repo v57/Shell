@@ -1,5 +1,5 @@
 import Foundation
-import Terminal
+import ShellKit
 
 /// The transport behind an opened database session. A database session has NO
 /// terminal I/O — its content is the `DatabaseBrowserView` driven by a

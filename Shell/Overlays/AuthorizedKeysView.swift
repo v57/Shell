@@ -1,5 +1,5 @@
 import SwiftUI
-import Terminal
+import ShellKit
 
 /// The authorized-keys panel (opened by the `key.2.on.ring` button in the
 /// Local and Remote sidebar headers).

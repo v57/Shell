@@ -6,7 +6,7 @@ Security framework; libssh2 + mbedTLS only carry the SSH transport.
 
 ## Verified
 
-**SSH identity key** (`Sources/Terminal/SSHKeychain.swift`)
+**SSH identity key** (`Sources/ShellKit/SSHKeychain.swift`)
 - P-256 signing key generated inside the Secure Enclave; only its device-bound `dataRepresentation`
   is stored (generic password `dev.v57.sh` / `ssh-sep-key`). The private scalar is never in memory
   or on disk, and the key can't be exported or restored on another device.

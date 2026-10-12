@@ -1,6 +1,6 @@
 import Foundation
-import Terminal
-import TerminalIntegrations
+import ShellKit
+import ShellIntegrations
 
 
 /// What an action session runs: the action plus the remote target config

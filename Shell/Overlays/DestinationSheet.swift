@@ -1,5 +1,5 @@
 import SwiftUI
-import TerminalIntegrations
+import ShellIntegrations
 
 /// The move/copy destination prompt: a text field pre-filled with the current
 /// directory, a Move/Copy mode selector, and a confirm/cancel pair. `onConfirm`
