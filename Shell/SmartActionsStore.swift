@@ -1,6 +1,6 @@
 import CryptoKit
 import Foundation
-import TerminalIntegrations
+import ShellIntegrations
 
 /// Encrypted per-directory storage for smart-action scan results, layered over
 /// `SecureFileStore` (Secure Enclave AES-GCM). One ciphertext file per

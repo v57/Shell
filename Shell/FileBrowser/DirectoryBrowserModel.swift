@@ -1,8 +1,8 @@
 import Foundation
 import Observation
 import SwiftUI
-import Terminal
-import TerminalIntegrations
+import ShellKit
+import ShellIntegrations
 
 /// The stateful owner of the Files panel: it holds the `DirectoryContext` for
 /// the currently-browsed session, the parsed `[FileRow]` listing, the column

@@ -1,8 +1,8 @@
 import Foundation
 import Observation
 import SwiftUI
-import Terminal
-import TerminalIntegrations
+import ShellKit
+import ShellIntegrations
 
 /// Tracks the current working directory of a file browser for one terminal
 /// session — locally (read live from the shell's cwd) or over SSH (via `pwd`).

@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import Terminal
+@testable import ShellKit
 
 /// Parser regression tests — the byte state machine that turns raw pty/SSH
 /// output into the grid model. Run with `swift test`.

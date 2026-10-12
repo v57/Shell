@@ -1,5 +1,5 @@
 import SwiftUI
-import Terminal
+import ShellKit
 
 struct HistorySessionView: View {
   let session: HistorySession

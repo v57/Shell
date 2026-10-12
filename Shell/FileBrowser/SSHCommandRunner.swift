@@ -1,6 +1,6 @@
 import Foundation
-import Terminal
-import TerminalIntegrations
+import ShellKit
+import ShellIntegrations
 
 /// Runs ONE command over the active SSH session's transport without a
 /// visible terminal, returning its output and exit status as a

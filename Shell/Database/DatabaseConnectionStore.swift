@@ -3,7 +3,7 @@ import Foundation
 import Observation
 import SwiftData
 import SwiftUI
-import Terminal
+import ShellKit
 
 /// Persists the sidebar's saved database connections, synced through iCloud —
 /// the same shape as `SSHConfigStore`.

@@ -1,7 +1,7 @@
 import SwiftUI
-import Md
+import MarkdownKit
 
-/// The main-view editor for a single note, rendered with the `Md` markdown
+/// The main-view editor for a single note, rendered with the `MarkdownKit` markdown
 /// editor (Obsidian-style live preview: syntax symbols hide on inactive lines
 /// and appear while editing them). The note's ciphertext is decrypted HERE when
 /// the note opens — the decrypted text is passed to the editor as its

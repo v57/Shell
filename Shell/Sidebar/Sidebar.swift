@@ -1,8 +1,8 @@
 import Foundation
 import SwiftUI
-import Terminal
-import TerminalIntegrations
-import Monitoring
+import ShellKit
+import ShellIntegrations
+import ShellMonitoring
 
 /// The sidebar: a `List` composing ONE VIEW PER SECTION — `LocalSectionView`,
 /// `RemoteSectionView`, `NotesSectionView`, plus the Running and Text Files

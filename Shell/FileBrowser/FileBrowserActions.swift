@@ -1,5 +1,5 @@
 import Foundation
-import TerminalIntegrations
+import ShellIntegrations
 
 /// Runs folder/file operations (open, delete, move/copy) for a
 /// `DirectoryBrowserModel` through the model's shared command runner, so they

@@ -4,9 +4,9 @@
 import PackageDescription
 
 let package = Package(
-    name: "Terminal",
+    name: "Shell",
     platforms: [.macOS(.v14), .iOS(.v17)],
-    products: [.library(name: "Terminal", targets: ["Terminal"]), .library(name: "TerminalIntegrations", targets: ["TerminalIntegrations"]), .library(name: "Monitoring", targets: ["Monitoring"]), .library(name: "DatabaseEngines", targets: ["DatabaseEngines"])],
+    products: [.library(name: "ShellKit", targets: ["ShellKit"]), .library(name: "ShellIntegrations", targets: ["ShellIntegrations"]), .library(name: "ShellMonitoring", targets: ["ShellMonitoring"]), .library(name: "ShellDatabaseEngines", targets: ["ShellDatabaseEngines"])],
     dependencies: [
         // Local Database package (MongoDB / PostgreSQL / Redis / SQLite engine
         // libraries). All four engines are cross-platform — the C-driver
@@ -23,7 +23,7 @@ let package = Package(
         // Targets are the basic building blocks of a package, defining a module or a test suite.
         // Targets can depend on other targets in this package and products from dependencies.
         .target(
-            name: "Terminal",
+            name: "ShellKit",
             dependencies: [
                 // libssh2 + mbedTLS, surfaced as the CLibssh2 module
                 // (consumed by Libssh2Connection and Libssh2PortForward).
@@ -36,13 +36,13 @@ let package = Package(
             ]
         ),
         .target(
-            name: "TerminalIntegrations",
+            name: "ShellIntegrations",
             swiftSettings: [
                 .swiftLanguageMode(.v5),
             ]
         ),
         .target(
-            name: "Monitoring",
+            name: "ShellMonitoring",
             swiftSettings: [
                 .swiftLanguageMode(.v5),
             ]
@@ -53,7 +53,7 @@ let package = Package(
         // slices and SQLite rides the SDK's system SQLite3 module — so no
         // engine is conditionally excluded from iOS builds anymore.
         .target(
-            name: "DatabaseEngines",
+            name: "ShellDatabaseEngines",
             dependencies: [
                 .product(name: "PostgreSQL", package: "Database"),
                 .product(name: "Redis", package: "Database"),
@@ -65,22 +65,22 @@ let package = Package(
             ]
         ),
         .testTarget(
-            name: "TerminalIntegrationsTests",
-            dependencies: ["TerminalIntegrations"],
+            name: "ShellIntegrationsTests",
+            dependencies: ["ShellIntegrations"],
             swiftSettings: [
                 .swiftLanguageMode(.v5),
             ]
         ),
         .testTarget(
-            name: "TerminalTests",
-            dependencies: ["Terminal"],
+            name: "ShellKitTests",
+            dependencies: ["ShellKit"],
             swiftSettings: [
                 .swiftLanguageMode(.v5),
             ]
         ),
         .testTarget(
-            name: "MonitoringTests",
-            dependencies: ["Monitoring"],
+            name: "ShellMonitoringTests",
+            dependencies: ["ShellMonitoring"],
             swiftSettings: [
                 .swiftLanguageMode(.v5),
             ]

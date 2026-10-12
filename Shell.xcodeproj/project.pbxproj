@@ -7,11 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		2611F6FA3042CFF000E1213E /* Md in Frameworks */ = {isa = PBXBuildFile; productRef = 2611F6F93042CFF000E1213E /* Md */; };
-		26C2D067302C066C008363F2 /* Terminal in Frameworks */ = {isa = PBXBuildFile; productRef = 26C2D066302C066C008363F2 /* Terminal */; };
-		A10000000000000000000002 /* TerminalIntegrations in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000001 /* TerminalIntegrations */; };
-		A10000000000000000000004 /* Monitoring in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000003 /* Monitoring */; };
-		A35000000000000000000002 /* DatabaseEngines in Frameworks */ = {isa = PBXBuildFile; productRef = A35000000000000000000001 /* DatabaseEngines */; };
+		2611F6FA3042CFF000E1213E /* MarkdownKit in Frameworks */ = {isa = PBXBuildFile; productRef = 2611F6F93042CFF000E1213E /* MarkdownKit */; };
+		26C2D067302C066C008363F2 /* ShellKit in Frameworks */ = {isa = PBXBuildFile; productRef = 26C2D066302C066C008363F2 /* ShellKit */; };
+		A10000000000000000000002 /* ShellIntegrations in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000001 /* ShellIntegrations */; };
+		A10000000000000000000004 /* ShellMonitoring in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000003 /* ShellMonitoring */; };
+		A35000000000000000000002 /* ShellDatabaseEngines in Frameworks */ = {isa = PBXBuildFile; productRef = A35000000000000000000001 /* ShellDatabaseEngines */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -59,11 +59,11 @@
 		000000000000000130000000 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
-				2611F6FA3042CFF000E1213E /* Md in Frameworks */,
-				A10000000000000000000004 /* Monitoring in Frameworks */,
-				A10000000000000000000002 /* TerminalIntegrations in Frameworks */,
-				26C2D067302C066C008363F2 /* Terminal in Frameworks */,
-				A35000000000000000000002 /* DatabaseEngines in Frameworks */,
+				2611F6FA3042CFF000E1213E /* MarkdownKit in Frameworks */,
+				A10000000000000000000004 /* ShellMonitoring in Frameworks */,
+				A10000000000000000000002 /* ShellIntegrations in Frameworks */,
+				26C2D067302C066C008363F2 /* ShellKit in Frameworks */,
+				A35000000000000000000002 /* ShellDatabaseEngines in Frameworks */,
 			);
 		};
 		000000000000000230000000 /* Frameworks */ = {
@@ -110,11 +110,11 @@
 			);
 			name = Shell;
 			packageProductDependencies = (
-				A10000000000000000000003 /* Monitoring */,
-				A10000000000000000000001 /* TerminalIntegrations */,
-				26C2D066302C066C008363F2 /* Terminal */,
-				A35000000000000000000001 /* DatabaseEngines */,
-				2611F6F93042CFF000E1213E /* Md */,
+				A10000000000000000000003 /* ShellMonitoring */,
+				A10000000000000000000001 /* ShellIntegrations */,
+				26C2D066302C066C008363F2 /* ShellKit */,
+				A35000000000000000000001 /* ShellDatabaseEngines */,
+				2611F6F93042CFF000E1213E /* MarkdownKit */,
 			);
 			productName = MyApp;
 			productReference = 000000000000000000000120 /* Shell.app */;
@@ -574,25 +574,25 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		2611F6F93042CFF000E1213E /* Md */ = {
+		2611F6F93042CFF000E1213E /* MarkdownKit */ = {
 			isa = XCSwiftPackageProductDependency;
-			productName = Md;
+			productName = MarkdownKit;
 		};
-		26C2D066302C066C008363F2 /* Terminal */ = {
+		26C2D066302C066C008363F2 /* ShellKit */ = {
 			isa = XCSwiftPackageProductDependency;
-			productName = Terminal;
+			productName = ShellKit;
 		};
-		A10000000000000000000001 /* TerminalIntegrations */ = {
+		A10000000000000000000001 /* ShellIntegrations */ = {
 			isa = XCSwiftPackageProductDependency;
-			productName = TerminalIntegrations;
+			productName = ShellIntegrations;
 		};
-		A10000000000000000000003 /* Monitoring */ = {
+		A10000000000000000000003 /* ShellMonitoring */ = {
 			isa = XCSwiftPackageProductDependency;
-			productName = Monitoring;
+			productName = ShellMonitoring;
 		};
-		A35000000000000000000001 /* DatabaseEngines */ = {
+		A35000000000000000000001 /* ShellDatabaseEngines */ = {
 			isa = XCSwiftPackageProductDependency;
-			productName = DatabaseEngines;
+			productName = ShellDatabaseEngines;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

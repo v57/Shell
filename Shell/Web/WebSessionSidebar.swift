@@ -1,5 +1,5 @@
 import SwiftUI
-import Terminal
+import ShellKit
 
 /// A saved web session row in the sidebar's Local or SSH section. Mirrors the
 /// screen/remote rows: an icon, the page name, an open/closed dot, and a

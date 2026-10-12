@@ -1,7 +1,7 @@
 import Foundation
 import SwiftUI
-import Terminal
-import TerminalIntegrations
+import ShellKit
+import ShellIntegrations
 import UniformTypeIdentifiers
 
 #if os(macOS)

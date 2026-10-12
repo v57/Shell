@@ -2,7 +2,7 @@ import CryptoKit
 import Foundation
 import SwiftData
 import Testing
-import Terminal
+import ShellKit
 @testable import Shell
 
 /// Hermetic tests for the iCloud-synced database-connection store, mirroring

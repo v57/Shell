@@ -1,7 +1,7 @@
 #if os(macOS)
 import SwiftUI
 import Charts
-import Monitoring
+import ShellMonitoring
 
 /// The stats graphs sheet, opened by clicking the Local section header in
 /// the sidebar: CPU%, GPU%, and system wattage over the last 10 minutes —

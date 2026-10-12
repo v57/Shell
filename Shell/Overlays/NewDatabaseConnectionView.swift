@@ -1,5 +1,5 @@
 import SwiftUI
-import Terminal
+import ShellKit
 
 /// Create/edit form for a database connection. Mirrors the SSH
 /// `NewConnectionView` shape: an engine picker, connection fields, and a

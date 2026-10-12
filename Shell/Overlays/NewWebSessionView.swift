@@ -1,6 +1,6 @@
 import Foundation
 import SwiftUI
-import Terminal
+import ShellKit
 
 /// Sheet for EDITING a saved web session: fields prefill and the toolbar button
 /// saves in place (same id) — mirrors NewConnectionView. Creating a page has no

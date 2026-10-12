@@ -1,6 +1,6 @@
 import Foundation
 import SwiftUI
-import Terminal
+import ShellKit
 
 /// The Remote section: saved SSH hosts, each emitting its running sessions, its
 /// host-bound web pages and its tunneled database connections as indented

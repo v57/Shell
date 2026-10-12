@@ -2,7 +2,7 @@ import CryptoKit
 import Foundation
 import Observation
 import SwiftData
-import Terminal
+import ShellKit
 
 /// Persists the sidebar's saved SSH connections, synced through iCloud.
 ///

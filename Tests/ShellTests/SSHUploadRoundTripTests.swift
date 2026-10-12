@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-import Terminal
+import ShellKit
 
 /// App-hosted (TEST_HOST = Shell.app) regression check for the local→SSH drop
 /// machinery: `SSHSession.connect` (Secure-Enclave key, forwarding-only) →

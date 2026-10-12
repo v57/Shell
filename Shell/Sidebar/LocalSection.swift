@@ -1,8 +1,8 @@
 import Foundation
 import SwiftUI
-import Terminal
-import TerminalIntegrations
-import Monitoring
+import ShellKit
+import ShellIntegrations
+import ShellMonitoring
 
 #if os(macOS)
 /// The Local section: this Mac's terminals, its persistent screen/tmux

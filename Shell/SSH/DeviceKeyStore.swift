@@ -2,7 +2,7 @@ import CryptoKit
 import Foundation
 import Observation
 import SwiftData
-import Terminal
+import ShellKit
 #if os(iOS)
 import UIKit
 #endif

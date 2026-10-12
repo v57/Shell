@@ -1,5 +1,5 @@
 import SwiftUI
-import Terminal
+import ShellKit
 #if os(macOS)
 import AppKit
 #endif

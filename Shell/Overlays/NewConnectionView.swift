@@ -1,6 +1,6 @@
 import Foundation
 import SwiftUI
-import Terminal
+import ShellKit
 
 /// Sheet for creating a NEW SSH connection, or EDITING a saved one (when
 /// initialized with a `config`): fields prefill and the toolbar button

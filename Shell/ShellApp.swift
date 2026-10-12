@@ -1,6 +1,6 @@
 import SwiftUI
-import Terminal
-import TerminalIntegrations
+import ShellKit
+import ShellIntegrations
 
 @main
 struct ShellApp: App {

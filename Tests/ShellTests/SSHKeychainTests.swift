@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-import Terminal
+import ShellKit
 
 /// Keychain-backed tests. These run in the app-hosted test bundle
 /// (TEST_HOST = Shell.app), so they execute inside the app's signed

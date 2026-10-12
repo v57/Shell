@@ -1,7 +1,7 @@
 #if os(macOS)
 import AppKit
 import Foundation
-import TerminalIntegrations
+import ShellIntegrations
 import UniformTypeIdentifiers
 
 /// App-side launcher for the "Open With" control: resolves the real

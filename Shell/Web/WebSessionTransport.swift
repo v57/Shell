@@ -1,5 +1,5 @@
 import Foundation
-import Terminal
+import ShellKit
 
 /// The transport behind an opened web session. A web session has NO terminal
 /// I/O — its content is a SwiftUI WebView. This transport reports an

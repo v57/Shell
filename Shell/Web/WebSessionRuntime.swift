@@ -1,6 +1,6 @@
 import Foundation
 import Observation
-import Terminal
+import ShellKit
 
 /// The runtime backing an OPEN ssh-owned web session. AppModel creates one per
 /// opened web page that has an `sshConfigID`, owns it for the session's

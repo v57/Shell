@@ -1,6 +1,6 @@
 import Foundation
-import Terminal
-import TerminalIntegrations
+import ShellKit
+import ShellIntegrations
 
 /// Error surfaced for create/rename actions, shown as an alert.
 struct ScreenActionError: Identifiable, Equatable {

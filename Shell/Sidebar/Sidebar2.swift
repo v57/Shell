@@ -6,8 +6,8 @@
 //
 
 import SwiftUI
-import Terminal
-import TerminalIntegrations
+import ShellKit
+import ShellIntegrations
 
 /// The sidebar on a `ScrollView` + `LazyVStack` instead of a `List`.
 ///
