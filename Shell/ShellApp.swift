@@ -1,11 +1,22 @@
 import SwiftUI
 import ShellKit
 import ShellIntegrations
+#if os(macOS)
+import UpdateKit
+#endif
 
 @main
 struct ShellApp: App {
   #if os(macOS)
   @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+
+  /// Updates for the Mac app from GitHub Releases (Shell.zip, built by
+  /// Scripts/release.sh): checked daily once the user turns on
+  /// automatic checks (never before), installed in place with a relaunch.
+  /// The iOS app updates through the App Store.
+  private let updater = AppUpdater(github: "v57/Shell", assetName: "Shell.zip")
+
+  init() { updater.start() }
   #endif
 
   var body: some Scene {
@@ -16,6 +27,7 @@ struct ShellApp: App {
     #if os(macOS)
     .commands {
       ShellCommands()
+      UpdaterCommands(updater: updater)
     }
     #endif
 

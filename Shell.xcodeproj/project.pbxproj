@@ -12,6 +12,7 @@
 		A10000000000000000000002 /* ShellIntegrations in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000001 /* ShellIntegrations */; };
 		A10000000000000000000004 /* ShellMonitoring in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000003 /* ShellMonitoring */; };
 		A35000000000000000000002 /* ShellDatabaseEngines in Frameworks */ = {isa = PBXBuildFile; productRef = A35000000000000000000001 /* ShellDatabaseEngines */; };
+		D5C0DE000000000000000003 /* UpdateKit in Frameworks */ = {isa = PBXBuildFile; platformFilters = (macos, ); productRef = D5C0DE000000000000000002 /* UpdateKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -64,6 +65,7 @@
 				A10000000000000000000002 /* ShellIntegrations in Frameworks */,
 				26C2D067302C066C008363F2 /* ShellKit in Frameworks */,
 				A35000000000000000000002 /* ShellDatabaseEngines in Frameworks */,
+				D5C0DE000000000000000003 /* UpdateKit in Frameworks */,
 			);
 		};
 		000000000000000230000000 /* Frameworks */ = {
@@ -115,6 +117,7 @@
 				26C2D066302C066C008363F2 /* ShellKit */,
 				A35000000000000000000001 /* ShellDatabaseEngines */,
 				2611F6F93042CFF000E1213E /* MarkdownKit */,
+				D5C0DE000000000000000002 /* UpdateKit */,
 			);
 			productName = MyApp;
 			productReference = 000000000000000000000120 /* Shell.app */;
@@ -174,6 +177,7 @@
 				26C2D065302C066C008363F2 /* XCLocalSwiftPackageReference "../Shell" */,
 				A200000000000000000000E1 /* XCLocalSwiftPackageReference "../Database" */,
 				2611F6F83042CFF000E1213E /* XCLocalSwiftPackageReference "../Markdown" */,
+				D5C0DE000000000000000001 /* XCLocalSwiftPackageReference "../UpdateKit" */,
 			);
 			preferredProjectObjectVersion = 90;
 			productRefGroup = 000000000000000000000020 /* Products */;
@@ -571,6 +575,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../Database;
 		};
+		D5C0DE000000000000000001 /* XCLocalSwiftPackageReference "../UpdateKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../UpdateKit;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -593,6 +601,10 @@
 		A35000000000000000000001 /* ShellDatabaseEngines */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = ShellDatabaseEngines;
+		};
+		D5C0DE000000000000000002 /* UpdateKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = UpdateKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
