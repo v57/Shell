@@ -17,6 +17,9 @@ public final class TerminalSession: Identifiable {
     case starting
     case connecting(String)
     case connected
+    /// The link dropped and the session is dialing again (`attempt` counts
+    /// from 1). Only sessions created with a `reconnect` factory get here.
+    case reconnecting(attempt: Int)
     case failed(String)
     case closed
   }
@@ -174,7 +177,29 @@ public final class TerminalSession: Identifiable {
   public var snapshotUpdateHandler: ((TerminalSnapshot) -> Void)?
 
   @ObservationIgnored
-  private let transport: any TerminalTransport
+  private var transport: any TerminalTransport
+  /// Builds a fresh transport for the same destination when the link
+  /// drops (SSH: a new `SSHSession` for the config). Nil = no reconnect:
+  /// a dropped link is a plain failure.
+  @ObservationIgnored
+  private let makeReconnectTransport: (() -> any TerminalTransport)?
+  /// The message shown while the first connection was being made
+  /// ("Connecting to host…"); reused for the reconnect status.
+  @ObservationIgnored
+  private let startupMessage: String?
+  /// Why the link dropped, shown above the reconnect status.
+  @ObservationIgnored
+  private var lossMessage: String?
+  /// How many dials the current reconnect has made or scheduled; 0 while
+  /// the original connection is up (or was never lost).
+  @ObservationIgnored
+  private var reconnectAttempt = 0
+  @ObservationIgnored
+  private var reconnectTimer: Timer?
+  /// Seconds to wait before dial `attempt` (1-based). Test seam; the default
+  /// is `defaultReconnectDelay`.
+  @ObservationIgnored
+  public var reconnectDelay: (Int) -> TimeInterval = TerminalSession.defaultReconnectDelay
   @ObservationIgnored
   private lazy var parser = TerminalOutputParser(sendResponse: { [weak self] response in
     self?.send(response)
@@ -249,9 +274,20 @@ public final class TerminalSession: Identifiable {
 
   /// Creates a session over `transport` and starts it immediately.
   /// `startupMessage` is shown while connecting (SSH: "Connecting to
-  /// host…"); nil starts in `.starting` (local pty).
-  public init(transport: any TerminalTransport, startupMessage: String? = nil) {
+  /// host…"); nil starts in `.starting` (local pty). With `reconnect`, a
+  /// dropped link (host rebooting, network gone) does not end the session:
+  /// it keeps dialing with transports from the factory, backing off to one
+  /// dial every five seconds, until the host answers again or the session
+  /// is closed. The scrollback survives; the new shell continues below a
+  /// "reconnected" line.
+  public init(
+    transport: any TerminalTransport,
+    startupMessage: String? = nil,
+    reconnect: (() -> any TerminalTransport)? = nil
+  ) {
     self.transport = transport
+    self.makeReconnectTransport = reconnect
+    self.startupMessage = startupMessage
     // Seed the parser grid with the size the transport STARTS the child at
     // (`initialGridSize`). The child's first output can beat the view's
     // first layout, and that is exactly what happens for a session created
@@ -266,24 +302,7 @@ public final class TerminalSession: Identifiable {
       connectionState = .connecting(startupMessage)
       snapshot = TerminalSnapshot(message: startupMessage)
     }
-    transport.onOutput = { [weak self] data in
-      self?.receiveOutput(data)
-    }
-    transport.onConnected = { [weak self] in
-      self?.transportConnected()
-    }
-    transport.onTerminated = { [weak self] message in
-      self?.transportTerminated(message)
-    }
-    transport.onExit = { [weak self] code in
-      self?.transportExited(code)
-    }
-    transport.onHostKeyPrompt = { [weak self] prompt in
-      self?.hostKeyPrompt = prompt
-    }
-    transport.onPasswordPrompt = { [weak self] prompt in
-      self?.passwordPrompt = prompt
-    }
+    wire(transport)
     transport.start()
     // The initial grid is visible immediately (no pty output may ever
     // arrive before the view appears). Force: it is the first publish.
@@ -291,6 +310,45 @@ public final class TerminalSession: Identifiable {
     if startupMessage == nil {
       publishNow(force: true)
     }
+  }
+
+  /// Points `transport`'s callbacks at this session. Callbacks capture the
+  /// transport too, so a replaced (dead) transport whose last events are
+  /// still queued on the main thread cannot speak for the live one.
+  private func wire(_ transport: any TerminalTransport) {
+    transport.onOutput = { [weak self, weak transport] data in
+      guard let self, self.isCurrent(transport) else { return }
+      self.receiveOutput(data)
+    }
+    transport.onConnected = { [weak self, weak transport] in
+      guard let self, self.isCurrent(transport) else { return }
+      self.transportConnected()
+    }
+    transport.onTerminated = { [weak self, weak transport] message in
+      guard let self, self.isCurrent(transport) else { return }
+      self.transportTerminated(message)
+    }
+    transport.onConnectionLost = { [weak self, weak transport] message in
+      guard let self, self.isCurrent(transport) else { return }
+      self.transportConnectionLost(message)
+    }
+    transport.onExit = { [weak self, weak transport] code in
+      guard let self, self.isCurrent(transport) else { return }
+      self.transportExited(code)
+    }
+    transport.onHostKeyPrompt = { [weak self, weak transport] prompt in
+      guard let self, self.isCurrent(transport) else { return }
+      self.hostKeyPrompt = prompt
+    }
+    transport.onPasswordPrompt = { [weak self, weak transport] prompt in
+      guard let self, self.isCurrent(transport) else { return }
+      self.passwordPrompt = prompt
+    }
+  }
+
+  private func isCurrent(_ transport: (any TerminalTransport)?) -> Bool {
+    guard let transport else { return false }
+    return transport === self.transport
   }
 
   deinit {
@@ -305,6 +363,8 @@ public final class TerminalSession: Identifiable {
   public func close() {
     guard !didCloseTransport else { return }
     didCloseTransport = true
+    reconnectTimer?.invalidate()
+    reconnectTimer = nil
     publishTimer?.invalidate()
     publishTimer = nil
     pendingPublish = false
@@ -708,15 +768,106 @@ public final class TerminalSession: Identifiable {
   }
 
   private func transportConnected() {
+    let reconnected = reconnectAttempt > 0
+    reconnectAttempt = 0
+    lossMessage = nil
     connectionState = .connected
+    if reconnected {
+      // The fresh transport started its pty at the default size; bring it
+      // to the grid's real size before the new shell draws its prompt.
+      transport.resize(columns: lastGridSize.columns, rows: lastGridSize.rows)
+      // Leave whatever screen the dead shell was on (alt screen, colors)
+      // and mark the seam, so the new prompt starts on its own line below
+      // the old output instead of over it.
+      receiveOutput(Data("\u{1B}[?1049l\u{1B}[0m\r\n\u{1B}[2m\u{2500}\u{2500} reconnected \u{2500}\u{2500}\u{1B}[0m\r\n".utf8))
+    }
     // Force: clears the startup message even if the grid pixels match.
     publishNow(force: true)
   }
 
   private func transportTerminated(_ message: String) {
+    reconnectTimer?.invalidate()
+    reconnectTimer = nil
     connectionState = .failed(message)
     snapshot = TerminalSnapshot(message: message)
     snapshotUpdateHandler?(snapshot)
+  }
+
+  // MARK: - Reconnect
+
+  /// Whether a dropped link is dialed again (the session was created with
+  /// a `reconnect` factory). Also what `reconnectNow()` needs.
+  public var canReconnect: Bool { makeReconnectTransport != nil }
+
+  /// 1s, 2s, 3s, then every 5s: quick enough that a host back from a
+  /// reboot is picked up within seconds, slow enough not to hammer one
+  /// that stays down. Each dial itself times out after 20s.
+  public nonisolated static func defaultReconnectDelay(attempt: Int) -> TimeInterval {
+    attempt < 4 ? TimeInterval(attempt) : 5
+  }
+
+  /// The link dropped (transport says the host is unreachable or stopped
+  /// answering, not that the configuration is wrong). With a reconnect
+  /// factory: schedule the next dial. Without: a failure, as before.
+  private func transportConnectionLost(_ message: String) {
+    guard !didCloseTransport else { return }
+    guard canReconnect else {
+      transportTerminated(message)
+      return
+    }
+    lossMessage = message
+    scheduleReconnect()
+  }
+
+  /// Dials again right away: from a scheduled reconnect (skipping the
+  /// wait), a final failure (the user fixed what was wrong: password, host
+  /// key) or an ended shell. No-op while the session is live or closed.
+  public func reconnectNow() {
+    guard canReconnect, !didCloseTransport else { return }
+    switch connectionState {
+    case .starting, .connecting, .connected:
+      return
+    case .reconnecting, .failed, .closed:
+      reconnectTimer?.invalidate()
+      reconnectTimer = nil
+      reconnectAttempt += 1
+      showReconnecting()
+      dial()
+    }
+  }
+
+  private func scheduleReconnect() {
+    reconnectAttempt += 1
+    showReconnecting()
+    reconnectTimer?.invalidate()
+    let delay = reconnectDelay(reconnectAttempt)
+    let timer = Timer(timeInterval: delay, repeats: false) { [weak self] _ in
+      DispatchQueue.main.async { self?.dial() }
+    }
+    RunLoop.main.add(timer, forMode: .common)
+    reconnectTimer = timer
+  }
+
+  private func showReconnecting() {
+    connectionState = .reconnecting(attempt: reconnectAttempt)
+    var lines: [String] = []
+    if let lossMessage { lines.append("Connection lost: \(lossMessage)") }
+    lines.append("\(startupMessage ?? "Reconnecting…") (attempt \(reconnectAttempt))")
+    snapshot = TerminalSnapshot(message: lines.joined(separator: "\n\n"))
+    snapshotUpdateHandler?(snapshot)
+  }
+
+  /// Replaces the dead transport with a fresh one and starts it. The old
+  /// one is closed first (its engine thread, socket); its callbacks are
+  /// already orphaned by `wire`'s identity check.
+  private func dial() {
+    guard !didCloseTransport, let makeReconnectTransport else { return }
+    reconnectTimer = nil
+    transport.close()
+    let fresh = makeReconnectTransport()
+    transport = fresh
+    wire(fresh)
+    fresh.start()
   }
 
   private func transportExited(_ code: Int32) {

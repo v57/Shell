@@ -404,6 +404,20 @@ struct ContentView: View {
           }
         }
         .toolbar {
+            // Dial again now: skips a scheduled reconnect's wait, retries a
+            // final failure after the user fixed it (password, host key), or
+            // reopens a shell that ended. Only on sessions that can reconnect
+            // (SSH terminals), only while they are not live.
+            if session.canReconnect, !isLive(session) {
+              ToolbarItem(placement: .primaryAction) {
+                Button {
+                  session.reconnectNow()
+                } label: {
+                  Label("Reconnect", systemImage: "arrow.clockwise")
+                }
+                .help("Reconnect now")
+              }
+            }
 #if os(macOS)
             // Smart actions for the active local directory: a Run button per
             // action, a Stop button (disabled unless something is running), and a
@@ -452,6 +466,15 @@ struct ContentView: View {
     }
     .navigationTitle(model.displayName(for: session))
     .navigationDirectorySubtitle(localDirectoryText)
+  }
+
+  /// Whether the session's link is up or being set up for the first time
+  /// (no Reconnect button then).
+  private func isLive(_ session: TerminalSession) -> Bool {
+    switch session.connectionState {
+    case .starting, .connecting, .connected: true
+    case .reconnecting, .failed, .closed: false
+    }
   }
 
   /// The detail pane for an archived history session, with its delete /

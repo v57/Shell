@@ -114,7 +114,7 @@ private struct RunningSectionView: View {
   /// or remote exec is alive); Cancel sends Ctrl+C in that state.
   private func isRunning(_ session: TerminalSession) -> Bool {
     switch session.connectionState {
-    case .starting, .connecting, .connected:
+    case .starting, .connecting, .reconnecting, .connected:
       return true
     case .failed, .closed:
       return false
@@ -166,7 +166,7 @@ private struct ActionRunRow: View {
   /// (play → checkmark / xmark) rather than swapping views.
   private var stateSymbol: String {
     switch session.connectionState {
-    case .starting, .connecting, .connected: "play.fill"
+    case .starting, .connecting, .reconnecting, .connected: "play.fill"
     case .failed: "xmark.circle.fill"
     case .closed: session.actionExitCode == 0 ? "checkmark.circle.fill" : "xmark.circle.fill"
     }
@@ -382,6 +382,9 @@ struct SessionRow: View {
       session.hasActivity ? AnyShapeStyle(.green) : nil
     case .failed:
       AnyShapeStyle(.red)
+    case .reconnecting:
+      // The link dropped and the session is dialing again.
+      AnyShapeStyle(.orange)
     case .starting, .connecting, .closed:
       AnyShapeStyle(.secondary)
     }

@@ -847,9 +847,13 @@ final class AppModel {
   @discardableResult
   func connect(to config: SSHConfig) -> TerminalSession {
     connectionStore.save(config)
+    // A dropped link (host rebooting, network gone) is dialed again with a
+    // fresh SSHSession until the host answers; the terminal keeps its
+    // scrollback. A shell the user ends (`exit`) just closes.
     let session = TerminalSession(
       transport: SSHSession(config: config),
-      startupMessage: "Connecting to \(config.host)…"
+      startupMessage: "Connecting to \(config.host)…",
+      reconnect: { SSHSession(config: config) }
     )
     sessionKinds[session.id] = .ssh(config)
     registerCapture(for: session, archiveLocally: false)
@@ -2275,7 +2279,7 @@ final class AppModel {
     sessions.contains { session in
       guard case .action(let spec) = kind(of: session), spec.action.id == id else { return false }
       switch session.connectionState {
-      case .starting, .connecting, .connected: return true
+      case .starting, .connecting, .reconnecting, .connected: return true
       case .failed, .closed: return false
       }
     }
