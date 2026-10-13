@@ -37,7 +37,8 @@ public final class SSHSession: TerminalTransport {
     started = true
 
     // The identity key lives in the Secure Enclave; it never touches disk.
-    let key = try? SSHKeychain.loadOrCreateDefaultKey()
+    // A password-only config never needs it, so it leaves the Keychain alone.
+    let key = config.authMethod == .keychainKey ? try? SSHKeychain.loadOrCreateDefaultKey() : nil
     let engine = Libssh2Connection(
       config: config,
       privateKey: key,

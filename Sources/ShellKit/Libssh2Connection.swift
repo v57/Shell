@@ -483,13 +483,21 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
     }
 
     // 2) Password: saved one from the Keychain first, else prompt.
-    let methods = libssh2_userauth_list(sess, username, usernameLen)
+    // The session is non-blocking: the method list (a "none" auth exchange)
+    // and the password attempt are driven through EAGAIN like every other
+    // round trip, or they report "no methods" before the server answers.
+    var methods = libssh2_userauth_list(sess, username, usernameLen)
+    if methods == nil {
+      _ = driveChannel(libssh2_session_last_errno(sess)) {
+        methods = libssh2_userauth_list(sess, username, usernameLen)
+        return methods == nil ? libssh2_session_last_errno(sess) : 0
+      }
+    }
     let supportsPassword = methods.map { String(cString: $0).contains("password") } ?? false
     if supportsPassword {
       if config.savePassword,
          let saved = try? SSHKeychain.loadPassword(account: config.passwordAccount) {
-        let rc = libssh2_userauth_password_ex(sess, username, usernameLen, saved, UInt32(saved.utf8.count), nil)
-        if rc == 0 { return }
+        if authWithPassword(sess, username: username, usernameLen: usernameLen, password: saved) == 0 { return }
         // Fall through to the prompt on failure.
       }
 
@@ -506,12 +514,21 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
       guard let password = boxed.password else {
         throw EngineError.authenticationCancelled
       }
-      let rc = libssh2_userauth_password_ex(sess, username, usernameLen, password, UInt32(password.utf8.count), nil)
+      let rc = authWithPassword(sess, username: username, usernameLen: usernameLen, password: password)
       if rc == 0 { return }
       throw EngineError.libssh2(rc, lastErrorText(sess))
     }
 
     throw EngineError.noAvailableAuthenticationMethods
+  }
+
+  /// `libssh2_userauth_password_ex` driven to completion on the non-blocking
+  /// session; returns libssh2's final result (0 = accepted).
+  private func authWithPassword(_ sess: OpaquePointer, username: String, usernameLen: UInt32, password: String) -> Int32 {
+    let attempt = {
+      libssh2_userauth_password_ex(sess, username, usernameLen, password, UInt32(password.utf8.count), nil)
+    }
+    return driveChannel(attempt(), attempt)
   }
 
   /// Drives `libssh2_userauth_publickey` with the Secure Enclave sign callback.
