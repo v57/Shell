@@ -83,6 +83,14 @@ public nonisolated enum SSHKeychain {
     fingerprint(blob: ecdsaBlob(for: key))
   }
 
+  /// SHA256 fingerprint of any OpenSSH public key line ("type base64 [comment]"),
+  /// nil when the second field is not base64.
+  public static func publicKeyFingerprint(forKeyLine line: String) -> String? {
+    let fields = line.split(whereSeparator: \.isWhitespace)
+    guard fields.count >= 2, let blob = Data(base64Encoded: String(fields[1])), !blob.isEmpty else { return nil }
+    return fingerprint(blob: blob)
+  }
+
   // MARK: - Per-connection passwords
   
   public static func savePassword(_ password: String, account: String) throws {

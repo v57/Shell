@@ -123,6 +123,55 @@ final class DeviceKeyStore {
     }
   }
 
+  // MARK: - Custom keys
+
+  /// Saves a public key added by hand (another machine's or a hardware
+  /// key's), so every device can add it to its servers. Upserts by
+  /// fingerprint like device keys; `name` falls back to the line's comment.
+  @discardableResult
+  func addCustomKey(line: String, name: String?) throws -> DeviceKeyRecord {
+    let line = line.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard AuthorizedKeysManager.isPlainKeyLine(line),
+          let fingerprint = SSHKeychain.publicKeyFingerprint(forKeyLine: line) else {
+      throw AuthorizedKeysError.invalidKeyLine
+    }
+    let trimmedName = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let displayName = trimmedName.isEmpty ? Self.comment(of: line) : trimmedName
+    let record: DeviceKeyRecord
+    if let existing = fetch(byFingerprint: fingerprint) {
+      record = existing
+      // Re-adding a device's own key by hand keeps its device line.
+      if !existing.isDeviceKey { existing.keyLine = line }
+      if let displayName { existing.deviceName = displayName }
+      existing.updatedAt = Date()
+    } else {
+      record = DeviceKeyRecord(fingerprint: fingerprint, keyLine: line, deviceName: displayName, updatedAt: Date())
+      context.insert(record)
+    }
+    try context.save()
+    storageError = nil
+    reload()
+    return record
+  }
+
+  /// Removes a key from the registry (every record with that fingerprint).
+  /// Servers that already have it keep it. A device that is still in use
+  /// publishes itself again on its next launch.
+  func forget(fingerprint: String) throws {
+    let records = (try? context.fetch(FetchDescriptor<DeviceKeyRecord>())) ?? []
+    records.filter { $0.fingerprint == fingerprint }.forEach(context.delete)
+    try context.save()
+    reload()
+  }
+
+  /// The comment of a key line (everything after the base64), if any.
+  static func comment(of line: String) -> String? {
+    let fields = line.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: true)
+    guard fields.count == 3 else { return nil }
+    let comment = fields[2].trimmingCharacters(in: .whitespaces)
+    return comment.isEmpty ? nil : comment
+  }
+
   /// Re-fetches — the no-push sync trigger (scene activation).
   func refreshOnActivation() {
     reload()

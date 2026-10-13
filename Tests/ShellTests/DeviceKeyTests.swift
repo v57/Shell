@@ -97,6 +97,29 @@ struct DeviceKeyStoreTests {
     let stored = try context.fetch(FetchDescriptor<DeviceKeyRecord>()).filter { $0.fingerprint == fingerprint }
     #expect(stored.count == 1)
   }
+
+  @Test @MainActor func addsAndForgetsCustomKeys() throws {
+    let store = makeStore(keyProvider: { try Self.freshKey() })
+    let line = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl laptop@home"
+    let fingerprint = try #require(SSHKeychain.publicKeyFingerprint(forKeyLine: line))
+
+    let record = try store.addCustomKey(line: line, name: "")
+    #expect(record.deviceName == "laptop@home")
+    #expect(!record.isDeviceKey)
+
+    // Adding it again renames the same record.
+    try store.addCustomKey(line: line, name: "Work laptop")
+    let matching = store.all.filter { $0.fingerprint == fingerprint }
+    #expect(matching.count == 1)
+    #expect(matching.first?.deviceName == "Work laptop")
+
+    #expect(throws: AuthorizedKeysError.self) {
+      try store.addCustomKey(line: "command=\"sh\" \(line)", name: nil)
+    }
+
+    try store.forget(fingerprint: fingerprint)
+    #expect(!store.all.contains { $0.fingerprint == fingerprint })
+  }
 }
 
 /// The authorized-keys manager: local file operations + parsing + command

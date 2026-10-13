@@ -24,6 +24,8 @@ final class AuthorizedKeysManager {
     enum Source {
       case device   // this device's Secure Enclave key
       case icloud   // another device, published via iCloud
+      case custom   // added by hand, saved in iCloud
+      case file     // only in the target's authorized_keys
     }
 
     var id: String { keyMaterial }
