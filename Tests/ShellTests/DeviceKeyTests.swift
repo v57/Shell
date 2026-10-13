@@ -76,6 +76,27 @@ struct DeviceKeyStoreTests {
     // Other devices' records from the previous tests are still readable.
     #expect(failing.all.count >= 2)
   }
+
+  @Test @MainActor func collapsesSyncedDuplicatesToTheNewest() throws {
+    // Two devices (or a reinstall) published the same key before syncing:
+    // CloudKit delivers two records with one fingerprint.
+    let context = Self.sharedContainer.mainContext
+    let fingerprint = "SHA256:duplicate-\(UUID().uuidString)"
+    let older = DeviceKeyRecord(fingerprint: fingerprint, keyLine: "ecdsa-sha2-nistp256 AAAA1 Shell (a@iPhone)",
+                                deviceName: "iPhone", updatedAt: Date(timeIntervalSince1970: 1))
+    let newer = DeviceKeyRecord(fingerprint: fingerprint, keyLine: "ecdsa-sha2-nistp256 AAAA1 Shell (a@iPhone)",
+                                deviceName: "iPhone 2", updatedAt: Date(timeIntervalSince1970: 2))
+    context.insert(older)
+    context.insert(newer)
+    try context.save()
+
+    let store = makeStore(keyProvider: { try Self.freshKey() })
+    let matching = store.all.filter { $0.fingerprint == fingerprint }
+    #expect(matching.count == 1)
+    #expect(matching.first?.deviceName == "iPhone 2")
+    let stored = try context.fetch(FetchDescriptor<DeviceKeyRecord>()).filter { $0.fingerprint == fingerprint }
+    #expect(stored.count == 1)
+  }
 }
 
 /// The authorized-keys manager: local file operations + parsing + command

@@ -134,7 +134,35 @@ final class DeviceKeyStore {
     let records = (try? context.fetch(
       FetchDescriptor<DeviceKeyRecord>(sortBy: [SortDescriptor(\.updatedAt, order: .reverse)])
     )) ?? []
-    all = records
+    all = removingDuplicates(records)
+  }
+
+  /// Collapses records that share a fingerprint into one, deleting the rest.
+  ///
+  /// CloudKit can't enforce uniqueness: a device that publishes before its
+  /// earlier record has synced down (a reinstall, a reset store, two devices
+  /// publishing at once) inserts a second record for the same key. Every
+  /// device keeps the same survivor — the newest `updatedAt`, then the
+  /// highest `id` — so concurrent clean-ups never delete each other's pick.
+  private func removingDuplicates(_ records: [DeviceKeyRecord]) -> [DeviceKeyRecord] {
+    let groups = Dictionary(grouping: records.filter { $0.fingerprint != nil }) { $0.fingerprint! }
+    var duplicates: [DeviceKeyRecord] = []
+    for group in groups.values where group.count > 1 {
+      let survivor = group.max { lhs, rhs in
+        (lhs.updatedAt, lhs.id.uuidString) < (rhs.updatedAt, rhs.id.uuidString)
+      }!
+      duplicates += group.filter { $0 !== survivor }
+    }
+    guard !duplicates.isEmpty else { return records }
+    duplicates.forEach(context.delete)
+    do {
+      try context.save()
+    } catch {
+      storageError = error.localizedDescription
+      NSLog("DeviceKeyStore: could not remove duplicate keys: \(error)")
+    }
+    let removed = Set(duplicates.map(ObjectIdentifier.init))
+    return records.filter { !removed.contains(ObjectIdentifier($0)) }
   }
 
   private func fetch(byFingerprint fingerprint: String) -> DeviceKeyRecord? {
