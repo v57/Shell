@@ -17,7 +17,12 @@ public final class SSHSession: TerminalTransport {
   /// All callbacks are delivered on the main thread.
   public var onOutput: ((Data) -> Void)?
   public var onConnected: (() -> Void)?
+  /// A final failure: configuration, host key, authentication.
   public var onTerminated: ((String) -> Void)?
+  /// The link dropped or the host never answered; the owner may start a
+  /// fresh `SSHSession` for the same config. Delivered to `onTerminated`
+  /// instead while this is unset (connect-only owners handle both alike).
+  public var onConnectionLost: ((String) -> Void)?
   /// The exec command's remote exit status (action sessions only).
   public var onExit: ((Int32) -> Void)?
   public var onHostKeyPrompt: ((TerminalHostKeyPrompt) -> Void)?
@@ -54,6 +59,10 @@ public final class SSHSession: TerminalTransport {
     }
     engine.onTerminated = { [weak self] message in
       self?.onTerminated?(message)
+    }
+    engine.onConnectionLost = { [weak self] message in
+      guard let self else { return }
+      (self.onConnectionLost ?? self.onTerminated)?(message)
     }
     engine.onExit = { [weak self] status in
       self?.onExit?(status)

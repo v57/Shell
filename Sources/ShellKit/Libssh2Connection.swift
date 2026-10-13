@@ -48,6 +48,13 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
 
   enum EngineError: LocalizedError {
     case connectTimedOut
+    /// The host name did not resolve (`getaddrinfo` failed).
+    case hostNotFound(String)
+    /// The TCP connect failed with this errno (refused, unreachable, …).
+    case socket(Int32, String)
+    /// The host stopped answering: no packet arrived for `keepaliveTimeout`
+    /// seconds although keepalives were being sent.
+    case noResponse
     case hostKeyRejected
     case authenticationCancelled
     case noAvailableAuthenticationMethods
@@ -61,6 +68,12 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
       switch self {
       case .connectTimedOut:
         return "Connection timed out."
+      case .hostNotFound(let message):
+        return "Could not resolve the host: \(message)"
+      case .socket(_, let message):
+        return message
+      case .noResponse:
+        return "The host stopped responding."
       case .hostKeyRejected:
         return "Host key was rejected."
       case .authenticationCancelled:
@@ -80,12 +93,47 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
   /// libssh2's EAGAIN constant is a C macro (not visible to Swift). -37 is the
   /// stable value of `LIBSSH2_ERROR_EAGAIN` for all supported libssh2 versions.
   private static let EAGAIN: Int32 = -37
+  /// libssh2 error codes that mean the LINK failed, not the configuration:
+  /// `BANNER_RECV` (-2), `SOCKET_SEND` (-7), `TIMEOUT` (-9),
+  /// `SOCKET_DISCONNECT` (-13), `SOCKET_RECV` (-43). A host that is still
+  /// booting accepts the TCP connection and then drops it, which surfaces as
+  /// one of these during the handshake.
+  private static let linkErrorCodes: Set<Int32> = [-2, -7, -9, -13, -43]
+
+  /// Whether `error` is a dropped or unreachable link (the caller may dial
+  /// again) rather than a configuration or authentication failure (retrying
+  /// would fail the same way).
+  static func isConnectionLoss(_ error: Error) -> Bool {
+    guard let engineError = error as? EngineError else { return false }
+    switch engineError {
+    case .connectTimedOut, .socket, .noResponse:
+      return true
+    case .libssh2(let code, _):
+      return linkErrorCodes.contains(code)
+    case .hostNotFound, .hostKeyRejected, .authenticationCancelled,
+         .noAvailableAuthenticationMethods, .notConnected, .remoteCommandFailed:
+      return false
+    }
+  }
+
+  /// SSH-level keepalive (`keepalive@libssh2.org`, reply requested) cadence
+  /// for shell and exec sessions, in seconds, and how long the link may stay
+  /// silent before the host counts as gone (three missed replies, the same
+  /// ratio as OpenSSH's ServerAliveInterval / ServerAliveCountMax). A host
+  /// that reboots without closing its connections is otherwise only found
+  /// out when the kernel gives up retransmitting, many minutes later.
+  static let keepaliveInterval: UInt32 = 15
+  static let keepaliveTimeout: TimeInterval = 45
 
   // MARK: Callbacks (all delivered on the main thread)
 
   var onOutput: ((Data) -> Void)?
   var onConnected: (() -> Void)?
+  /// The connection failed for good (configuration, host key, auth).
   var onTerminated: ((String) -> Void)?
+  /// The link to the host dropped, or the host never answered; see
+  /// `isConnectionLoss`. Falls back to `onTerminated` when unset.
+  var onConnectionLost: ((String) -> Void)?
   /// The remote command's exit status (exec/action sessions only).
   var onExit: ((Int32) -> Void)?
   var onHostKeyChallenge: ((HostKeyChallenge) -> Void)?
@@ -128,6 +176,9 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
   /// True once an exec channel reported its exit status; a subsequent clean
   /// close must NOT surface as an error.
   private var execExitSeen = false
+  /// When the socket last had inbound data (keepalive replies included).
+  /// The pump declares the host gone once this is `keepaliveTimeout` old.
+  private var lastReceive = Date()
 
   /// Pending bytes to write to the channel, guarded by `writeLock` (crosses
   /// from the main thread into `queue`).
@@ -323,6 +374,13 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
       }
 
       try openSessionChannel(sess)
+      // Reply-requesting keepalives: the server's answers are the heartbeat
+      // the pump's receive timeout listens for. Forwarding-only connections
+      // get none — nothing reads their session packets while no tunnel
+      // channel is open, so the replies would pile up unread; TCP keepalive
+      // on the socket covers them.
+      libssh2_keepalive_config(sess, 1, Self.keepaliveInterval)
+      lastReceive = Date()
       DispatchQueue.main.async { [weak self] in
         self?.onConnected?()
       }
@@ -335,8 +393,15 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
       // re-schedule themselves, so the connection is still alive after
       // `runConnect` returns — it must stay up for one-shot SFTP/exec ops.
       teardownSession()
+      let lost = Self.isConnectionLoss(error)
       DispatchQueue.main.async { [weak self] in
-        self?.onTerminated?(Self.describe(error))
+        guard let self else { return }
+        let message = Self.describe(error)
+        if lost {
+          (self.onConnectionLost ?? self.onTerminated)?(message)
+        } else {
+          self.onTerminated?(message)
+        }
       }
     }
   }
@@ -357,7 +422,7 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
       getaddrinfo(h, String(port), &hints, &ai)
     }
     guard rc == 0, let addrInfo = ai else {
-      throw EngineError.connectTimedOut
+      throw EngineError.hostNotFound(String(cString: gai_strerror(rc)))
     }
     defer { freeaddrinfo(addrInfo) }
 
@@ -370,6 +435,19 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
         // TCP_NODELAY: disable Nagle so keystrokes flush immediately.
         var one: Int32 = 1
         setsockopt(s, IPPROTO_TCP, TCP_NODELAY, &one, socklen_t(MemoryLayout<Int32>.size))
+        // TCP keepalive: probe an idle link every 5s after 10s of quiet and
+        // give up after 3 unanswered probes, so a peer that vanished without
+        // closing (power loss, VM reset) turns into a socket error in ~25s
+        // instead of the kernel's multi-minute retransmit timeout. Covers
+        // every connection kind, including forwarding-only ones that carry
+        // no SSH keepalives.
+        setsockopt(s, SOL_SOCKET, SO_KEEPALIVE, &one, socklen_t(MemoryLayout<Int32>.size))
+        var idle: Int32 = 10
+        var interval: Int32 = 5
+        var count: Int32 = 3
+        setsockopt(s, IPPROTO_TCP, TCP_KEEPALIVE, &idle, socklen_t(MemoryLayout<Int32>.size))
+        setsockopt(s, IPPROTO_TCP, TCP_KEEPINTVL, &interval, socklen_t(MemoryLayout<Int32>.size))
+        setsockopt(s, IPPROTO_TCP, TCP_KEEPCNT, &count, socklen_t(MemoryLayout<Int32>.size))
         // Non-blocking so the 20s connect timeout is enforced by poll().
         let fl = fcntl(s, F_GETFL, 0)
         if fl >= 0 { _ = fcntl(s, F_SETFL, fl | O_NONBLOCK) }
@@ -389,12 +467,12 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
             if err == 0 {
               return s
             }
-            lastError = .libssh2(err, String(cString: strerror(err)))
+            lastError = .socket(err, "Could not connect: \(String(cString: strerror(err)))")
           } else {
             lastError = .connectTimedOut
           }
         } else {
-          lastError = .connectTimedOut
+          lastError = .socket(errno, "Could not connect: \(String(cString: strerror(errno)))")
         }
         Darwin.close(s)
       }
@@ -676,7 +754,7 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
       _ = poll(&pfd, 1, 0)
       if pfd.revents & Int16(POLLHUP | POLLERR | POLLNVAL) != 0 {
         running = false
-        finishOnMain("Connection closed.")
+        finishOnMain(Self.describe(socketError()), lost: true)
         return
       }
       // Drain any pending session packets so the SSH session stays healthy.
@@ -727,6 +805,7 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
 
     if channelReady || socketReady {
       drainOutput(ch)
+      guard running else { return }
     }
 
     if socketReady {
@@ -735,7 +814,26 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
       _ = poll(&pfd, 1, 0)
       if pfd.revents & Int16(POLLHUP | POLLERR | POLLNVAL) != 0, !channelGone {
         running = false
-        finishOnMain("Connection closed.")
+        finishOnMain(Self.describe(socketError()), lost: true)
+        return
+      }
+      // Inbound data (output, a keepalive reply, any packet): the host is
+      // alive. `drainOutput` consumed it all, so readiness here is fresh.
+      lastReceive = Date()
+    }
+
+    // Heartbeat: send a keepalive when one is due, and give up on a host
+    // that has answered nothing for `keepaliveTimeout`.
+    if let sess = session, !channelGone {
+      var secondsToNext: Int32 = 0
+      if libssh2_keepalive_send(sess, &secondsToNext) != 0 {
+        running = false
+        finishOnMain("Could not send to the host.", lost: true)
+        return
+      }
+      if Date().timeIntervalSince(lastReceive) > Self.keepaliveTimeout {
+        running = false
+        finishOnMain(Self.describe(EngineError.noResponse), lost: true)
         return
       }
     }
@@ -771,8 +869,9 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
         handleChannelEOF(ch)
         break
       }
-      // Real error reading.
-      finishOnMain(lastErrorText(session!))
+      // Real error reading: the link is gone (the channel itself ends with
+      // EOF, handled above).
+      finishOnMain(linkErrorMessage(session!), lost: true)
       running = false
       break
     }
@@ -803,8 +902,8 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
         writeLock.unlock()
         break
       }
-      // Real write error.
-      finishOnMain(lastErrorText(session!))
+      // Real write error: the link is gone.
+      finishOnMain(linkErrorMessage(session!), lost: true)
       running = false
       break
     }
@@ -824,14 +923,47 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
       }
     }
     channelGone = true
-    finishOnMain("Connection closed.")
+    finishShellChannel(ch)
   }
 
   private func checkLiveClose(_ ch: OpaquePointer) {
     if libssh2_channel_eof(ch) != 0 && libssh2_channel_wait_closed(ch) == 0 {
+      if channelGone { return }
       channelGone = true
-      finishOnMain("Connection closed.")
+      if execCommand != nil {
+        completedChannelExitIfNeeded(ch)
+        if execExitSeen { return }
+      }
+      finishShellChannel(ch)
     }
+  }
+
+  /// The interactive shell's channel reached EOF. A shell the USER ended
+  /// (`exit`, ^D) exits with a status, like a local shell: `onExit`. A shell
+  /// the HOST ended — killed by SIGHUP/SIGTERM when the host shuts down or
+  /// reboots — exits with a signal: the link is as good as lost, so
+  /// `onConnectionLost`, and the owner can dial again once the host is back.
+  private func finishShellChannel(_ ch: OpaquePointer) {
+    if let signal = exitSignal(of: ch) {
+      finishOnMain("The remote shell was terminated (SIG\(signal)).", lost: true)
+      return
+    }
+    let status = Int32(libssh2_channel_get_exit_status(ch))
+    DispatchQueue.main.async { [weak self] in
+      self?.onExit?(status)
+    }
+  }
+
+  /// The signal name (`HUP`, `TERM`, …) the remote process died from, or nil
+  /// when it exited normally (or the server sent no exit-signal).
+  private func exitSignal(of ch: OpaquePointer) -> String? {
+    guard let sess = session else { return nil }
+    var name: UnsafeMutablePointer<CChar>?
+    var nameLength = 0
+    guard libssh2_channel_get_exit_signal(ch, &name, &nameLength, nil, nil, nil, nil) == 0,
+          let name else { return nil }
+    defer { libssh2_free(sess, name) }
+    return String(cString: name)
   }
 
   /// For exec channels, once the channel reaches EOF the remote command has
@@ -1128,11 +1260,39 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
 
   // MARK: Helpers
 
-  private func finishOnMain(_ message: String) {
+  /// Reports the end of the connection on the main thread: `lost` routes to
+  /// `onConnectionLost` (the owner may dial again), else `onTerminated`.
+  private func finishOnMain(_ message: String, lost: Bool = false) {
     let m = message
     DispatchQueue.main.async { [weak self] in
       guard let self, self.running || self.channel != nil else { return }
-      self.onTerminated?(m)
+      if lost {
+        (self.onConnectionLost ?? self.onTerminated)?(m)
+      } else {
+        self.onTerminated?(m)
+      }
+    }
+  }
+
+  /// The socket's pending error after a POLLHUP/POLLERR, as an engine error:
+  /// a keepalive timeout reads "Operation timed out", a reset "Connection
+  /// reset by peer", a plain close falls back to the generic message.
+  private func socketError() -> EngineError {
+    var err: Int32 = 0
+    var len = socklen_t(MemoryLayout<Int32>.size)
+    if socketFD >= 0, getsockopt(socketFD, SOL_SOCKET, SO_ERROR, &err, &len) == 0, err != 0 {
+      return .socket(err, String(cString: strerror(err)))
+    }
+    return .socket(ECONNRESET, "Connection closed by the host.")
+  }
+
+  /// A readable reason for a failed read/write: libssh2's own text for a
+  /// dead socket is just "transport read".
+  private func linkErrorMessage(_ sess: OpaquePointer) -> String {
+    switch libssh2_session_last_errno(sess) {
+    case -43, -13: return "Connection closed by the host."
+    case -7: return "Could not send to the host."
+    default: return lastErrorText(sess)
     }
   }
 

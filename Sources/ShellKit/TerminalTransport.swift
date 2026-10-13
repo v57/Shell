@@ -61,8 +61,17 @@ public protocol TerminalTransport: AnyObject {
   var onOutput: ((Data) -> Void)? { get set }
   /// The session is ready to accept input (pty spawned / SSH channel open).
   var onConnected: (() -> Void)? { get set }
-  /// The transport failed or the connection dropped (shows an error).
+  /// The transport failed for good: a bad configuration, a rejected host
+  /// key, cancelled or failed authentication. Retrying would fail the same
+  /// way, so the session shows the error and stops.
   var onTerminated: ((String) -> Void)? { get set }
+  /// The network link to the host went away (connection refused, timed
+  /// out, closed by the peer, no response to keepalives) or the remote
+  /// shell was killed by a signal (the host is shutting down). Nothing
+  /// about the configuration is wrong, so the session may dial again.
+  /// Transports that cannot tell the two apart report everything through
+  /// `onTerminated`.
+  var onConnectionLost: ((String) -> Void)? { get set }
   /// The child process / remote exec exited with this code.
   var onExit: ((Int32) -> Void)? { get set }
   /// The server presented an unknown host key (SSH transports only).
@@ -96,8 +105,8 @@ public protocol TerminalTransport: AnyObject {
   var echoesInput: Bool { get }
 }
 
-/// Non-SSH transports never produce auth prompts — default no-ops so
-/// conformance only needs the four I/O callbacks.
+/// Non-SSH transports never produce auth prompts or lose a network link —
+/// default no-ops so conformance only needs the four I/O callbacks.
 public extension TerminalTransport {
   /// Default start size: the classic 80x24. SSH requests exactly this from
   /// the server at channel open (`libssh2_channel_request_pty_ex`), so its
@@ -110,6 +119,12 @@ public extension TerminalTransport {
     set {}
   }
   var onPasswordPrompt: ((TerminalPasswordPrompt) -> Void)? {
+    get { nil }
+    set {}
+  }
+  /// Local transports have no network link to lose; a dead child is an
+  /// exit, and a spawn failure is final.
+  var onConnectionLost: ((String) -> Void)? {
     get { nil }
     set {}
   }
