@@ -287,7 +287,10 @@ public final class TerminalSession: Identifiable {
     transport.start()
     // The initial grid is visible immediately (no pty output may ever
     // arrive before the view appears). Force: it is the first publish.
-    publishNow(force: true)
+    // A startup message stays up instead until the transport connects.
+    if startupMessage == nil {
+      publishNow(force: true)
+    }
   }
 
   deinit {
@@ -613,6 +616,10 @@ public final class TerminalSession: Identifiable {
     pendingPublish = false
     publishTimer?.invalidate()
     publishTimer = nil
+    // A status message (connecting, reconnecting, failed) stays up until
+    // the transport connects (a forced publish): output that was still
+    // being parsed when the link dropped must not replace it.
+    guard force || snapshot.message == nil else { return }
 
     let newSnapshot = parser.snapshotForPublish()  // consumes the dirty set
     // Skip when nothing VISIBLE changed since the last publish (bytes
