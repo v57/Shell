@@ -24,8 +24,13 @@ struct ShellApp: App {
     updater.start()
     #endif
     // SSH hosts, database connections and device keys sync with the other v57 apps and devices through the
-    // vault.
-    Vault.shared.startSync()
+    // vault; the screenshot demo has a store of its own and never syncs.
+    if ScreenshotDemo.isOn {
+      ScreenshotDemo.prepare()
+      ScreenshotDemo.apply(to: AppModel.shared)
+    } else {
+      Vault.shared.startSync()
+    }
   }
 
   var body: some Scene {

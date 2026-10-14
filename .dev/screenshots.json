@@ -1,0 +1,37 @@
+{
+  "build": { "scheme": "Shell", "project": "Shell.xcodeproj" },
+  "appearances": ["light", "dark"],
+  "variables": { "DEMO": "/tmp/ShellDemo" },
+  "watch": ["Shell", "Sources", "Tools/screenshots"],
+  "mac": { "window": [1440, 900] },
+  "scenes": [
+    {
+      "id": "01-terminal",
+      "arguments": ["--screenshot-demo", "--run", "git log --oneline --decorate --graph && git status -s"],
+      "environment": { "ZDOTDIR": "$DEMO/zsh" },
+      "delay": 4,
+      "caption": "Terminals, SSH hosts and databases in one window"
+    },
+    {
+      "id": "02-note",
+      "arguments": ["--screenshot-demo", "--note", "Release 2.0"],
+      "environment": { "ZDOTDIR": "$DEMO/zsh" },
+      "delay": 3,
+      "caption": "Notes next to your sessions, synced with Markdown"
+    },
+    {
+      "id": "03-actions",
+      "arguments": ["--screenshot-demo", "--actions"],
+      "environment": { "ZDOTDIR": "$DEMO/zsh" },
+      "delay": 3,
+      "caption": "Save the commands you run every day"
+    },
+    {
+      "id": "04-database",
+      "arguments": ["--screenshot-demo", "--new-database"],
+      "environment": { "ZDOTDIR": "$DEMO/zsh" },
+      "delay": 3,
+      "caption": "Connect to a database through any SSH host"
+    }
+  ]
+}

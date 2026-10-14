@@ -132,16 +132,16 @@ final class AppModel {
   #endif
 
   /// The sidebar's saved Actions (UserDefaults-backed).
-  var actions = ActionsStore()
+  var actions = ActionsStore(defaults: ScreenshotDemo.isOn ? ScreenshotDemo.defaults : .standard)
   /// The sidebar's saved web sessions (UserDefaults-backed).
-  var webSessions = WebSessionStore()
+  var webSessions = WebSessionStore(defaults: ScreenshotDemo.isOn ? ScreenshotDemo.defaults : .standard)
   /// The live SSH-tunnel runtimes for OPEN ssh-owned web sessions, keyed by
   /// web session id. Created on connect (openWebSession), stopped and removed
   /// on teardown (removeSession). Plain web sessions have no entry.
   private(set) var webSessionRuntimes: [UUID: WebSessionRuntime] = [:]
   /// Encrypted local-session history. Active captures remain in memory until
   /// their terminal closes or the app terminates.
-  var history = HistoryStore()
+  var history = HistoryStore(fileURL: ScreenshotDemo.isOn ? ScreenshotDemo.historyFile : nil)
   var historyMode = false
   /// The actions overlay (⌘R) and the New Action sheet.
   var showingActions = false
@@ -332,12 +332,13 @@ final class AppModel {
     let notesFlag = FeatureFlagsStore.shared.isEnabled(.notes)
     notes = NotesStore()
     notesFeatureEnabled = notesFlag
-    // Hosts and connections saved by builds before the vault move into it once.
-    LegacyImport.run(configs: connectionStore, databases: databaseStore)
+    // Hosts and connections saved by builds before the vault move into it once (never into the
+    // screenshot demo's store).
+    if !ScreenshotDemo.isOn { LegacyImport.run(configs: connectionStore, databases: databaseStore) }
     // Publish this device's identity key to iCloud (no-op when the Secure
     // Enclave key is unreachable, e.g. locked screen — retried when the
     // authorized-keys panel opens). Part of the Authorized Keys feature.
-    if features.isEnabled(.authorizedKeys) {
+    if features.isEnabled(.authorizedKeys), !ScreenshotDemo.isOn {
       deviceKeys.publishThisDevice()
     }
     #if os(macOS)
@@ -353,7 +354,7 @@ final class AppModel {
       _ = addLocalTerminal()
     }
     // Files linked by a drop on Notes stay in the Text Files section.
-    reopenLinkedFiles()
+    if !ScreenshotDemo.isOn { reopenLinkedFiles() }
     #endif
   }
 
@@ -361,7 +362,8 @@ final class AppModel {
   /// Starts or stops the Screen feature's background pollers to match the
   /// current feature flag. Idempotent; safe to call at any time.
   private func configureGatedBackgroundWork() {
-    if features.isEnabled(.screen) {
+    // The monitor lists the Mac's real screen/tmux sessions: never in the screenshot demo.
+    if features.isEnabled(.screen), !ScreenshotDemo.isOn {
       screenMonitor.start()
     } else {
       screenMonitor.stop()
