@@ -104,9 +104,16 @@ final class AppModel {
   var notes: NotesStore
 
   #if os(macOS)
+  /// Files dropped on a session, the terminal or Notes, waiting for the user to pick what to do with them (the
+  /// drop dialog in ContentView; see FileDropActions.swift).
+  var fileDropRequest: FileDropRequest?
+  /// Why a drop could not be carried out (shown as an alert).
+  var fileDropError: String?
+
   /// Transient, scratch opened-file documents (the sidebar "Text Files"
   /// section), edited in the content area. NOT persisted — cleared on app
-  /// restart and when a file is closed via ⌘W. Kept entirely separate from
+  /// restart and when a file is closed via ⌘W — except files LINKED by a drop
+  /// on Notes (`linkFile`), which reopen at launch. Kept entirely separate from
   /// `NotesStore` (an opened file is a scratch view, not a Notes item). See
   /// `OpenFilePane.swift`.
   private(set) var openedFiles: [OpenedFile] = []
@@ -345,6 +352,8 @@ final class AppModel {
     if features.isEnabled(.sessions) {
       _ = addLocalTerminal()
     }
+    // Files linked by a drop on Notes stay in the Text Files section.
+    reopenLinkedFiles()
     #endif
   }
 
@@ -1113,118 +1122,6 @@ final class AppModel {
     sessions.filter { kind(of: $0).shellConfigID == config.id }
   }
 
-#if os(macOS)
-  /// Copies files dropped onto a sidebar session row into that session's
-  /// current directory. Each `ShellFile` is materialized first — a LOCAL row's
-  /// own URL, or a freshly SFTP-downloaded temp copy of a REMOTE (SSH) row's
-  /// file — then copied in. The copy uses `FileManager` (off the main thread) so
-  /// it is real, overwrites existing entries, and surfaces a failure through the
-  /// file-browser error line instead of silently doing nothing.
-  ///
-  /// Copies files dropped onto a sidebar session row into that session's current
-  /// directory (a LOCAL row's own URL, or a freshly SFTP-downloaded temp copy of
-  /// a REMOTE row's file), OR uploads them onto an SSH session's remote cwd.
-  /// Local copies use `FileManager` (off the main thread); remote uploads
-  /// materialize each file locally then SFTP-push it to the session's cwd.
-  func dropFiles(_ files: [ShellFile], on session: TerminalSession) {
-    guard !files.isEmpty else { return }
-    switch kind(of: session) {
-    case .local:
-      copyLocally(files, into: session.currentDirectory?.path ?? NSHomeDirectory())
-    case .ssh(let config):
-      uploadToRemote(files, config: config, remoteDirectory: session.remoteCurrentDirectory?.path)
-    default:
-      return
-    }
-  }
-
-  /// Copies files dropped onto a saved SSH connection row into that server's
-  /// HOME directory (no session is running, so there is no cwd to follow; a
-  /// dropped file lands in `~`). Each file is materialized locally first — a
-  /// LOCAL row's own URL, or an SFTP-downloaded temp copy of a REMOTE row's
-  /// file — then SFTP-uploaded to `~/<name>`.
-  func dropFiles(_ files: [ShellFile], toSSH config: SSHConfig) {
-    guard !files.isEmpty else { return }
-    uploadToRemote(files, config: config, remoteDirectory: nil)
-  }
-
-  private func copyLocally(_ files: [ShellFile], into directory: String) {
-    Task {
-      for file in files {
-        let local: URL
-        do {
-          local = try await file.download()
-        } catch {
-          directoryBrowser.setLastError(
-            "Could not copy \(file.url.lastPathComponent): \(error.localizedDescription)")
-          return
-        }
-        let message = await Task.detached(priority: .userInitiated) { () -> String? in
-          let fm = FileManager.default
-          do {
-            try fm.createDirectory(atPath: directory, withIntermediateDirectories: true)
-            let src = local.standardizedFileURL.path
-            let dest = URL(fileURLWithPath: directory)
-              .appendingPathComponent(local.lastPathComponent)
-              .standardizedFileURL.path
-            // Dropping a file onto the directory it already lives in is a no-op.
-            guard src != dest else { return nil }
-            if fm.fileExists(atPath: dest) { try fm.removeItem(atPath: dest) }
-            try fm.copyItem(atPath: src, toPath: dest)
-            return nil
-          } catch {
-            return "Could not copy \(local.lastPathComponent): \(error.localizedDescription)"
-          }
-        }.value
-        if let message { directoryBrowser.setLastError(message); return }
-      }
-    }
-  }
-
-  private func uploadToRemote(_ files: [ShellFile], config: SSHConfig, remoteDirectory: String?) {
-    Task {
-      do {
-        // Dial ONE auth-only connection for the whole drop (Secure Enclave auth
-        // is expensive, so never re-auth per file), resolve the remote cwd — or
-        // the login dir when dropping on a saved connection with no running
-        // session — then push each file over the SFTP subsystem.
-        let session = try await SSHSession.connect(config: config)
-        defer { session.close() }
-        let dir: String
-        if let remoteDirectory, !remoteDirectory.isEmpty {
-          dir = remoteDirectory
-        } else {
-          dir = try await session.remoteHomeDirectory()
-        }
-        for file in files {
-          do {
-            let local = try await file.download()
-            // A Finder-dropped file arrives as a security-scoped URL whose access
-            // must be held across the SFTP read (which runs on a background
-            // queue, past the drop closure). No-op for ordinary local/temp URLs.
-            let scoped = local.startAccessingSecurityScopedResource()
-            defer { if scoped { local.stopAccessingSecurityScopedResource() } }
-            if local.hasDirectoryPath {
-              directoryBrowser.setLastError(
-                "Uploading the folder \(local.lastPathComponent) over SSH isn't supported yet.")
-              continue
-            }
-            let remotePath = (dir as NSString).appendingPathComponent(local.lastPathComponent)
-            try await session.uploadFile(localURL: local, remotePath: remotePath)
-          } catch {
-            directoryBrowser.setLastError(
-              "Could not upload \(file.url.lastPathComponent): \(error.localizedDescription)")
-            return
-          }
-        }
-      } catch {
-        directoryBrowser.setLastError(
-          "Could not upload to \(config.displayName): \(error.localizedDescription)")
-      }
-    }
-  }
-
-#endif
 
   /// Sets a session's sidebar name; empty input restores the default.
   func renameSession(_ id: UUID, to name: String) {
@@ -1373,16 +1270,16 @@ final class AppModel {
   /// content. Non-UTF8 and oversized files are surfaced as a read-only notice.
   /// This is the entry point for `.textFile(url:)` from
   /// `application(_:openFiles:)`.
-  func openFile(_ url: URL) {
+  func openFile(_ url: URL, select: Bool = true) {
     if let existing = openedFiles.first(where: { $0.url == url }) {
-      selection = .openedFile(existing.id)
+      if select { selection = .openedFile(existing.id) }
       return
     }
     openFileGeneration += 1
     let generation = openFileGeneration
     var opened = OpenedFile(url: url, loadGeneration: generation)
     openedFiles.append(opened)
-    selection = .openedFile(opened.id)
+    if select { selection = .openedFile(opened.id) }
     Task.detached(priority: .userInitiated) {
       let content = Self.loadContent(of: url)
       Task { @MainActor in
@@ -1480,6 +1377,7 @@ final class AppModel {
       try? file.text.write(to: file.url, atomically: true, encoding: .utf8)
     }
     openedFiles.remove(at: idx)
+    unlinkFile(file.url)
     let next = openedFiles.indices.contains(idx) ? openedFiles[idx].id : openedFiles.last?.id
     selection = next.map { .openedFile($0) }
   }

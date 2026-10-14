@@ -82,6 +82,7 @@ struct DetachDetailView: View {
         } else {
           TerminalView(session: session)
             .id(session.id)
+            .terminalFileDrop(session)
         }
       }
       .navigationTitle(model.displayName(for: session))

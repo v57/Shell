@@ -163,6 +163,7 @@ struct ContentView: View {
           #endif
         }
       }
+      .modifier(FileDropDialog())
       .alert("Encrypted Storage Error", isPresented: Binding(
         get: { model.notes.storageError != nil || model.history.storageError != nil },
         set: { if !$0 { model.notes.storageError = nil; model.history.storageError = nil } }
@@ -395,6 +396,7 @@ struct ContentView: View {
           TerminalView(session: session)
             .id(session.id)
             .transition(detailTransition)
+            .terminalFileDrop(session)
             .allowsHitTesting(!(model.directoryBrowser.visible && flags.isEnabled(.files)))
 
           if model.directoryBrowser.visible, flags.isEnabled(.files) {

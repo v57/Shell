@@ -21,12 +21,26 @@
 			<string>Alternate</string>
 		</dict>
 	</array>
+	<!-- Shell's own drag types. public.item, never public.data: Finder takes the first data type of a drag and
+	     saved a Files-panel row's description as a "Shell File" clipping instead of copying the file. -->
 	<key>UTExportedTypeDeclarations</key>
 	<array>
 		<dict>
 			<key>UTTypeConformsTo</key>
 			<array>
-				<string>public.data</string>
+				<string>public.item</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Shell Sidebar Row</string>
+			<key>UTTypeIdentifier</key>
+			<string>dev.v57.shell.sidebar-row</string>
+			<key>UTTypeTagSpecification</key>
+			<dict/>
+		</dict>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.item</string>
 			</array>
 			<key>UTTypeDescription</key>
 			<string>Shell File</string>

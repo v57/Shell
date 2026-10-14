@@ -17,6 +17,7 @@ struct NotesSectionView: View {
         ForEach(notesCollapsed || !flags.isEnabled(.notes) ? [] : model.notes.notes) { note in
           NoteRow(note: note)
             .sidebarRow(.note(note.id))
+            .notesFileDrop()
             .contextMenu {
               Button(note.isEncrypted ? "Decrypt Note" : "Encrypt Note") {
                 model.notes.setEncrypted(!note.isEncrypted, for: note.id)
@@ -39,6 +40,7 @@ struct NotesSectionView: View {
             }.buttonStyle(.borderless).help("New note")
           }
         }
+        .notesFileDrop()
       }
     } // end if (notes section gate)
   }
@@ -80,5 +82,24 @@ private struct NoteRow: View {
       }
     }
     .contentShape(Rectangle())
+  }
+}
+
+private extension View {
+  /// Text files dropped on Notes: copied into encrypted notes, or linked (FileDropActions.swift).
+  func notesFileDrop() -> some View {
+    modifier(NotesFileDrop())
+  }
+}
+
+private struct NotesFileDrop: ViewModifier {
+  @Environment(AppModel.self) private var model
+
+  func body(content: Content) -> some View {
+    #if os(macOS)
+    content.sidebarFileDrop { files in model.requestFileDrop(files, on: .notes) }
+    #else
+    content
+    #endif
   }
 }

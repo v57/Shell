@@ -97,6 +97,17 @@ final class NotesStore {
     return notes.first { $0.id == id } ?? NoteSummary(id: id, lastUpdate: .now, isEncrypted: note.encrypted)
   }
 
+  /// Creates a note holding `text` (a file dropped on Notes), named `name` or the next free "name 2".
+  @discardableResult
+  func addNote(named name: String, text: String, encrypted: Bool) -> NoteSummary {
+    let note = VaultNote(name: availableName(Self.fileName(for: name), in: "", excluding: ""), encrypted: encrypted, text: text)
+    vault.save(note)
+    storageError = vault.error
+    reload()
+    let id = Self.uuid(note.id)
+    return notes.first { $0.id == id } ?? NoteSummary(id: id, lastUpdate: .now, isEncrypted: note.encrypted)
+  }
+
   func deleteNote(_ id: UUID) {
     saveTasks[id]?.cancel()
     saveTasks[id] = nil

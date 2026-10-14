@@ -96,15 +96,9 @@ struct LocalSectionView: View {
               onCancelRename: { state.renamingSessionID = nil }
             )
             .sidebarRow(.session(session.id), reorder: sessionReorder.row(at: index))
-            .dropDestination(for: ShellFile.self) { files, _ in
-              // A file dropped on this session cell — from Finder (decoded as a
-              // ShellFile via the FileRepresentation importing closure) or dragged
-              // from the Files panel (custom-UTType Codable payload). Each is
-              // materialized (a remote row is SFTP-downloaded) then copied into
-              // the session's cwd.
-              model.dropFiles(files, on: session)
-              return true
-            }
+            // Files from Finder or the Files panel: ask whether to copy them in,
+            // type their paths or go to their folder (FileDropActions.swift).
+            .sidebarFileDrop { files in model.requestFileDrop(files, on: .session(session.id)) }
             .contextMenu {
               Button("Rename…") { state.renamingSessionID = session.id }
               if flags.isEnabled(.authorizedKeys) {

@@ -5,58 +5,10 @@ import ShellIntegrations
 import UniformTypeIdentifiers
 
 #if os(macOS)
-/// A row dragged out of the browser. Internally it carries the file URL (+
-/// optional remote config id) as a custom-UTType Codable payload — this is what
-/// makes it importable by the app's own `.dropDestination(for: ShellFile.self)`
-/// targets (a sidebar session cell, a directory row) via `visibility(.ownProcess)`.
-/// It also exports as a real file (FileRepresentation) so a local row can be
-/// dropped into Finder. When a selection is dragged, `Table` emits one
-/// `ShellFile` per selected row, so the payloads arrive as an array — no need to
-/// bundle the whole selection's names inside one item.
-/// (Internal — referenced by the sidebar session-cell drop, hence not `private`.)
-struct ShellFile: Transferable, Codable {
-  let url: URL
-  let isDirectory: Bool
-  /// Non-nil for a REMOTE (SSH) row: the host to fetch the file from so it can
-  /// be materialized (downloaded) before drag-out. Nil for local rows.
-  var remote: SSHConfig?
-  init(url: URL, isDirectory: Bool, remote: SSHConfig? = nil) {
-    self.url = url
-    self.isDirectory = isDirectory
-    self.remote = remote
-  }
-  /// Returns a REAL local file URL for the transfer: a local row's own `url`,
-  /// or a freshly SFTP-downloaded temp copy of a remote row's file (so Finder /
-  /// a session-cell drop get actual bytes, not a remote path that doesn't exist
-  /// on this Mac).
-  func download() async throws -> URL {
-    guard let config = remote else { return url }
-    let data = try await SSHSession.downloadFile(config: config, remotePath: url.path)
-    let dir = FileManager.default.temporaryDirectory
-      .appendingPathComponent("shell-drag", isDirectory: true)
-    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-    let dest = dir.appendingPathComponent(url.lastPathComponent)
-    try data.write(to: dest)
-    return dest
-  }
-  nonisolated static var transferRepresentation: some TransferRepresentation {
-    CodableRepresentation(contentType: .shellFile).visibility(.ownProcess)
-    FileRepresentation(contentType: .data) { file in
-      // allowAccessingOriginalFile:true gives the destination the ORIGINAL URL
-      // instead of a sandbox-hidden temp copy. A staged copy (false) forces
-      // SwiftUI to hand off a `public.file-url` sandbox extension on drop, which
-      // fails with -20 ("does client lack read access") for an in-app file → the
-      // drop silently does nothing. Local files are already readable by this
-      // (non-sandboxed) process, so pass the original through.
-      return try await SentTransferredFile(file.download(), allowAccessingOriginalFile: true)
-    } importing: { file in
-      ShellFile(url: file.file, isDirectory: file.file.hasDirectoryPath)
-    }.suggestedFileName { $0.url.lastPathComponent }
-  }
-}
-extension UTType {
-  nonisolated static var shellFile: UTType { UTType(exportedAs: "dev.v57.url") }
-}
+/// What the Files panel receives from a drop: Shell's own rows keep their host (see `FileDrop`).
+typealias DroppedFiles = [ShellFile]
+#else
+typealias DroppedFiles = [URL]
 #endif
 
 /// The directory browser's main content area: a breadcrumb path bar plus the
@@ -128,8 +80,8 @@ struct DirectoryBrowserView: View {
   var onMove: (Set<String>, String) -> Void
   /// Copy the selected entries to a destination (context-menu op).
   var onCopy: (Set<String>) -> Void
-  /// Copy files dropped onto the table (from Finder) into the current directory.
-  var onDrop: ([URL]) -> Void
+  /// Copy files dropped onto the table (from Finder, or another Files listing) into the current directory.
+  var onDrop: (DroppedFiles) -> Void
   /// Rename a single entry from `from` to `to`. The view enters rename mode on
   /// Return and commits via this callback; the model reuses its move/copy path
   /// (rename is a move within the current directory).
@@ -149,7 +101,7 @@ struct DirectoryBrowserView: View {
     onRetry: @escaping () -> Void = {}, onDelete: @escaping (Set<String>) -> Void = { _ in },
     onMove: @escaping (Set<String>, String) -> Void = { _, _ in },
     onCopy: @escaping (Set<String>) -> Void = { _ in },
-    onDrop: @escaping ([URL]) -> Void = { _ in },
+    onDrop: @escaping (DroppedFiles) -> Void = { _ in },
     onRename: @escaping (String, String) -> Void = { _, _ in },
     onMoveCopyIntoDirectory: @escaping (Set<String>, String, FileCommandBuilder.MoveCopyMode) -> Void
       = { _, _, _ in }
@@ -252,7 +204,7 @@ struct DirectoryBrowserView: View {
             // A directory row is a drop target for an INTERNAL drag: dropping
             // one or more (selected) rows here moves/copies them into it. This
             // uses the dedicated internal payload type so it never captures the
-            // Finder (URL) drops handled by the table-level dropDestination.
+            // Finder (URL) drops handled by the table-level fileDrop.
             tableRow.dropDestination(for: ShellFile.self) { payloads in
               handleRowDrop(payloads, onto: row)
             }
@@ -274,13 +226,10 @@ struct DirectoryBrowserView: View {
         }
       }
       // Accept files dropped onto the browser (from Finder, or a dragged row)
-      // and copy them into the current dir. Finder drops decode as a `ShellFile`
-      // via the FileRepresentation importing closure; internal row drags decode
-      // via the custom-UTType Codable payload. Both carry `.url`.
-      .dropDestination(for: ShellFile.self) { files, _ in
-        onDrop(files.map(\.url))
-        return true
-      }
+      // and copy them into the current dir. `fileDrop` reads the drag
+      // pasteboard: a Finder file's original path, or a row's own description
+      // (with its host, when it comes from a remote listing).
+      .fileDrop { files in onDrop(files) }
       // Return on a single selected row enters rename mode. When already in
       // rename mode, the TextField's own `.onSubmit` (Return) commits — so this
       // key handler is only active in the non-editing state.
@@ -322,10 +271,14 @@ struct DirectoryBrowserView: View {
     /// already contains it (or the target dragged onto itself) never attempts a
     /// self-move. `Table` delivers one `ShellFile` per dragged (selected) row,
     /// so the names come from each payload's file URL, not a bundle. Finder (URL)
-    /// drops never reach here — they use the table-level dropDestination.
+    /// drops never reach here — they use the table-level `fileDrop`.
     private func handleRowDrop(_ payloads: [ShellFile], onto target: FileRow) {
       guard target.isDirectory else { return }
-      let names = Set(payloads.map { $0.url.lastPathComponent }).subtracting([target.name])
+      // Only rows of THIS listing move by name: a row of another folder or host would move its namesake here.
+      let here = payloads.filter {
+        $0.remote?.id == sshConfig?.id && $0.url.deletingLastPathComponent().path == URL(fileURLWithPath: path).path
+      }
+      let names = Set(here.map { $0.url.lastPathComponent }).subtracting([target.name])
       guard !names.isEmpty else { return }
       onMoveCopyIntoDirectory(names, absolutePath(for: target), .move)
     }

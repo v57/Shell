@@ -102,12 +102,9 @@ private struct SSHConfigGroup: View {
     SSHConfigRow(config: config)
       .sidebarRow(.ssh(config.id), reorder: reorder)
 #if os(macOS)
-      .dropDestination(for: ShellFile.self) { files, _ in
-        // A file dropped on the saved connection — no terminal cwd to follow,
-        // so it lands in the server's home directory (~).
-        model.dropFiles(files, toSSH: config)
-        return true
-      }
+      // A file dropped on the saved connection — no terminal cwd to follow,
+      // so it uploads to the server's home directory (~), once confirmed.
+      .sidebarFileDrop { files in model.requestFileDrop(files, on: .host(config)) }
 #endif
       .contextMenu {
         Button("Connect") { model.connect(to: config) }
@@ -179,13 +176,10 @@ private struct SSHConfigGroup: View {
       .padding(.leading, 14)
       .sidebarRow(.session(session.id), reorder: sessionReorder.row(at: index))
 #if os(macOS)
-      .dropDestination(for: ShellFile.self) { files, _ in
-        // A file dropped on a running SSH session's row: materialize it locally
-        // (a remote row is SFTP-downloaded) then upload to the session's remote
-        // cwd — the same semantics as a local cell, but over the SFTP subsystem.
-        model.dropFiles(files, on: session)
-        return true
-      }
+      // A file dropped on a running SSH session's row: ask whether to upload it
+      // to the session's remote cwd or, for a file on this same host, to type
+      // its path or go to its folder (FileDropActions.swift).
+      .sidebarFileDrop { files in model.requestFileDrop(files, on: .session(session.id)) }
 #endif
       .contextMenu {
         Button("Rename…") { state.renamingSessionID = session.id }

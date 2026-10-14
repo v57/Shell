@@ -7,6 +7,7 @@ import ShellIntegrations
 /// move/copy destination prompt. It owns no state of its own beyond what those
 /// transient sheets need; every action routes back to a model method.
 struct FilesPanelView: View {
+  @Environment(AppModel.self) private var app
   @Bindable var model: DirectoryBrowserModel
 
   /// Whether the delete confirmation dialog is showing.
@@ -35,7 +36,13 @@ struct FilesPanelView: View {
         showsDeleteConfirm = true
       }, onMove: { names, _ in beginMutate(names: names, mode: .move) },
       onCopy: { names in beginMutate(names: names, mode: .copy) },
-      onDrop: { urls in model.copyIn(urls: urls) },
+      onDrop: { files in
+        #if os(macOS)
+        app.dropFiles(files, into: model)
+        #else
+        model.copyIn(urls: files)
+        #endif
+      },
       onRename: { from, to in model.rename(from: from, to: to) },
       onMoveCopyIntoDirectory: { names, targetPath, mode in
         model.moveCopy(names, to: targetPath, mode: mode)
