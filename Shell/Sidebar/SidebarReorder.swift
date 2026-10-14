@@ -87,6 +87,12 @@ final class SidebarDragState {
     self.index = index
   }
 
+  /// Whether `reorder` is the row being dragged. That row is drawn only as the
+  /// drag image, so in the sidebar it stays as an empty gap where it would drop.
+  func isDragging(_ reorder: SidebarReorder) -> Bool {
+    list == reorder.list && index == reorder.index
+  }
+
   /// Ends the drag.
   func end() {
     list = nil
@@ -164,7 +170,30 @@ struct SidebarRowDrag: ViewModifier {
           MainActor.assumeIsolated { drag.begin(reorder.list, at: reorder.index) }
           return NSItemProvider(object: SidebarDragState.contentKind as NSString)
         }
+        .modifier(SidebarDraggedRowGap(reorder: reorder, drag: drag))
         .onDrop(of: [.plainText], delegate: SidebarRowDropDelegate(reorder: reorder, drag: drag))
+    } else {
+      content
+    }
+  }
+}
+
+/// The drag image IS the row while it is dragged, so the row itself only keeps
+/// its space. A drag can end without a drop on a row (outside the sidebar, or
+/// back on itself), so the session's end clears the drag state too. Before
+/// macOS 26 / iOS 27 nothing reports that end, and a hidden row could stay
+/// hidden, so there the row stays drawn.
+private struct SidebarDraggedRowGap: ViewModifier {
+  let reorder: SidebarReorder
+  let drag: SidebarDragState
+
+  func body(content: Content) -> some View {
+    if #available(macOS 26.0, iOS 27.0, *) {
+      content
+        .opacity(drag.isDragging(reorder) ? 0 : 1)
+        .onDragSessionUpdated { session in
+          if case .ended = session.phase { drag.end() }
+        }
     } else {
       content
     }
