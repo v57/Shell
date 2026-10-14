@@ -131,84 +131,57 @@ struct DatabaseConnectionStoreTests {
 }
 
 struct NotesStoreTests {
-  @MainActor func makeStore() -> (NotesStore, local: URL, cloud: URL) {
-    let root = FileManager.default.temporaryDirectory.appendingPathComponent("shell-notes-\(UUID().uuidString)")
-    let local = root.appendingPathComponent("Local")
-    let cloud = root.appendingPathComponent("Cloud")
-    try? FileManager.default.createDirectory(at: cloud, withIntermediateDirectories: true)
-    let store = NotesStore(localFolder: local, iCloudFolder: cloud, lookUpICloud: false, keys: MemoryKeyProvider())
-    return (store, local, cloud)
-  }
-
-  private func files(_ folder: URL) -> [String] {
-    ((try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []).filter { !$0.hasPrefix(".") }.sorted()
-  }
-
-  @Test @MainActor func newNotesAreEncryptedFilesNamedAfterTheirTitle() throws {
-    let (store, _, cloud) = makeStore()
+  @Test @MainActor func newNotesAreEncryptedAndNamedAfterTheirTitle() throws {
+    let vault = TestVault.make()
+    let store = NotesStore(vault: vault)
     let note = store.addNote()
-    #expect(note.storedInICloud)
     #expect(note.isEncrypted)
-    #expect(files(cloud) == ["Untitled.mdenc"])
     #expect(store.isEmptyNote(note.id))
-
     store.updateText("# Groceries\nmilk", for: note.id)
     #expect(store.title(for: note.id) == "Groceries")
     store.flush()
-    #expect(files(cloud) == ["Groceries.mdenc"])
-    let data = try Data(contentsOf: cloud.appendingPathComponent("Groceries.mdenc"))
-    #expect(!String(decoding: data, as: UTF8.self).contains("milk"))
-    #expect(store.decryptedNote(id: note.id)?.text == "# Groceries\nmilk")
+    let saved = try #require(try vault.store?.records(VaultNote.self).first)
+    #expect(saved.name == "Groceries")
+    #expect(saved.path == "Groceries.mdenc")
+    #expect(saved.text == "# Groceries\nmilk")
   }
 
-  @Test @MainActor func notesCanBeDecryptedAndMovedToThisDevice() throws {
-    let (store, local, cloud) = makeStore()
-    let note = store.addNote()
-    store.updateText("Plan\nsteps", for: note.id)
-    store.flush()
-    store.setEncrypted(false, for: note.id)
-    #expect(files(cloud) == ["Plan.md"])
-    #expect(try String(contentsOf: cloud.appendingPathComponent("Plan.md"), encoding: .utf8) == "Plan\nsteps")
-    store.setICloudStorage(false, for: note.id)
-    #expect(files(cloud).isEmpty)
-    #expect(files(local) == ["Plan.md"])
-    #expect(store.notes.first?.storedInICloud == false)
-    #expect(store.decryptedNote(id: note.id)?.subtitle == "steps")
-  }
-
-  @Test @MainActor func notesWrittenByMarkdownAppear() throws {
-    let (store, _, cloud) = makeStore()
-    try Data("# From Markdown\nhello".utf8).write(to: cloud.appendingPathComponent("From Markdown.md"))
-    store.refreshOnActivation()
+  @Test @MainActor func notesFromMarkdownAppearAndCanBeDecrypted() throws {
+    let vault = TestVault.make()
+    vault.save(VaultNote(folder: "Work", name: "Plan", encrypted: false, text: "Plan\nsteps"))
+    let store = NotesStore(vault: vault)
     let note = try #require(store.notes.first)
     #expect(!note.isEncrypted)
-    #expect(store.title(for: note.id) == "From Markdown")
+    #expect(store.subtitle(for: note.id) == "steps")
+    store.setEncrypted(true, for: note.id)
+    #expect(try vault.store?.records(VaultNote.self).first?.path == "Work/Plan.mdenc")
     store.deleteNote(note.id)
-    #expect(files(cloud).isEmpty)
+    #expect(store.notes.isEmpty)
+    #expect(try vault.store?.records(VaultNote.self).isEmpty == true)
   }
 
-  @Test @MainActor func mostRecentlyChangedNotesComeFirstAndEditsMoveUp() throws {
-    let (store, _, cloud) = makeStore()
-    for (name, time) in [("old", 100.0), ("middle", 200.0), ("new", 300.0)] {
-      let url = cloud.appendingPathComponent("\(name).md")
-      try Data(name.utf8).write(to: url)
-      try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: time)], ofItemAtPath: url.path)
-    }
-    store.refreshOnActivation()
-    #expect(store.notes.map { store.title(for: $0.id) } == ["new", "middle", "old"])
+  @Test @MainActor func editedNotesMoveUpAndUnchangedTextIsNoEdit() throws {
+    let vault = TestVault.make()
+    vault.save(VaultNote(name: "old", text: "old"))
+    vault.save(VaultNote(name: "new", text: "new"))
+    let store = NotesStore(vault: vault)
+    #expect(store.notes.map { store.title(for: $0.id) } == ["new", "old"])
     let old = try #require(store.notes.last)
+    let before = old.lastUpdate
+    store.updateText("old", for: old.id)
+    #expect(store.notes.last?.lastUpdate == before)
     store.updateText("old, edited", for: old.id)
     #expect(store.notes.first?.id == old.id)
   }
 
-  @Test @MainActor func unchangedTextIsNotAnEdit() throws {
-    let (store, _, cloud) = makeStore()
-    try Data("same".utf8).write(to: cloud.appendingPathComponent("same.md"))
-    try FileManager.default.setAttributes(
-      [.modificationDate: Date(timeIntervalSince1970: 100)], ofItemAtPath: cloud.appendingPathComponent("same.md").path)
-    store.refreshOnActivation()
-    let note = try #require(store.notes.first)
-    store.updateText("same", for: note.id)
-    #expect(store.notes.first?.lastUpdate == Date(timeIntervalSince1970: 100))
+  @Test @MainActor func untitledNotesGetFreeNames() throws {
+    let vault = TestVault.make()
+    vault.save(VaultNote(name: "Ideas", text: "Ideas"))
+    let store = NotesStore(vault: vault)
+    let note = store.addNote()
+    store.updateText("Ideas\nmore", for: note.id)
+    store.flush()
+    let names = try vault.store?.records(VaultNote.self).map(\.name).sorted()
+    #expect(names == ["Ideas", "Ideas 2"])
   }
 }

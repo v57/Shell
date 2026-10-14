@@ -2,29 +2,23 @@ import Foundation
 import Observation
 import VaultKit
 
-/// Backs the sidebar's Notes list: Markdown files Shell shares with the Markdown app.
+/// Backs the sidebar's Notes list: the notes the v57 apps share through the vault (`../Vault`).
 ///
-/// - **iCloud** notes are the files in Markdown's iCloud Drive folder (`iCloud.dev.v57.md`): the notes the
-///   Markdown app shows, synced by iCloud Drive to every device.
-/// - **Local** notes are files in Shell's own folder, on this device only.
+/// Each note is a `VaultNote`: it syncs through iCloud (encrypted, titles included) and is the same note the
+/// Markdown app shows, which keeps it as a file in its notes folder (`NotesMirror`). Shell reads and edits the
+/// records directly, so it works without Markdown and on iOS. `isEncrypted` decides the file Markdown writes:
+/// `.mdenc` (only the v57 apps read it) or a plain `.md`. New notes are encrypted.
 ///
-/// A note is a plain `.md` file or an encrypted `.mdenc` one (`EncryptedNote` in `../Vault`, sealed with the
-/// key the v57 apps share through iCloud Keychain), so Markdown opens Shell's notes and the reverse. New notes
-/// are encrypted. When two devices saved a note before seeing each other's version, iCloud Drive's copies are
-/// merged line by line (`NoteConflicts`).
-///
-/// Notes are read lazily (visible rows and the open editor), cached until the file changes. Edits are written
-/// 5 seconds after the last keystroke. A note whose file is still named "Untitled" takes its title as its
-/// file name when saved.
+/// Edits show at once and are saved 2 seconds after the last keystroke. A note still named "Untitled" takes its
+/// title as its name when saved. Changes from Markdown, other devices or other windows arrive live.
 @MainActor
 @Observable
 final class NotesStore {
-  /// A sidebar row: an id (stable while the app runs), the sort key and where the note lives.
+  /// A sidebar row.
   struct NoteSummary: Identifiable, Equatable {
     let id: UUID
     var lastUpdate: Date
-    var storedInICloud: Bool
-    var isEncrypted: Bool = true
+    var isEncrypted: Bool
   }
 
   /// A note's text and the title and subtitle derived from it.
@@ -34,75 +28,32 @@ final class NotesStore {
     var text: String
   }
 
-  /// All notes (local + iCloud), most recently changed first.
+  /// All notes, most recently changed first.
   private(set) var notes: [NoteSummary] = []
 
   /// The most recent read or write failure.
   var storageError: String?
 
-  /// Whether any note lives in iCloud.
-  var hasICloudNotes: Bool { notes.contains { $0.storedInICloud } }
-
-  /// Whether new notes are encrypted (on unless turned off).
+  /// Whether new notes are encrypted on disk (on unless turned off).
   static let encryptsNewNotesKey = "encryptsNewNotes"
   var encryptsNewNotes: Bool {
     get { UserDefaults.standard.object(forKey: Self.encryptsNewNotesKey) as? Bool ?? true }
     set { UserDefaults.standard.set(newValue, forKey: Self.encryptsNewNotesKey) }
   }
 
-  @ObservationIgnored let localFolder: URL
-  @ObservationIgnored private(set) var iCloudFolder: URL?
-  @ObservationIgnored private let keys: VaultKeyProvider
-  @ObservationIgnored private let bases: NoteBaseCache
-  @ObservationIgnored private var urls: [UUID: URL] = [:]
-  @ObservationIgnored private var cache: [UUID: (modified: Date, contents: DecryptedContents)] = [:]
+  @ObservationIgnored private let vault: Vault
+  @ObservationIgnored private var records: [UUID: VaultNote] = [:]
   @ObservationIgnored private var saveTasks: [UUID: Task<Void, Never>] = [:]
   @ObservationIgnored private var pendingText: [UUID: String] = [:]
-  @ObservationIgnored private var presenters: [FolderPresenter] = []
+  @ObservationIgnored private var observer: VaultChangeObserver?
+  @ObservationIgnored var saveDelay: Duration = .seconds(2)
 
-  /// - Parameters:
-  ///   - localFolder: the folder of this device's notes.
-  ///   - iCloudFolder: Markdown's iCloud Drive folder; nil looks it up (off the main thread), or without iCloud
-  ///     leaves only local notes.
-  init(
-    localFolder: URL = NotesStore.defaultLocalFolder, iCloudFolder: URL? = nil, lookUpICloud: Bool = true,
-    keys: VaultKeyProvider = KeychainKeyProvider()
-  ) {
-    self.localFolder = localFolder
-    self.iCloudFolder = iCloudFolder
-    self.keys = keys
-    bases = NoteBaseCache(
-      directory: URL.cachesDirectory.appendingPathComponent("NoteBases", isDirectory: true), keys: keys)
-    try? FileManager.default.createDirectory(at: localFolder, withIntermediateDirectories: true)
-    watch(localFolder)
+  init(vault: Vault = .shared) {
+    self.vault = vault
     reload()
-    if iCloudFolder == nil, lookUpICloud {
-      Task {
-        let folder = await Task.detached { Self.markdownICloudFolder() }.value
-        guard let folder else { return }
-        self.iCloudFolder = folder
-        self.watch(folder)
-        self.reload()
-      }
-    } else if let iCloudFolder {
-      watch(iCloudFolder)
+    observer = VaultChangeObserver { [weak self] in
+      Task { @MainActor in self?.refreshOnActivation() }
     }
-  }
-
-  nonisolated static var defaultLocalFolder: URL {
-    URL.applicationSupportDirectory
-      .appendingPathComponent(Bundle.main.bundleIdentifier ?? "Shell", isDirectory: true)
-      .appendingPathComponent("Notes", isDirectory: true)
-  }
-
-  /// Markdown's iCloud Drive notes folder, nil without iCloud Drive. Blocks on first use: call off the main
-  /// thread.
-  nonisolated static func markdownICloudFolder() -> URL? {
-    guard let container = FileManager.default.url(forUbiquityContainerIdentifier: VaultConfiguration.notesContainer)
-    else { return nil }
-    let documents = container.appendingPathComponent("Documents", isDirectory: true)
-    try? FileManager.default.createDirectory(at: documents, withIntermediateDirectories: true)
-    return documents
   }
 
   // MARK: - Reading
@@ -115,22 +66,9 @@ final class NotesStore {
     decryptedNote(id: id)?.subtitle
   }
 
-  /// The note's text, read (and decrypted) on demand and cached until the file changes.
   func decryptedNote(id: UUID) -> DecryptedContents? {
     if let pending = pendingText[id] { return Self.contents(of: pending) }
-    guard let url = urls[id], let summary = notes.first(where: { $0.id == id }) else { return nil }
-    if let cached = cache[id], cached.modified == summary.lastUpdate { return cached.contents }
-    do {
-      NoteConflicts.resolveQuietly(at: url, bases: bases, keys: keys)
-      let text = try Self.read(url, keys: keys)
-      bases.setBase(text, for: url)
-      let contents = Self.contents(of: text)
-      cache[id] = (summary.lastUpdate, contents)
-      return contents
-    } catch {
-      storageError = error.localizedDescription
-      return nil
-    }
+    return records[id].map { Self.contents(of: $0.text) }
   }
 
   /// Whether a note has no text yet (a new note closed without typing is deleted).
@@ -141,40 +79,35 @@ final class NotesStore {
 
   // MARK: - Editing
 
-  /// Creates an empty note (in iCloud when available, encrypted unless turned off) and returns it.
+  /// Creates an empty note and returns it.
   @discardableResult
   func addNote() -> NoteSummary {
-    let folder = iCloudFolder ?? localFolder
-    let encrypted = encryptsNewNotes
-    let url = Self.availableURL(named: "Untitled", encrypted: encrypted, in: folder)
-    do {
-      try Self.write("", to: url, keys: keys)
-    } catch {
-      storageError = error.localizedDescription
+    let names = Set(records.values.filter { $0.folder.isEmpty }.map { $0.name.lowercased() })
+    var name = "Untitled"
+    var number = 2
+    while names.contains(name.lowercased()) {
+      name = "Untitled \(number)"
+      number += 1
     }
+    let note = VaultNote(name: name, encrypted: encryptsNewNotes)
+    vault.save(note)
+    storageError = vault.error
     reload()
-    let id = id(for: url)
-    return notes.first { $0.id == id }
-      ?? NoteSummary(id: id, lastUpdate: .now, storedInICloud: folder == iCloudFolder, isEncrypted: encrypted)
+    let id = Self.uuid(note.id)
+    return notes.first { $0.id == id } ?? NoteSummary(id: id, lastUpdate: .now, isEncrypted: note.encrypted)
   }
 
   func deleteNote(_ id: UUID) {
     saveTasks[id]?.cancel()
     saveTasks[id] = nil
     pendingText[id] = nil
-    cache[id] = nil
-    guard let url = urls[id] else { return }
-    var error: NSError?
-    NSFileCoordinator().coordinate(writingItemAt: url, options: .forDeleting, error: &error) { target in
-      try? FileManager.default.removeItem(at: target)
-    }
-    if let error { storageError = error.localizedDescription }
-    urls[id] = nil
+    guard let note = records[id] else { return }
+    vault.delete(note)
     reload()
   }
 
-  /// Replaces a note's text: shown at once, written 5 seconds after the last edit. Unchanged text is a no-op
-  /// (the editor repopulates its content when a note opens).
+  /// Replaces a note's text: shown at once, saved shortly after the last edit. Unchanged text is a no-op (the
+  /// editor repopulates its content when a note opens).
   func updateText(_ text: String, for id: UUID) {
     guard let index = notes.firstIndex(where: { $0.id == id }) else { return }
     if let current = decryptedNote(id: id), current.text == text { return }
@@ -182,123 +115,75 @@ final class NotesStore {
     notes[index].lastUpdate = .now
     resort()
     saveTasks[id]?.cancel()
-    saveTasks[id] = Task { [weak self] in
-      try? await Task.sleep(for: .seconds(5))
+    saveTasks[id] = Task { [weak self, saveDelay] in
+      try? await Task.sleep(for: saveDelay)
       guard !Task.isCancelled else { return }
       self?.save(id)
     }
   }
 
-  // MARK: - Location and encryption
-
-  /// Moves a note between iCloud (Markdown's folder) and this device.
-  func setICloudStorage(_ inICloud: Bool, for id: UUID) {
-    guard let url = urls[id], let summary = notes.first(where: { $0.id == id }), summary.storedInICloud != inICloud
-    else { return }
-    guard let folder = inICloud ? iCloudFolder : localFolder else {
-      storageError = NotesSyncError.iCloudUnavailable.localizedDescription
-      return
-    }
-    save(id)
-    move(id, from: url, to: Self.availableURL(named: url.deletingPathExtension().lastPathComponent,
-                                              encrypted: NoteFiles.isEncrypted(url), in: folder))
-  }
-
-  /// Encrypts a note (`.mdenc`) or decrypts it to a plain `.md` file.
+  /// Encrypts the note's file (`.mdenc`) or makes it a plain `.md` one. In iCloud it's encrypted either way.
   func setEncrypted(_ encrypted: Bool, for id: UUID) {
-    guard let url = urls[id], NoteFiles.isEncrypted(url) != encrypted else { return }
     save(id)
-    do {
-      let text = try Self.read(url, keys: keys)
-      let target = Self.availableURL(
-        named: url.deletingPathExtension().lastPathComponent, encrypted: encrypted, in: url.deletingLastPathComponent())
-      try Self.write(text, to: target, keys: keys)
-      var error: NSError?
-      NSFileCoordinator().coordinate(writingItemAt: url, options: .forDeleting, error: &error) { old in
-        try? FileManager.default.removeItem(at: old)
-      }
-      bases.moveBase(from: url, to: target)
-      rebind(id, to: target)
-    } catch {
-      storageError = error.localizedDescription
-    }
+    guard var note = records[id], note.encrypted != encrypted else { return }
+    note.encrypted = encrypted
+    vault.save(note)
     reload()
   }
 
   // MARK: - Persistence
 
-  /// Writes every pending edit now (scene change, quit).
+  /// Saves every pending edit now (scene change, quit).
   func flush() {
     for id in Array(pendingText.keys) { save(id) }
   }
 
-  /// Re-reads the folders (iCloud Drive brought changes, another app wrote).
+  /// Re-reads the notes (another app or device changed them).
   func refreshOnActivation() {
+    vault.reload()
     reload()
   }
 
   private func save(_ id: UUID) {
     saveTasks[id]?.cancel()
     saveTasks[id] = nil
-    guard let text = pendingText.removeValue(forKey: id), var url = urls[id] else { return }
-    do {
-      try Self.write(text, to: url, keys: keys)
-      bases.setBase(text, for: url)
-      // A note still named "Untitled" takes its title as its name, as Markdown shows names.
-      let title = Self.title(for: text)
-      if url.deletingPathExtension().lastPathComponent.hasPrefix("Untitled"), title != "Untitled" {
-        let target = Self.availableURL(
-          named: Self.fileName(for: title), encrypted: NoteFiles.isEncrypted(url), in: url.deletingLastPathComponent())
-        move(id, from: url, to: target)
-        url = target
-      }
-      cache[id] = nil
-      storageError = nil
-    } catch {
-      pendingText[id] = text
-      storageError = error.localizedDescription
+    guard let text = pendingText.removeValue(forKey: id), var note = records[id] else { return }
+    note.text = text
+    // A note still named "Untitled" takes its title as its name, as Markdown shows names.
+    let title = Self.title(for: text)
+    if note.name.hasPrefix("Untitled"), title != "Untitled" {
+      note.name = availableName(Self.fileName(for: title), in: note.folder, excluding: note.id)
     }
+    vault.save(note)
+    storageError = vault.error
     reload()
   }
 
-  private func move(_ id: UUID, from url: URL, to target: URL) {
-    var error: NSError?
-    let coordinator = NSFileCoordinator()
-    coordinator.coordinate(writingItemAt: url, options: .forMoving, writingItemAt: target, options: .forReplacing,
-                           error: &error) { from, to in
-      do {
-        try FileManager.default.moveItem(at: from, to: to)
-        coordinator.item(at: from, didMoveTo: to)
-      } catch {
-        self.storageError = error.localizedDescription
-      }
+  /// `name`, or the next free "name 2" among the notes in `folder`.
+  private func availableName(_ name: String, in folder: String, excluding id: String) -> String {
+    let taken = Set(records.values.filter { $0.folder == folder && $0.id != id }.map { $0.name.lowercased() })
+    var candidate = name
+    var number = 2
+    while taken.contains(candidate.lowercased()) {
+      candidate = "\(name) \(number)"
+      number += 1
     }
-    if let error {
-      storageError = error.localizedDescription
-      return
-    }
-    bases.moveBase(from: url, to: target)
-    rebind(id, to: target)
-    reload()
+    return candidate
   }
 
-  // MARK: - Listing
-
-  /// Re-lists both folders, keeping each file's id.
   private func reload() {
-    var found: [NoteSummary] = []
-    var seen: [UUID: URL] = [:]
-    for (folder, inICloud) in [(localFolder, false)] + (iCloudFolder.map { [($0, true)] } ?? []) {
-      for url in Self.noteFiles(in: folder) {
-        let id = id(for: url)
-        seen[id] = url
-        let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
-        let lastUpdate = pendingText[id] != nil ? (notes.first { $0.id == id }?.lastUpdate ?? modified) : modified
-        found.append(NoteSummary(id: id, lastUpdate: lastUpdate, storedInICloud: inICloud, isEncrypted: NoteFiles.isEncrypted(url)))
-      }
+    guard let store = vault.store, let items = try? store.items(kind: VaultNote.kind) else { return }
+    var byID: [UUID: VaultNote] = [:]
+    var summaries: [NoteSummary] = []
+    for item in items {
+      let note = VaultNote(id: item.id, values: item.values)
+      let id = Self.uuid(item.id)
+      byID[id] = note
+      let lastUpdate = pendingText[id] != nil ? (notes.first { $0.id == id }?.lastUpdate ?? item.modified) : item.modified
+      summaries.append(NoteSummary(id: id, lastUpdate: lastUpdate, isEncrypted: note.encrypted))
     }
-    urls = seen
-    notes = found
+    records = byID
+    notes = summaries
     resort()
   }
 
@@ -309,97 +194,13 @@ final class NotesStore {
     }
   }
 
-  @ObservationIgnored private var idsByPath: [String: UUID] = [:]
-
-  private func id(for url: URL) -> UUID {
-    let path = url.standardizedFileURL.path
-    if let id = idsByPath[path] { return id }
-    let id = UUID()
-    idsByPath[path] = id
-    return id
-  }
-
-  private func rebind(_ id: UUID, to url: URL) {
-    if let old = urls[id] { idsByPath[old.standardizedFileURL.path] = nil }
-    idsByPath[url.standardizedFileURL.path] = id
-    urls[id] = url
-  }
-
-  /// The note files under a folder (subfolders too), iCloud placeholders of notes not downloaded yet included
-  /// (their download starts).
-  nonisolated private static func noteFiles(in folder: URL) -> [URL] {
-    let fileManager = FileManager.default
-    guard let enumerator = fileManager.enumerator(at: folder, includingPropertiesForKeys: [.isDirectoryKey]) else {
-      return []
-    }
-    var files: [URL] = []
-    for case let url as URL in enumerator {
-      var name = url.lastPathComponent
-      var file = url
-      if name.hasPrefix("."), name.hasSuffix(".icloud") {
-        name = String(name.dropFirst().dropLast(".icloud".count))
-        file = url.deletingLastPathComponent().appendingPathComponent(name)
-        try? fileManager.startDownloadingUbiquitousItem(at: file)
-      } else if name.hasPrefix(".") {
-        if (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true { enumerator.skipDescendants() }
-        continue
-      }
-      let ext = (name as NSString).pathExtension.lowercased()
-      if ext == "md" || ext == "markdown" || ext == EncryptedNote.fileExtension { files.append(file) }
-    }
-    return files
-  }
-
-  // MARK: - Files
-
-  nonisolated private static func read(_ url: URL, keys: VaultKeyProvider) throws -> String {
-    var result: Result<String, Error> = .failure(CocoaError(.fileReadUnknown))
-    var error: NSError?
-    NSFileCoordinator().coordinate(readingItemAt: url, options: [], error: &error) { url in
-      result = Result {
-        let data = try Data(contentsOf: url)
-        if NoteFiles.isEncrypted(url) { return data.isEmpty ? "" : try EncryptedNote.open(data, keys: keys) }
-        return String(decoding: data, as: UTF8.self)
-      }
-    }
-    if let error { throw error }
-    return try result.get()
-  }
-
-  nonisolated private static func write(_ text: String, to url: URL, keys: VaultKeyProvider) throws {
-    let data = NoteFiles.isEncrypted(url) ? try EncryptedNote.seal(text, keys: keys) : Data(text.utf8)
-    var writeError: Error?
-    var error: NSError?
-    NSFileCoordinator().coordinate(writingItemAt: url, options: .forReplacing, error: &error) { target in
-      do { try data.write(to: target, options: .atomic) } catch { writeError = error }
-    }
-    if let failure = error ?? writeError { throw failure }
-  }
-
-  private static func availableURL(named base: String, encrypted: Bool, in folder: URL) -> URL {
-    let ext = encrypted ? EncryptedNote.fileExtension : "md"
-    var url = folder.appendingPathComponent(base).appendingPathExtension(ext)
-    var number = 2
-    while FileManager.default.fileExists(atPath: url.path) {
-      url = folder.appendingPathComponent("\(base) \(number)").appendingPathExtension(ext)
-      number += 1
-    }
-    return url
-  }
+  static func uuid(_ id: String) -> UUID { UUID(uuidString: id) ?? stableUUID(id) }
 
   /// A file name for a title: no slashes or colons, at most 60 characters.
   static func fileName(for title: String) -> String {
     let cleaned = title.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
       .trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: ".")))
     return cleaned.isEmpty ? "Untitled" : String(cleaned.prefix(60))
-  }
-
-  private func watch(_ folder: URL) {
-    let presenter = FolderPresenter(url: folder) { [weak self] in
-      Task { @MainActor in self?.reload() }
-    }
-    NSFileCoordinator.addFilePresenter(presenter)
-    presenters.append(presenter)
   }
 
   // MARK: - Title/subtitle derivation
@@ -455,55 +256,5 @@ final class NotesStore {
       .replacingOccurrences(of: "\r", with: "\n")
       .split(separator: "\n", omittingEmptySubsequences: false)
       .map(String.init)
-  }
-}
-
-/// Note file helpers shared with the Markdown app's conventions.
-enum NoteFiles {
-  nonisolated static func isEncrypted(_ url: URL) -> Bool { EncryptedNote.isEncrypted(url) }
-}
-
-extension NoteConflicts {
-  /// Merges iCloud Drive's conflicting versions of a note, if any, against the last version this device saw.
-  nonisolated static func resolveQuietly(at url: URL, bases: NoteBaseCache, keys: VaultKeyProvider) {
-    guard (try? url.resourceValues(forKeys: [.isUbiquitousItemKey]))?.isUbiquitousItem == true else { return }
-    if let merged = try? resolve(at: url, base: bases.base(for: url), keys: keys) {
-      bases.setBase(merged, for: url)
-    }
-  }
-}
-
-/// Reports changes in a folder (another app's write, iCloud Drive's sync).
-final class FolderPresenter: NSObject, NSFilePresenter, @unchecked Sendable {
-  let presentedItemURL: URL?
-  let presentedItemOperationQueue = OperationQueue()
-  private let changed: @Sendable () -> Void
-
-  init(url: URL, changed: @escaping @Sendable () -> Void) {
-    presentedItemURL = url
-    self.changed = changed
-    presentedItemOperationQueue.maxConcurrentOperationCount = 1
-  }
-
-  func presentedSubitemDidChange(at url: URL) { changed() }
-  func presentedItemDidChange() { changed() }
-  func presentedSubitem(at oldURL: URL, didMoveTo newURL: URL) { changed() }
-  func accommodatePresentedSubitemDeletion(at url: URL, completionHandler: @escaping (Error?) -> Void) {
-    changed()
-    completionHandler(nil)
-  }
-}
-
-enum NotesSyncError: LocalizedError {
-  case iCloudUnavailable
-  case noteNotFound
-
-  var errorDescription: String? {
-    switch self {
-    case .iCloudUnavailable:
-      return "iCloud Drive is unavailable. Sign in with your Apple Account and turn on iCloud Drive, then try again."
-    case .noteNotFound:
-      return "The note no longer exists."
-    }
   }
 }

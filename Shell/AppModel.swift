@@ -190,11 +190,8 @@ final class AppModel {
   private var sessionCommands: [UUID: [SubmittedCommand]] = [:]
   private var localHistoryDrafts: [UUID: LocalHistoryDraft] = [:]
   private var selectionBeforeHistory: Selection?
-  /// Whether the Notes store lists Markdown's iCloud Drive folder (`.notes` on)
-  /// or only the local folder (`.notes` off). Used to detect the ON↔OFF
-  /// transition in the feature-flag reactivity so the store is only swapped
-  /// when the flag actually flips (reactivity re-arms on every observed flag
-  /// change).
+  /// The `.notes` flag as last seen, to act only when it flips (reactivity
+  /// re-arms on every observed flag change).
   private var notesFeatureEnabled = false
 
   #if os(macOS)
@@ -342,10 +339,9 @@ final class AppModel {
     databaseStore = DatabaseConnectionStore()
     // Notes gating must not read `self` here (stored properties are still
     // being initialized); read the flag first, wire `notes`, then publish it.
-    // Notes are files shared with the Markdown app (its iCloud Drive folder); while the feature is off only
-    // the local folder is listed.
+    // Notes are the ones the v57 apps share (Markdown keeps them as files).
     let notesFlag = FeatureFlagsStore.shared.isEnabled(.notes)
-    notes = NotesStore(lookUpICloud: notesFlag)
+    notes = NotesStore()
     notesFeatureEnabled = notesFlag
     // Hosts and connections saved by builds before the vault move into it once.
     LegacyImport.run(configs: connectionStore, databases: databaseStore)
@@ -419,14 +415,12 @@ final class AppModel {
     }
   }
 
-  /// Swaps the Notes store to match the `.notes` flag: on lists Markdown's
-  /// iCloud Drive folder too, off only the local folder. No-op unless the flag
-  /// actually flipped (reactivity re-arms on every observed flag change, so the
-  /// store must not be rebuilt every time).
+  /// Follows the `.notes` flag: the Notes section and commands are gated on it,
+  /// and turning it on re-reads the notes.
   private func configureNotesGating(notesEnabled: Bool) {
     guard notesEnabled != notesFeatureEnabled else { return }
     notesFeatureEnabled = notesEnabled
-    notes = NotesStore(lookUpICloud: notesEnabled)
+    if notesEnabled { notes.refreshOnActivation() }
   }
   #endif
 

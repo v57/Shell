@@ -21,9 +21,6 @@ struct NotesSectionView: View {
               Button(note.isEncrypted ? "Decrypt Note" : "Encrypt Note") {
                 model.notes.setEncrypted(!note.isEncrypted, for: note.id)
               }
-              Button(note.storedInICloud ? "Keep on This Device" : "Move to iCloud") {
-                model.notes.setICloudStorage(!note.storedInICloud, for: note.id)
-              }
               Divider()
               Button("Delete Note", role: .destructive) {
                 model.deleteNote(note.id)
@@ -70,17 +67,10 @@ private struct NoteRow: View {
           Image(systemName: "lock.fill")
             .font(.caption2)
             .foregroundStyle(.secondary)
-            .help("Encrypted with the key the v57 apps share")
-        }
-        if note.storedInICloud {
-          Image(systemName: "icloud.fill")
-            .font(.caption2)
-            .foregroundStyle(Color.blue)
-            .help("In iCloud Drive, shared with Markdown")
-            .transition(SidebarMotion.iconTransition)
+            .help("Markdown keeps this note's file encrypted (it syncs encrypted either way)")
         }
       }
-      .sidebarAnimation(value: note.storedInICloud)
+      .sidebarAnimation(value: note.isEncrypted)
       if let subtitle = model.notes.subtitle(for: note.id) {
         Text(subtitle)
           .font(.caption)
