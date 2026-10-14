@@ -10,8 +10,8 @@ Modern terminal for your needs. Pure SwiftUI, no electron-type bullshit
 - Authorized-keys manager: add or remove keys on any server's
   `~/.ssh/authorized_keys` (local or over SSH), with every device's public
   key published through iCloud
-- Notes shared with the Markdown app (its iCloud Drive folder), encrypted per
-  note
+- Notes shared with the Markdown app, synced through iCloud, kept as files by
+  Markdown (encrypted per note)
 - Open the current folder in Code, Markdown, Git or Dev
 - Encrypted local session history with replay
 - Quick actions `cmd + r`
@@ -46,17 +46,12 @@ Hosts and connections saved by builds before the vault (`SSHConfigs.store`)
 are imported once.
 
 ## Notes storage
-Notes are Markdown files shared with the Markdown app:
-
-- **iCloud**: Markdown's iCloud Drive folder (`iCloud.dev.v57.md`), the notes
-  Markdown lists, synced by iCloud Drive.
-- **Local**: Shell's own folder, on this device only.
-
-A note is a plain `.md` file or an encrypted `.mdenc` one (sealed with the
-vault key, so only the v57 apps on the user's devices read it). New notes are
-encrypted; the lock button in the editor's toolbar switches a note either way,
-the cloud button moves it between iCloud and this device. Versions two devices
-saved apart are merged line by line.
+Notes are the vault's notes (`VaultNote`), shared with the Markdown app: they
+sync through iCloud (encrypted, titles included, no iCloud Drive needed), and
+Markdown keeps them as files in its notes folder. Shell edits the records
+directly, on macOS and iOS. The lock button decides whether Markdown keeps a
+note's file encrypted (`.mdenc`) or plain (`.md`); new notes are encrypted.
+Edits made on two devices at once merge line by line.
 
 ## Authorized keys
 The `key.2.on.ring` button (Local and Remote sidebar headers, before the +
