@@ -27,8 +27,8 @@ struct ContentView: View {
   /// are refreshed only when this changes (the coordinator's cache makes
   /// repeat refreshes of the same directory cheap anyway).
   @State private var activeDirectoryURL: URL?
-  /// The picker's currently selected smart-action target (nil = all/project).
-  @State private var smartActionsTarget: String?
+  /// The picker's selected smart-action scheme (nil = the first one).
+  @State private var smartActionsSchemeID: String?
   /// A `.web` session's address bar: the text of the toolbar search field
   /// (`.searchable` is applied to the web session's detail pane).
   @State private var webAddressText = ""
@@ -419,29 +419,30 @@ struct ContentView: View {
               }
             }
 #if os(macOS)
-            // Smart actions for the active local directory: a Run button per
-            // action, a Stop button (disabled unless something is running), and a
-            // target picker when the project has multiple targets/schemes.
-            if let directory = model.smartActionDirectory, !model.smartActionActions.isEmpty {
+            // Smart actions for the active local directory (Code's
+            // CodeActions schemes): a scheme picker when the directory has
+            // several, a Run/Stop button per action of the selected scheme,
+            // and its distribute actions in a menu.
+            if let directory = model.smartActionDirectory, let scheme = selectedSmartActionScheme {
               ToolbarItemGroup(placement: .primaryAction) {
-                if smartActionsTargets.count > 1 {
+                if model.smartActionSchemes.count > 1 {
                   Menu {
-                    Button("Project") { smartActionsTarget = nil }
-                    Divider()
-                    ForEach(smartActionsTargets, id: \.self) { target in
-                      Button(target) { smartActionsTarget = target }
+                    ForEach(model.smartActionSchemes) { scheme in
+                      Button(scheme.name, systemImage: scheme.toolchain.symbolName) {
+                        smartActionsSchemeID = scheme.id
+                      }
                     }
                   } label: {
-                    Label(smartActionsTarget ?? "Project", systemImage: "scope")
+                    Label(scheme.name, systemImage: "scope")
                   }
-                  .help("Select target")
+                  .help("Select scheme")
                 }
-                ForEach(smartActionGroups) { group in
-                  if group.kind == .distribute {
-                    DistributeMenu(actions: group.actions, directory: directory)
-                  } else {
-                    SmartActionMenu(actions: group.actions, directory: directory)
-                  }
+                ForEach(SmartActionButton.kinds.filter { scheme.terminalCommand(for: $0) != nil }, id: \.self) { kind in
+                  SmartActionButton(kind: kind, scheme: scheme, directory: directory)
+                }
+                let distribution = ActionKind.allCases.filter { $0.isDistribution && scheme.supports($0) }
+                if !distribution.isEmpty {
+                  DistributeMenu(kinds: distribution, scheme: scheme, directory: directory)
                 }
               }
             }
@@ -629,7 +630,7 @@ struct ContentView: View {
       let url = URL(fileURLWithPath: path)
       if activeDirectoryURL != url {
         activeDirectoryURL = url
-        smartActionsTarget = nil   // don't carry a stale target across projects
+        smartActionsSchemeID = nil   // don't carry a stale scheme across projects
         #if os(macOS)
           model.refreshSmartActions(for: url)
         #endif
@@ -653,9 +654,10 @@ struct ContentView: View {
   }
 
   #if os(macOS)
-  /// Non-nil smart-action targets (schemes/executables) sorted for the picker.
-  private var smartActionsTargets: [String] {
-    Array(Set(model.smartActionActions.compactMap(\.target))).sorted()
+  /// The scheme whose smart actions the toolbar shows: the picked one, else
+  /// the directory's first.
+  private var selectedSmartActionScheme: ActionScheme? {
+    model.smartActionSchemes.first { $0.id == smartActionsSchemeID } ?? model.smartActionSchemes.first
   }
 
   /// The SSH-tunnel picker shown in a `.web` session's toolbar. Lists every
@@ -704,114 +706,63 @@ struct ContentView: View {
     }
     return "None (open directly)"
   }
-
-  /// Smart actions to show in the toolbar: everything when no target is
-  /// selected, otherwise the selected target's actions plus project-wide ones.
-  private var smartActionsForDisplay: [IntegrationAction] {
-    guard let target = smartActionsTarget else { return model.smartActionActions }
-    return model.smartActionActions.filter { $0.target == nil || $0.target == target }
-  }
-
-  /// Displayed actions grouped by kind (icon), preserving first-appearance
-  /// order. Groups with a single action render as a plain button; groups with
-  /// several render as a menu whose primary action runs the selected one.
-  private var smartActionGroups: [SmartActionGroup] {
-    var order: [IntegrationActionKind] = []
-    var map: [IntegrationActionKind: [IntegrationAction]] = [:]
-    for action in smartActionsForDisplay {
-      if map[action.kind] == nil { order.append(action.kind) }
-      map[action.kind, default: []].append(action)
-    }
-    return order.map { SmartActionGroup(kind: $0, actions: map[$0] ?? []) }
-  }
 #endif
 }
 
 #if os(macOS)
-/// A group of smart actions sharing the same kind (icon). Used by the toolbar
-/// to render several same-icon actions as a menu instead of many buttons.
-private struct SmartActionGroup: Identifiable {
-  let kind: IntegrationActionKind
-  let actions: [IntegrationAction]
-  var id: IntegrationActionKind { kind }
-}
+/// A smart action of a scheme: Build = hammer, Run = play, Test =
+/// play.diamond, Lint = checkmark.seal. While it runs the icon flips to
+/// `stop.fill` and the button stops it instead, so there's no separate Stop.
+private struct SmartActionButton: View {
+  /// The actions shown as buttons, in toolbar order.
+  static let kinds: [ActionKind] = [.run, .build, .test, .lint]
 
-/// A smart-action control for one kind: renders a single button when there's
-/// one action, or a menu whose primary action runs the currently selected
-/// action (the dropdown switches the selection). Normal icon per kind
-/// (Build = hammer, Run = play, Test = play.diamond); when the selected action
-/// is running the icon flips to `stop.fill` and the primary action stops it
-/// instead — so there's no separate Stop button.
-private struct SmartActionMenu: View {
-  let actions: [IntegrationAction]
+  let kind: ActionKind
+  let scheme: ActionScheme
   let directory: URL
   @Environment(AppModel.self) private var model
-  @State private var selectedAction: IntegrationAction?
-
-  private var selected: IntegrationAction { selectedAction ?? actions[0] }
 
   var body: some View {
-    if actions.count > 1 {
-      Menu {
-        ForEach(actions) { action in
-          Button(action.title, systemImage: smartActionIcon(for: action)) {
-            selectedAction = action
-          }
-        }
-      } label: {
-        Label(selected.title, systemImage: smartActionIcon(for: selected))
-      } primaryAction: {
-        toggle(selected)
-      }.menuIndicator(.hidden)
-    } else if let action = actions.first {
-      Button(action.title, systemImage: smartActionIcon(for: action)) {
-        toggle(action)
+    let running = model.isSmartActionRunning(kind, scheme: scheme, in: directory)
+    Button(kind.title, systemImage: running ? "stop.fill" : icon) {
+      if running {
+        model.stopSmartAction(in: directory)
+      } else {
+        model.runSmartAction(kind, scheme: scheme, in: directory)
       }
     }
+    .help(running ? "Stop" : "\(kind.title) \(scheme.name)")
   }
 
-  /// Run the action, or stop it when it's already the running one.
-  private func toggle(_ action: IntegrationAction) {
-    if model.isSmartActionRunning(action.id, in: directory) {
-      model.stopSmartAction(in: directory)
-    } else {
-      model.runSmartAction(action, in: directory)
-    }
-  }
-
-  private func smartActionIcon(for action: IntegrationAction) -> String {
-    if model.isSmartActionRunning(action.id, in: directory) {
-      return "stop.fill"
-    }
-    switch action.kind {
-    case .build: return "hammer.fill"
+  private var icon: String {
+    switch kind {
     case .run: return "play.fill"
+    case .build: return "hammer.fill"
     case .test: return "play.diamond"
-    case .distribute: return "square.and.arrow.up"
-    case .lint: return "checkmark.seal"
+    default: return "checkmark.seal"
     }
   }
 }
 
-/// A smart-action control for the `.distribute` kind: a plain Menu labeled
-/// "Distribute" whose items each run their action immediately on click.
-/// Distribute actions (Install / Export / Upload) are one-shot — unlike
-/// build/run/test they never toggle to a stop state.
+/// The scheme's distribute actions (Install / Export / Upload to App Store)
+/// in a "Distribute" menu whose items run immediately. They are one-shot —
+/// unlike build/run/test they never toggle to a stop state.
 private struct DistributeMenu: View {
-  let actions: [IntegrationAction]
+  let kinds: [ActionKind]
+  let scheme: ActionScheme
   let directory: URL
   @Environment(AppModel.self) private var model
 
   var body: some View {
     Menu {
-      ForEach(actions) { action in
+      ForEach(kinds, id: \.self) { kind in
         Button {
-          model.runSmartAction(action, in: directory)
+          model.runSmartAction(kind, scheme: scheme, in: directory)
         } label: {
-          Label(action.title, systemImage: "square.and.arrow.up")
+          Label(kind.title, systemImage: "square.and.arrow.up")
         }
       }
-      if actions.contains(where: { $0.requirement == .notarization }) {
+      if kinds.contains(where: \.needsNotarization) {
         Divider()
         Button("Notarization Settings…") {
           model.notarizationSetup = NotarizationSetupRequest()

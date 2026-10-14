@@ -4,15 +4,15 @@ import ShellKit
 import ShellIntegrations
 import UniformTypeIdentifiers
 
-/// What opened the Notarization sheet: an Export waiting to run, or the
-/// Distribute menu's settings item (no action).
+/// What opened the Notarization sheet: a scheme's Export waiting to run, or
+/// the Distribute menu's settings item (no scheme).
 struct NotarizationSetupRequest: Identifiable {
   let id = UUID()
-  let action: IntegrationAction?
+  let scheme: ActionScheme?
   let directory: URL?
 
-  init(action: IntegrationAction? = nil, directory: URL? = nil) {
-    self.action = action
+  init(scheme: ActionScheme? = nil, directory: URL? = nil) {
+    self.scheme = scheme
     self.directory = directory
   }
 }
@@ -85,7 +85,7 @@ struct NotarizationSetupView: View {
       HStack {
         Spacer()
         Button("Cancel") { dismiss() }
-        Button(request.action == nil ? "Done" : "Export") { finish() }
+        Button(request.scheme == nil ? "Done" : "Export") { finish() }
           .keyboardShortcut(.defaultAction)
           .disabled(!hasDeveloperID || !profileIsValid)
       }
@@ -313,8 +313,8 @@ struct NotarizationSetupView: View {
   private func finish() {
     model.notaryProfile = trimmed(profile)
     dismiss()
-    if let action = request.action, let directory = request.directory {
-      model.runSmartAction(action, in: directory)
+    if let scheme = request.scheme, let directory = request.directory {
+      model.runSmartAction(.export, scheme: scheme, in: directory)
     }
   }
 

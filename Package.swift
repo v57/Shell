@@ -23,6 +23,9 @@ let package = Package(
         v57("Database"),
         // The vault: the store, keys and records the v57 apps share.
         v57("Vault"),
+        // CodeActions: the smart actions (a project's schemes and their
+        // build, run, test, lint and distribute commands) come from Code.
+        v57("Code"),
     ],
     targets: [
         .target(
@@ -46,6 +49,9 @@ let package = Package(
         ),
         .target(
             name: "ShellIntegrations",
+            dependencies: [
+                .product(name: "CodeActions", package: "Code"),
+            ],
             swiftSettings: [
                 .swiftLanguageMode(.v5),
             ]

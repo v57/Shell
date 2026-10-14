@@ -2,20 +2,20 @@ import Foundation
 
 /// Cached per-directory scan result, persisted by the app (encrypted at rest).
 public struct IntegrationCacheEntry: Codable, Sendable, Equatable {
-  /// File-list fingerprint this entry was generated from.
+  /// `ProjectScanner.fingerprint(of:)` of the folder this entry was made from.
   public let fingerprint: String
-  /// The smart actions computed for the directory.
-  public let actions: [IntegrationAction]
+  /// The schemes CodeActions found in the directory.
+  public let schemes: [ActionScheme]
   /// When the entry was (re)generated.
   public let generatedAt: Date
 
   public init(
     fingerprint: String,
-    actions: [IntegrationAction],
+    schemes: [ActionScheme],
     generatedAt: Date = Date()
   ) {
     self.fingerprint = fingerprint
-    self.actions = actions
+    self.schemes = schemes
     self.generatedAt = generatedAt
   }
 }

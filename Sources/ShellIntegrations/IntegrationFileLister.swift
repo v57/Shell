@@ -1,12 +1,8 @@
 import Foundation
 
-/// Enumerates a directory's top-level entries ONCE, cheaply.
-///
-/// The coordinator calls this a single time per directory and passes the
-/// resulting `[DirectoryEntry]` to every integration, so integrations never
-/// re-scan the filesystem. Hidden entries (dotfiles / dot-directories such as
-/// `.git`, `.build`, `.DS_Store`) are skipped: they are noise for project
-/// detection and skipping them keeps the cache fingerprint stable.
+/// Enumerates a directory's top-level entries once, cheaply, for the "Open
+/// With" apps. Hidden entries (dotfiles / dot-directories such as `.git`,
+/// `.build`, `.DS_Store`) are skipped: they are noise for project detection.
 public enum IntegrationFileLister {
   public static func list(directory: URL) -> [DirectoryEntry] {
     let keys: [URLResourceKey] = [.isDirectoryKey]

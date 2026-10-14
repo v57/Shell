@@ -19,13 +19,11 @@ public enum OpenWithKind: String, CaseIterable, Hashable, Codable, Sendable {
   case finder
 }
 
-/// Resolves which "Open With" apps apply to a directory, using the same
-/// shared top-level `[DirectoryEntry]` enumeration the smart-action
-/// integrations receive (see `SmartActionsCoordinator`). Pure logic — no
+/// Resolves which "Open With" apps apply to a directory from its top-level
+/// `[DirectoryEntry]` enumeration (`IntegrationFileLister`). Pure logic — no
 /// filesystem or AppKit access here.
 ///
-/// Project classification (matches the smart-action Xcode/SwiftIntegration
-/// gates):
+/// Project classification:
 /// - Xcode project (`.xcodeproj` / `.xcworkspace`) or SwiftPM package
 ///   (`Package.swift`) → Xcode, and Dev (localization, icons, releases)
 /// - Markdown files at the top → Markdown
@@ -39,10 +37,8 @@ public enum OpenWithResolver {
 
   /// - Parameter isRepository: whether the directory holds `.git` (the listing skips dotfiles).
   public static func kinds(for files: [DirectoryEntry], isRepository: Bool = false) -> [OpenWithKind] {
-    // `isAvailable` is irrelevant here (we're classifying a directory, not
-    // checking the toolchain); `relevance` only inspects the file names.
-    let hasXcodeProject = XcodeIntegration(isAvailable: true).relevance(files: files)
-    let hasPackage = SwiftIntegration(isAvailable: true).relevance(files: files)
+    let hasXcodeProject = files.contains { $0.name.hasSuffix(".xcodeproj") || $0.name.hasSuffix(".xcworkspace") }
+    let hasPackage = files.contains { $0.name == "Package.swift" && !$0.isDirectory }
     let isApple = hasXcodeProject || hasPackage
     let hasMarkdown = files.contains { !$0.isDirectory && ["md", "markdown"].contains(($0.name as NSString).pathExtension.lowercased()) }
     var result: [OpenWithKind] = []

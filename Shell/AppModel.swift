@@ -195,34 +195,14 @@ final class AppModel {
   private var notesFeatureEnabled = false
 
   #if os(macOS)
-  /// Project detection over the active directory (Swift/Xcode integrations),
-  /// driving the toolbar's smart-action Run/Stop controls. Availability is
-  /// probed once at startup; per-directory results are encrypted-cached.
-  let smartActions = SmartActionsCoordinator(
-    integrations: [
-      XcodeIntegration(isAvailable: false),
-      SwiftIntegration(isAvailable: false),
-      CargoIntegration(isAvailable: false),
-      JSIntegration(isAvailable: false),
-      GoIntegration(isAvailable: false),
-      MakeIntegration(isAvailable: false),
-      PythonIntegration(isAvailable: false),
-      GradleIntegration(isAvailable: false),
-      MavenIntegration(isAvailable: false),
-      CMakeIntegration(isAvailable: false),
-      DockerComposeIntegration(isAvailable: false),
-      DotnetIntegration(isAvailable: false),
-      DartIntegration(isAvailable: false),
-      RubyIntegration(isAvailable: false),
-      ElixirIntegration(isAvailable: false),
-      PHPIntegration(isAvailable: false),
-      ZigIntegration(isAvailable: false),
-    ],
-    cacheStore: SmartActionsStore()
-  )
-  /// The smart actions for the active directory (refreshed on directory change).
-  private(set) var smartActionActions: [IntegrationAction] = []
-  /// The directory `smartActionActions` was computed for (nil = none active).
+  /// Project detection over the active directory with Code's CodeActions,
+  /// driving the toolbar's smart-action Run/Stop controls. Per-directory
+  /// results are encrypted-cached.
+  let smartActions = SmartActionsCoordinator(cacheStore: SmartActionsStore())
+  /// The schemes in the active directory, each with its actions (refreshed
+  /// on directory change).
+  private(set) var smartActionSchemes: [ActionScheme] = []
+  /// The directory `smartActionSchemes` was computed for (nil = none active).
   private(set) var smartActionDirectory: URL?
   /// The "Open With" apps offered for the active directory (empty = none,
   /// e.g. no local terminal selected). Computed alongside the smart actions.
@@ -231,10 +211,6 @@ final class AppModel {
   /// clears) so an in-flight background scan from a previous directory is
   /// discarded as stale instead of overwriting newer results.
   private var smartActionsGeneration = 0
-  /// Whether `probeEnvironment()` has already run. Guards the one-time probe
-  /// so it runs only while the Smart Actions feature is enabled (and re-runs
-  /// on the OFF→ON transition, never repeatedly).
-  private var smartActionsProbed = false
   /// The Smart Actions flag value at the last reactivity pass. Tracks the
   /// ON↔OFF transition so a flip re-runs `refreshSmartActions` — clearing the
   /// toolbar instantly on OFF and repopulating it on ON, without requiring a
@@ -246,13 +222,19 @@ final class AppModel {
   /// makes the toolbar actions pop in late. Every background refresh
   /// revalidates (and replaces) the memoized result.
   private var smartActionResultMemo: [String: SmartActionResult] = [:]
-  /// The currently running smart-action session per canonical directory path.
+  /// The currently running smart action per canonical directory path.
   /// One per directory — a new Run replaces it (stop first), Stop kills it.
-  private var currentSmartActionByDirectory: [String: TerminalSession] = [:]
-  /// Memoized smart-action display state for one directory (actions plus the
+  private var currentSmartActionByDirectory: [String: RunningSmartAction] = [:]
+  /// A smart action's session, and which scheme and action it runs.
+  private struct RunningSmartAction {
+    let session: TerminalSession
+    let schemeID: String
+    let kind: ActionKind
+  }
+  /// Memoized smart-action display state for one directory (schemes plus the
   /// matching "Open With" apps).
   private struct SmartActionResult {
-    let actions: [IntegrationAction]
+    let schemes: [ActionScheme]
     let openKinds: [OpenWithKind]
   }
   /// The Notarization sheet: shown by the first Export (or from the
@@ -352,13 +334,7 @@ final class AppModel {
       deviceKeys.publishThisDevice()
     }
     #if os(macOS)
-    // Probe toolchains (xcodebuild/swift) only when Smart Actions is enabled
-    // — the probe is background work and must not run when the feature is off.
-    if features.isEnabled(.smartActions) {
-      smartActions.probeEnvironment()
-      smartActionsProbed = true
-      smartActionsEnabled = true
-    }
+    smartActionsEnabled = features.isEnabled(.smartActions)
     // Start (or leave stopped) the Screen feature's pollers to match the flag.
     configureGatedBackgroundWork()
     // React to runtime feature-flag flips (start/stop pollers, re-probe).
@@ -384,7 +360,7 @@ final class AppModel {
   }
 
   /// Re-applies the gated background configuration whenever any flag we gate
-  /// on flips, and re-probes Smart Actions on the OFF→ON transition. Uses
+  /// on flips, and refreshes Smart Actions when that flag flips. Uses
   /// `withObservationTracking` so we do not touch the store's persistence
   /// layer (a dependency); each observed flip re-arms the observation.
   private func startFeatureFlagReactivity() {
@@ -395,10 +371,6 @@ final class AppModel {
       let smart = features.isEnabled(.smartActions)
       let notes = features.isEnabled(.notes)
       configureGatedBackgroundWork()
-      if smart && !smartActionsProbed {
-        smartActions.probeEnvironment()
-        smartActionsProbed = true
-      }
       // Smart Actions ON↔OFF flip: re-run the refresh so the toolbar clears
       // instantly on OFF and repopulates on ON, without a session switch.
       // (refreshSmartActions itself short-circuits to empty when disabled and
@@ -2207,12 +2179,12 @@ final class AppModel {
 
   #if os(macOS)
   /// Recomputes the smart actions for the active local directory. Returns
-  /// immediately; the blocking scan (directory listing + integration scan +
+  /// immediately; the blocking scan (directory listing + CodeActions scan +
   /// cache save) runs off the main thread so a large directory never stalls
   /// the UI. The cache short-circuits unchanged directories. Passing nil
   /// clears them.
   ///
-  /// A directory visited before publishes its memoized actions SYNCHRONOUSLY
+  /// A directory visited before publishes its memoized schemes SYNCHRONOUSLY
   /// (the memo is keyed by canonical path and survives session switches), so
   /// switching sessions shows the toolbar controls instantly instead of
   /// waiting on the encrypted cache read. The background refresh still runs
@@ -2221,14 +2193,14 @@ final class AppModel {
     smartActionsGeneration += 1
     smartActionDirectory = directory
     guard let directory else {
-      smartActionActions = []
+      smartActionSchemes = []
       openWithKinds = []
       return
     }
-    // Smart Actions disabled → the directory listing + integration scan is
-    // background work that must not run; publish nothing.
+    // Smart Actions disabled → the directory listing + scan is background
+    // work that must not run; publish nothing.
     guard features.isEnabled(.smartActions) else {
-      smartActionActions = []
+      smartActionSchemes = []
       openWithKinds = []
       return
     }
@@ -2237,10 +2209,10 @@ final class AppModel {
     // previous directory's actions under this one. Revisit: publish the
     // memoized result immediately, then revalidate in the background.
     if let memo = smartActionResultMemo[canonical.path] {
-      smartActionActions = memo.actions
+      smartActionSchemes = memo.schemes
       openWithKinds = memo.openKinds
     } else {
-      smartActionActions = []
+      smartActionSchemes = []
       openWithKinds = []
     }
     let generation = smartActionsGeneration
@@ -2250,44 +2222,45 @@ final class AppModel {
       // non-MainActor-bound logic — run them off the main actor, then hop
       // back to publish.
       let result = await Task.detached(priority: .userInitiated) {
-        let actions = coordinator.refresh(directory: canonical)
+        let schemes = coordinator.refresh(directory: canonical)
         let entries = IntegrationFileLister.list(directory: canonical)
         // The lister skips dotfiles, so whether it's a repository is checked here.
         let isRepository = FileManager.default.fileExists(atPath: canonical.appendingPathComponent(".git").path)
         let openKinds = OpenWithResolver.kinds(for: entries, isRepository: isRepository)
-        return (actions: actions, openKinds: openKinds)
+        return (schemes: schemes, openKinds: openKinds)
       }.value
       guard let self, self.smartActionsGeneration == generation else { return }
-      let memo = SmartActionResult(actions: result.actions, openKinds: result.openKinds)
+      let memo = SmartActionResult(schemes: result.schemes, openKinds: result.openKinds)
       self.smartActionResultMemo[canonical.path] = memo
-      self.smartActionActions = memo.actions
+      self.smartActionSchemes = memo.schemes
       self.openWithKinds = memo.openKinds
     }
   }
 
   /// The currently running smart-action session for a directory, if any.
   func currentSmartAction(in directory: URL) -> TerminalSession? {
-    currentSmartActionByDirectory[directory.standardizedFileURL.path]
+    currentSmartActionByDirectory[directory.standardizedFileURL.path]?.session
   }
 
-  /// Whether a specific smart action is currently running in `directory`
+  /// Whether `kind` of `scheme` is the smart action running in `directory`
   /// (gates the toolbar control's stop.fill state).
-  func isSmartActionRunning(_ actionID: UUID, in directory: URL) -> Bool {
-    guard let session = currentSmartAction(in: directory),
-          case .action(let spec) = kind(of: session) else { return false }
-    return spec.action.id == actionID
+  func isSmartActionRunning(_ kind: ActionKind, scheme: ActionScheme, in directory: URL) -> Bool {
+    guard let running = currentSmartActionByDirectory[directory.standardizedFileURL.path] else { return false }
+    return running.schemeID == scheme.id && running.kind == kind
   }
 
-  /// Runs a smart action as a Running-section session in `directory` with no
-  /// focus. Replaces any current run for that directory (stops it first);
-  /// archives to history on completion via `actionSessionCompleted`.
-  func runSmartAction(_ action: IntegrationAction, in directory: URL) {
+  /// Runs `kind` of `scheme` (CodeActions' command for a terminal) as a
+  /// Running-section session in `directory` with no focus. Replaces any
+  /// current run for that directory (stops it first); archives to history on
+  /// completion via `actionSessionCompleted`.
+  func runSmartAction(_ kind: ActionKind, scheme: ActionScheme, in directory: URL) {
+    guard let schemeCommand = scheme.terminalCommand(for: kind) else { return }
     // An Export needs notarization set up first: the sheet checks it and
     // runs the action again once a profile is saved.
     var environment = ""
-    if action.requirement == .notarization {
+    if kind.needsNotarization {
       guard let notaryProfile else {
-        notarizationSetup = NotarizationSetupRequest(action: action, directory: directory)
+        notarizationSetup = NotarizationSetupRequest(scheme: scheme, directory: directory)
         return
       }
       environment = "export NOTARY_PROFILE=\(shellQuote(notaryProfile)) && "
@@ -2297,11 +2270,11 @@ final class AppModel {
     stopSmartAction(in: directory)
 
     // LocalPTYTransport has no working-dir parameter, so cd into the project.
-    let command = "\(environment)cd \(shellQuote(directory.path)) && \(action.command)"
+    let command = "\(environment)cd \(shellQuote(scheme.directory.path)) && \(schemeCommand)"
     let spec = ActionSpec(
       action: Action(
-        id: action.id,
-        name: action.title,
+        id: UUID(),
+        name: "\(kind.title) · \(scheme.name)",
         appliesToLocal: true,
         commands: command,
         focusWindow: false,
@@ -2315,10 +2288,13 @@ final class AppModel {
     let newSession = TerminalSession(transport: transport)
     sessionKinds[newSession.id] = .action(spec)
     registerActionCapture(for: newSession, seedCommand: command)
-    currentSmartActionByDirectory[directory.standardizedFileURL.path] = newSession
+    let key = directory.standardizedFileURL.path
+    currentSmartActionByDirectory[key] = RunningSmartAction(session: newSession, schemeID: scheme.id, kind: kind)
     newSession.actionCompletionHandler = { [weak self, weak newSession] in
       guard let self, let newSession else { return }
-      self.currentSmartActionByDirectory[directory.standardizedFileURL.path] = nil
+      if self.currentSmartActionByDirectory[key]?.session === newSession {
+        self.currentSmartActionByDirectory[key] = nil
+      }
       self.actionSessionCompleted(newSession)
     }
     sessions.append(newSession)
@@ -2328,10 +2304,10 @@ final class AppModel {
   /// Terminates the running smart-action session for a directory (no-op when
   /// none is running).
   func stopSmartAction(in directory: URL) {
-    guard let session = currentSmartActionByDirectory.removeValue(
+    guard let running = currentSmartActionByDirectory.removeValue(
       forKey: directory.standardizedFileURL.path
     ) else { return }
-    session.close()
+    running.session.close()
   }
 
   private func shellQuote(_ path: String) -> String {

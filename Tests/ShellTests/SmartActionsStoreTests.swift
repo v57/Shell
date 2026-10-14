@@ -16,13 +16,13 @@ struct SmartActionsStoreTests {
     let store = SmartActionsStore(directory: base)
     let dir1 = URL(fileURLWithPath: "/tmp/project-alpha")
     let dir2 = URL(fileURLWithPath: "/tmp/project-beta")
-    let action = IntegrationAction(kind: .build, title: "Build", target: nil, command: "swift build")
-    let entry = IntegrationCacheEntry(fingerprint: "fp1", actions: [action])
+    let scheme = ActionScheme(name: "alpha", toolchain: .swiftPM, directory: dir1, commands: [.build: "swift build"])
+    let entry = IntegrationCacheEntry(fingerprint: "fp1", schemes: [scheme])
 
     store.save(entry, forDirectory: dir1)
     let read = store.entry(forDirectory: dir1)
     #expect(read?.fingerprint == "fp1")
-    #expect(read?.actions == [action])
+    #expect(read?.schemes == [scheme])
     // A different directory does not collide with dir1's cached entry.
     #expect(store.entry(forDirectory: dir2) == nil)
   }

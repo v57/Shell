@@ -7,7 +7,7 @@ import Testing
 /// environment (GUI); skipped implicitly if the app can't bootstrap.
 @Suite(.serialized)
 struct SmartActionsLifecycleTests {
-  @Test func refreshSmartActionsDetectsSwiftPackage() throws {
+  @MainActor @Test func refreshSmartActionsDetectsSwiftPackage() async throws {
     let dir = FileManager.default.temporaryDirectory
       .appendingPathComponent(UUID().uuidString, isDirectory: true)
     try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -22,13 +22,17 @@ struct SmartActionsLifecycleTests {
 
     let model = AppModel.shared
     model.refreshSmartActions(for: dir)
-    #expect(!model.smartActionActions.isEmpty)
-    #expect(model.smartActionActions.contains { $0.kind == .build })
-    #expect(model.smartActionActions.contains { $0.kind == .run && $0.target == "Demo" })
-    #expect(model.isSmartActionRunning(UUID(), in: dir) == false)
+    // The scan runs off the main actor; wait for it to publish.
+    for _ in 0..<100 where model.smartActionSchemes.isEmpty {
+      try await Task.sleep(for: .milliseconds(50))
+    }
+    let scheme = try #require(model.smartActionSchemes.first)
+    #expect(scheme.name == "Demo")
+    #expect(scheme.terminalCommand(for: .run) == "swift run Demo")
+    #expect(model.isSmartActionRunning(.run, scheme: scheme, in: dir) == false)
 
     // Clearing the active directory empties the actions.
     model.refreshSmartActions(for: nil)
-    #expect(model.smartActionActions.isEmpty)
+    #expect(model.smartActionSchemes.isEmpty)
   }
 }

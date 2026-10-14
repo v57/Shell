@@ -33,23 +33,3 @@ struct FileListerTests {
     #expect(!entries.contains { $0.name == ".DS_Store" })
   }
 }
-
-struct FingerprintTests {
-  @Test func fingerprintOrderIndependent() {
-    let a = [DirectoryEntry(name: "z", isDirectory: true), DirectoryEntry(name: "a", isDirectory: false)]
-    let b = [DirectoryEntry(name: "a", isDirectory: false), DirectoryEntry(name: "z", isDirectory: true)]
-    #expect(IntegrationFingerprint.hash(entries: a) == IntegrationFingerprint.hash(entries: b))
-  }
-
-  @Test func fingerprintChangesWhenTypeChanges() {
-    let a = [DirectoryEntry(name: "a", isDirectory: false)]
-    let b = [DirectoryEntry(name: "a", isDirectory: true)]
-    #expect(IntegrationFingerprint.hash(entries: a) != IntegrationFingerprint.hash(entries: b))
-  }
-
-  @Test func fingerprintChangesWhenEntryAdded() {
-    let a = [DirectoryEntry(name: "a", isDirectory: false)]
-    let b = [DirectoryEntry(name: "a", isDirectory: false), DirectoryEntry(name: "b", isDirectory: false)]
-    #expect(IntegrationFingerprint.hash(entries: a) != IntegrationFingerprint.hash(entries: b))
-  }
-}

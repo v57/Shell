@@ -1,104 +1,37 @@
+// The smart actions are Code's: its CodeActions library finds a folder's
+// schemes and their commands. Shell adds none of its own.
+@_exported import CodeActions
 import Foundation
 
-/// Orchestrates the smart-action pipeline for the active directory:
-/// list files once → fingerprint → encrypted cache lookup (short-circuit) →
-/// scan only relevant + available integrations → persist.
+/// Finds the smart actions for the active directory: the schemes CodeActions
+/// finds in the directory itself (not its subfolders), read from the
+/// encrypted cache while the directory's fingerprint is unchanged.
 ///
 /// Not MainActor-bound: it is pure logic driven by the app (which calls it
-/// from the main actor). `probeEnvironment()` is called once at startup.
+/// off the main actor: `xcodebuild -list` takes a while).
 public final class SmartActionsCoordinator {
-  public let integrations: [any TerminalIntegration]
   private let cacheStore: any IntegrationCacheStore
-  private let probe: () -> EnvironmentProbe
+  private let scan: (ProjectFolder) -> [ActionScheme]
 
   public init(
-    integrations: [any TerminalIntegration],
     cacheStore: any IntegrationCacheStore,
-    probe: @escaping () -> EnvironmentProbe = EnvironmentProbe.probe
+    scan: @escaping (ProjectFolder) -> [ActionScheme] = ProjectScanner.schemes(in:)
   ) {
-    self.integrations = integrations
     self.cacheStore = cacheStore
-    self.probe = probe
+    self.scan = scan
   }
 
-  /// Probe installed toolchains ONCE and set each integration's availability.
-  ///
-  /// Each integration declares the tool it needs via `requiredTool`; it is
-  /// available only when that tool resolves on PATH. An integration with no
-  /// `requiredTool` falls back to the legacy id-based gating, keeping
-  /// existing behavior (and test doubles) unchanged.
-  public func probeEnvironment() {
-    let result = probe()
-    for integration in integrations {
-      let tools = integration.availabilityTools
-      if !tools.isEmpty {
-        // Available when ANY listed tool is on PATH — an OR rule (e.g. JS/TS:
-        // bun-first with an npm/node fallback when bun is absent).
-        integration.isAvailable = tools.contains(where: result.toolAvailable)
-      } else {
-        switch integration.id {
-        case "xcode": integration.isAvailable = result.xcodebuildAvailable
-        case "swift": integration.isAvailable = result.swiftAvailable
-        default: break
-        }
-      }
-    }
-  }
-
-  /// Probe (idempotent) then refresh — the app's startup entry point.
-  @discardableResult
-  public func probeAndRefresh(directory: URL) -> [IntegrationAction] {
-    probeEnvironment()
-    return refresh(directory: directory)
-  }
-
-  /// Bump this whenever integration code changes (a new action kind, a changed
-  /// command, a new integration). The cache fingerprint hashes only VISIBLE
-  /// TOP-LEVEL directory entries, so editing nested integration sources does
-  /// NOT invalidate a cached scan — folding a version into the fingerprint is
-  /// what forces a re-scan when the logic itself changes. (2026-09-05: adding
-  /// the `.distribute` kind left every cached Xcode dir showing stale
-  /// run/build/test actions until this was added.) (2026-09-06: PATH-based
-  /// probe + `.lint` kind + ToolIntegrationBase.) (2026-10-12: Xcode Install
-  /// exports with Developer ID when available, notarized Export action.)
-  static let cacheVersion = "4"
-
-  /// Returns the smart actions for `directory`, reading from the encrypted
-  /// cache when the fingerprint is unchanged and scanning otherwise.
-  public func refresh(directory: URL) -> [IntegrationAction] {
+  /// Returns the schemes for `directory`, reading from the encrypted cache
+  /// when the fingerprint is unchanged and scanning otherwise.
+  public func refresh(directory: URL) -> [ActionScheme] {
     let canonical = directory.standardizedFileURL
-    let entries = IntegrationFileLister.list(directory: canonical)
-    let fingerprint = Self.cacheVersion + ":" + IntegrationFingerprint.hash(entries: entries)
-
-    if let cached = cacheStore.entry(forDirectory: canonical),
-       cached.fingerprint == fingerprint {
-      return cached.actions
+    let folder = ProjectFolder(listing: canonical)
+    let fingerprint = ProjectScanner.fingerprint(of: folder)
+    if let cached = cacheStore.entry(forDirectory: canonical), cached.fingerprint == fingerprint {
+      return cached.schemes
     }
-
-    var actions: [IntegrationAction] = []
-    // Keep each action's integration index so the final list can be ordered
-    // (kind first, integration as tiebreaker: Run/Build/Test, Xcode before
-    // SwiftPM before other integrations).
-    var tagged: [(integration: Int, action: IntegrationAction)] = []
-    for (index, integration) in integrations.enumerated()
-    where integration.isAvailable && integration.relevance(files: entries) {
-      for action in integration.scan(directory: canonical, files: entries) {
-        tagged.append((index, action))
-      }
-    }
-    actions = tagged
-      .sorted { lhs, rhs in
-        if lhs.action.kind.toolbarOrder != rhs.action.kind.toolbarOrder {
-          return lhs.action.kind.toolbarOrder < rhs.action.kind.toolbarOrder
-        }
-        return lhs.integration < rhs.integration
-      }
-      .map(\.action)
-
-    cacheStore.save(
-      IntegrationCacheEntry(fingerprint: fingerprint, actions: actions),
-      forDirectory: canonical
-    )
-    return actions
+    let schemes = scan(folder)
+    cacheStore.save(IntegrationCacheEntry(fingerprint: fingerprint, schemes: schemes), forDirectory: canonical)
+    return schemes
   }
 }
