@@ -15,8 +15,7 @@
       "id": "02-note",
       "arguments": ["--screenshot-demo", "--note", "Release 2.0"],
       "environment": { "ZDOTDIR": "$DEMO/zsh" },
-      "caption": "Notes next to your sessions, synced with Markdown",
-      "relaunch": true
+      "caption": "Notes next to your sessions, synced with Markdown"
     },
     {
       "id": "03-actions",
