@@ -29,6 +29,12 @@ The `ShellKit` library is cross-platform; the local-pty pieces
 (`LocalPTYTransport` + its `.zsh`/`.tmux`/`.screen` presets) are compiled
 only on macOS.
 
+## Building
+
+The v57 repositories Shell uses (Database, Markdown, Git, Code, Vault, UpdateKit) come from GitHub's `main` branch.
+To work on them together, clone them next to this one and open `Shell-Local.xcworkspace` instead of
+`Shell.xcodeproj`, or run SwiftPM commands with `V57_LOCAL=1` (`V57_LOCAL=1 swift test`).
+
 ## Shared data (the vault)
 SSH hosts, database connections, accepted host keys and every device's public
 key are the records the v57 apps share through the vault (`../Vault`, see its

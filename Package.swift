@@ -3,6 +3,13 @@
 
 import PackageDescription
 
+/// Another v57 repository: GitHub's main branch, or the checkout next to this one with `V57_LOCAL=1` (in Xcode,
+/// open Shell-Local.xcworkspace instead).
+func v57(_ name: String) -> Package.Dependency {
+    Context.environment["V57_LOCAL"] == nil
+        ? .package(url: "https://github.com/v57/\(name).git", branch: "main") : .package(path: "../\(name)")
+}
+
 let package = Package(
     name: "Shell",
     platforms: [.macOS(.v14), .iOS(.v17)],
@@ -13,9 +20,9 @@ let package = Package(
         // (one copy per app: two would clash). Binary/SSH-libssh2/build-ssh.sh
         // still builds the libssh2 that Database's Scripts/build-libssh2.sh
         // repackages.
-        .package(path: "../Database"),
+        v57("Database"),
         // The vault: the store, keys and records the v57 apps share.
-        .package(path: "../Vault"),
+        v57("Vault"),
     ],
     targets: [
         .target(
