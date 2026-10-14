@@ -29,6 +29,7 @@ struct DetachDetailView: View {
 
   var body: some View {
     content
+      .fileDropMenu()
       .background {
         #if os(macOS)
         DetachWindowAccessor { window in

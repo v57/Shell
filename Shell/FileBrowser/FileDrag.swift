@@ -145,12 +145,17 @@ enum FileDrop {
   /// Whether the pointer is over one of Shell's windows: the topmost normal window under it belongs to this process.
   /// Safe off the main thread (SwiftUI asks for a dragged file there while the main thread waits for it).
   nonisolated static func pointerIsOverThisApp() -> Bool {
+    windowUnderPointer() != nil
+  }
+
+  /// The number of Shell's window under the pointer, when the topmost normal window there is one of Shell's.
+  nonisolated static func windowUnderPointer() -> Int? {
     let mouse = NSEvent.mouseLocation
     // Window bounds have a top-left origin on the main display; `mouseLocation` a bottom-left one.
     let point = CGPoint(x: mouse.x, y: CGDisplayBounds(CGMainDisplayID()).height - mouse.y)
     guard let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
       as? [[String: Any]]
-    else { return false }
+    else { return nil }
     for window in windows {
       // Layer 0 is the normal windows: the drag image and menus float above it.
       guard (window[kCGWindowLayer as String] as? Int) == 0,
@@ -158,9 +163,10 @@ enum FileDrop {
             CGRect(x: bounds["X"] ?? 0, y: bounds["Y"] ?? 0, width: bounds["Width"] ?? 0, height: bounds["Height"] ?? 0)
               .contains(point)
       else { continue }
-      return (window[kCGWindowOwnerPID as String] as? Int32) == getpid()
+      guard (window[kCGWindowOwnerPID as String] as? Int32) == getpid() else { return nil }
+      return window[kCGWindowNumber as String] as? Int
     }
-    return false
+    return nil
   }
 }
 

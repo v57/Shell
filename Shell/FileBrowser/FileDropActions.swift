@@ -1,4 +1,5 @@
 #if os(macOS)
+import AppKit
 import Foundation
 import ShellKit
 
@@ -28,11 +29,15 @@ enum FileDropAction: Hashable {
   case linkFile
 }
 
-/// A drop waiting for the user to pick a `FileDropAction` (ContentView's drop dialog).
+/// A drop waiting for the user to pick a `FileDropAction` (the drop menu, FileDropMenu.swift).
 struct FileDropRequest: Identifiable {
   let id = UUID()
   let files: [ShellFile]
   let target: FileDropTarget
+  /// Where the pointer was when the files were dropped, in screen coordinates: the menu opens there.
+  var location: CGPoint = NSEvent.mouseLocation
+  /// The Shell window the files were dropped on (the one that shows the menu); nil when unknown.
+  var windowNumber: Int? = FileDrop.windowUnderPointer()
 }
 
 /// Files dropped on Shell's targets: the dialog's choices and what each one does.
@@ -72,18 +77,24 @@ extension AppModel {
     }
   }
 
-  /// The dialog's title: what was dropped where.
-  func fileDropTitle(for request: FileDropRequest) -> String {
-    let what = request.files.count == 1 ? "“\(request.files[0].name)”" : "\(request.files.count) items"
+  /// What was dropped: the file's name, or how many items.
+  func fileDropSubject(for request: FileDropRequest) -> String {
+    request.files.count == 1 ? request.files[0].name : "\(request.files.count) items"
+  }
+
+  /// Where it was dropped: the session, host or Notes.
+  func fileDropTargetName(for request: FileDropRequest) -> String {
     switch request.target {
-    case .session(let id):
-      guard let session = session(id) else { return what }
-      return "\(what) on \(displayName(for: session))"
-    case .host(let config):
-      return "\(what) on \(config.displayName)"
-    case .notes:
-      return "\(what) on Notes"
+    case .session(let id): session(id).map { displayName(for: $0) } ?? "Session"
+    case .host(let config): config.displayName
+    case .notes: "Notes"
     }
+  }
+
+  /// What was dropped where, in one line (the menu's accessibility label).
+  func fileDropTitle(for request: FileDropRequest) -> String {
+    let what = request.files.count == 1 ? "“\(request.files[0].name)”" : fileDropSubject(for: request)
+    return "\(what) on \(fileDropTargetName(for: request))"
   }
 
   func fileDropTitle(of action: FileDropAction, for request: FileDropRequest) -> String {

@@ -163,7 +163,7 @@ struct ContentView: View {
           #endif
         }
       }
-      .modifier(FileDropDialog())
+      .fileDropMenu(showsErrors: true)
       .alert("Encrypted Storage Error", isPresented: Binding(
         get: { model.notes.storageError != nil || model.history.storageError != nil },
         set: { if !$0 { model.notes.storageError = nil; model.history.storageError = nil } }
