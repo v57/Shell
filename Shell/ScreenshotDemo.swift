@@ -12,6 +12,9 @@ import ShellKit
 ///   --note <name>             shows a demo note
 ///   --actions / --settings    opens that overlay
 ///   --new-database            opens the New Database Connection sheet
+///
+/// A capture takes every scene in one launch: the next scene's arguments arrive through `Screenshots` and `open`
+/// shows them in place, after undoing what the scene before left open.
 enum ScreenshotDemo {
   static let isOn: Bool = {
     #if DEBUG
@@ -21,13 +24,14 @@ enum ScreenshotDemo {
     #endif
   }()
 
-  static func value(_ option: String) -> String? {
-    let arguments = CommandLine.arguments
+  static func value(_ option: String, in arguments: [String] = CommandLine.arguments) -> String? {
     guard let index = arguments.firstIndex(of: option), index + 1 < arguments.count else { return nil }
     return arguments[index + 1]
   }
 
-  static func flag(_ option: String) -> Bool { isOn && CommandLine.arguments.contains(option) }
+  static func flag(_ option: String, in arguments: [String] = CommandLine.arguments) -> Bool {
+    isOn && arguments.contains(option)
+  }
 
   private static let folder = FileManager.default.temporaryDirectory.appendingPathComponent("ShellScreenshotDemo")
 
@@ -49,7 +53,13 @@ enum ScreenshotDemo {
     setenv("VAULT_DIRECTORY", vault.path, 1)
   }
 
-  /// The demo's records, then the scene's terminal command, note or panel.
+  /// The demo's notes by name, for `--note`.
+  @MainActor private static var noteIDs: [String: UUID] = [:]
+  /// The arguments of the scene on screen, and whether it typed a command into the terminal.
+  @MainActor private static var shown: [String]?
+  @MainActor private static var ranCommand = false
+
+  /// The demo's records (the scene itself is `open`'s).
   @MainActor static func apply(to model: AppModel) {
     let atlas = SSHConfig(name: "atlas-web-1", host: "web1.atlas.example.com", user: "deploy")
     let staging = SSHConfig(name: "staging", host: "staging.atlas.example.com", user: "maya")
@@ -75,20 +85,71 @@ enum ScreenshotDemo {
         Action(name: name, category: category, appliesToFutureSSHConnections: category == "Servers", commands: commands))
     }
 
-    model.notes.addNote(named: "Deploy checklist", text: deployChecklist, encrypted: false)
-    let release = model.notes.addNote(named: "Release 2.0", text: releaseNotes, encrypted: false)
-
-    if let command = value("--run"), let session = model.sessions.first {
-      // The shell needs a moment to print its first prompt.
-      Task {
-        try? await Task.sleep(for: .seconds(1))
-        model.insertCommandText(command + "\n", into: session)
-      }
+    for (name, text) in [("Deploy checklist", deployChecklist), ("Release 2.0", releaseNotes)] {
+      noteIDs[name] = model.notes.addNote(named: name, text: text, encrypted: false).id
     }
-    if value("--note") != nil { model.selection = .note(release.id) }
-    if flag("--actions") { model.showingActions = true }
-    if flag("--settings") { model.showingSettings = true }
-    if flag("--new-database") { model.showingNewDatabaseConnection = true }
+  }
+
+  /// A scene, from its arguments: the first one's at launch, the later ones' in place. Closes what the scene before
+  /// opened and clears the command it typed, then selects the terminal, types `--run`'s command, shows `--note`'s note
+  /// and opens `--actions`, `--settings` or `--new-database`.
+  @MainActor static func open(_ arguments: [String], in model: AppModel) async {
+    // The same scene again (its other appearance) is already on screen.
+    guard arguments != shown else { return }
+    shown = arguments
+
+    model.showingActions = false
+    model.showingNewAction = false
+    model.editingAction = nil
+    model.showingSettings = false
+    model.showingThemes = false
+    model.showingCommandInsert = false
+    model.showingNewConnection = false
+    model.showingNewDatabaseConnection = false
+    model.editingDatabaseConnection = nil
+    let terminal = model.sessions.first
+    if ranCommand, let terminal {
+      terminal.clearStdout()
+      ranCommand = false
+    }
+    model.selection = terminal.map { .session($0.id) }
+    // The shell's first prompt at launch, or the prompt it redrew after the clear.
+    if let terminal { await settle(terminal) }
+
+    if let command = value("--run", in: arguments), let terminal {
+      model.insertCommandText(command + "\n", into: terminal)
+      ranCommand = true
+      // The command's output, down to the next prompt.
+      await settle(terminal) { $0.components(separatedBy: "\n").count > 1 }
+    }
+    if let name = value("--note", in: arguments), let id = noteIDs[name] ?? noteIDs.values.first {
+      model.selection = .note(id)
+    }
+    if flag("--actions", in: arguments) { model.showingActions = true }
+    if flag("--settings", in: arguments) { model.showingSettings = true }
+    if flag("--new-database", in: arguments) { model.showingNewDatabaseConnection = true }
+  }
+
+  /// Until the terminal shows a prompt on its last line (and `condition` holds for its text), with no new output for
+  /// a moment; at most 10 seconds.
+  @MainActor private static func settle(
+    _ terminal: TerminalSession, until condition: (String) -> Bool = { _ in true }
+  ) async {
+    let start = Date.now
+    var generation = terminal.snapshotGeneration
+    var quietSince = Date.now
+    while Date.now.timeIntervalSince(start) < 10 {
+      try? await Task.sleep(for: .milliseconds(100))
+      if terminal.snapshotGeneration != generation {
+        generation = terminal.snapshotGeneration
+        quietSince = .now
+        continue
+      }
+      let text = terminal.snapshot.fullPlainText
+      let last = text.components(separatedBy: "\n").last?.trimmingCharacters(in: .whitespaces) ?? ""
+      let prompt = ["%", "$", "#"].contains { last.hasSuffix($0) }
+      if prompt, condition(text), Date.now.timeIntervalSince(quietSince) >= 0.4 { return }
+    }
   }
 
   private static let deployChecklist = """

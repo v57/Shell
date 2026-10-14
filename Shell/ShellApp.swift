@@ -2,6 +2,7 @@ import SwiftUI
 import ShellKit
 import ShellIntegrations
 import VaultKit
+import DevScreenshots
 #if os(macOS)
 import UpdateKit
 #endif
@@ -24,10 +25,18 @@ struct ShellApp: App {
     updater.start()
     #endif
     // SSH hosts, database connections and device keys sync with the other v57 apps and devices through the
-    // vault; the screenshot demo has a store of its own and never syncs.
+    // vault; the screenshot demo has a store of its own and never syncs. A capture (.dev/screenshots.json) takes
+    // every scene in this launch: the first from the launch arguments, the next ones in place.
     if ScreenshotDemo.isOn {
       ScreenshotDemo.prepare()
       ScreenshotDemo.apply(to: AppModel.shared)
+      Screenshots.prepare(waitsForReady: true) { scene in
+        await ScreenshotDemo.open(scene.arguments, in: AppModel.shared)
+      }
+      Task {
+        await ScreenshotDemo.open(CommandLine.arguments, in: AppModel.shared)
+        Screenshots.ready()
+      }
     } else {
       Vault.shared.startSync()
     }
