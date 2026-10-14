@@ -6,9 +6,9 @@ import VaultKit
 
 /// The sidebar's saved database connections: the ones the v57 apps share through the vault (`../Vault`).
 ///
-/// Each `DatabaseConnection` is a `VaultDatabase`, so Database and Database Pro list the same connections,
+/// Each `DatabaseConnection` is a `VaultDatabase`, so Database list the same connections,
 /// iCloud syncs them, and the list updates live when another app or device changes one. Fields Shell doesn't
-/// show (Database Pro's options, colors, read-only flag) stay in the shared record.
+/// show (Database's options, colors, read-only flag) stay in the shared record.
 ///
 /// A connection without an SSH host of its own attaches to the saved host whose address is the database's
 /// server (`VaultDatabase.tunnelHost`), so a database on a machine you SSH into shows under that host and
@@ -16,7 +16,7 @@ import VaultKit
 @MainActor
 @Observable
 final class DatabaseConnectionStore {
-  /// Connections in sidebar order (engines Shell has; DuckDB stays in Database Pro).
+  /// Connections in sidebar order (engines Shell has; DuckDB stays in Database).
   private(set) var all: [DatabaseConnection] = []
   /// The most recent persistence failure.
   var storageError: String?

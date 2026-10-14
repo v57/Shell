@@ -21,7 +21,7 @@ struct DatabaseDocument: Identifiable {
 }
 
 /// Live connection lifecycle wrapper for a saved `DatabaseConnection`, powered
-/// by Database Pro's engine-neutral DatabaseProKit (every engine but DuckDB,
+/// by Database's engine-neutral DatabaseKit (every engine but DuckDB,
 /// pure Swift on macOS and iOS). Shell keeps its own SSH tunnel; the engine
 /// connects to its local end.
 @MainActor
@@ -55,7 +55,7 @@ final class DatabaseSession {
   /// Each engine's default database/namespace to select after connect.
   private var defaultDatabase: String = ""
 
-  private var live: (any DatabaseProKit.DatabaseSession)?
+  private var live: (any DatabaseKit.DatabaseSession)?
   /// The tree node of each listed database (nil: the engine has no database level, like SQLite).
   private var databaseNodes: [String: TreeNode?] = [:]
   /// The object behind each listed collection/table/view name.
@@ -140,7 +140,7 @@ final class DatabaseSession {
     }
   }
 
-  /// The DatabaseProKit profile for this connection, aimed at `host:port` (the tunnel's local end when
+  /// The DatabaseKit profile for this connection, aimed at `host:port` (the tunnel's local end when
   /// tunneled). Shell opens its own SSH tunnel, so the profile has none.
   private func profile(host: String, port: UInt16) -> ConnectionProfile {
     var options: [String: String] = [:]
@@ -208,7 +208,7 @@ final class DatabaseSession {
   }
 
   private func collect(
-    _ node: TreeNode?, in session: any DatabaseProKit.DatabaseSession, into found: inout [ObjectRef], depth: Int
+    _ node: TreeNode?, in session: any DatabaseKit.DatabaseSession, into found: inout [ObjectRef], depth: Int
   ) async throws {
     for child in try await session.children(of: node) {
       if let ref = child.ref {

@@ -2,9 +2,9 @@ import Foundation
 import ShellDatabaseEngines
 import ShellKit
 
-/// Which database engine a connection talks to: every engine Database Pro's libraries have but DuckDB
-/// (DatabaseProKit, through ShellDatabaseEngines). Raw values are the shared records' engine names
-/// (`VaultDatabase.Engine`), so Database and Database Pro read the same connections.
+/// Which database engine a connection talks to: every engine Database's libraries have but DuckDB
+/// (DatabaseKit, through ShellDatabaseEngines). Raw values are the shared records' engine names
+/// (`VaultDatabase.Engine`), so Database read the same connections.
 enum DatabaseEngine: String, Codable, CaseIterable, Identifiable {
   case postgres
   case mysql
@@ -18,7 +18,7 @@ enum DatabaseEngine: String, Codable, CaseIterable, Identifiable {
 
   var id: String { rawValue }
 
-  /// The engine in DatabaseProKit.
+  /// The engine in DatabaseKit.
   var kind: EngineKind { EngineKind(rawValue: rawValue) ?? .postgres }
 
   var displayName: String { kind.displayName }

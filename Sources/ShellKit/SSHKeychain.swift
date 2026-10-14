@@ -43,7 +43,7 @@ public nonisolated enum SSHKeychain {
   // MARK: - Identity keys (Secure Enclave)
   
   /// Returns this device's Secure Enclave key, the one every v57 app shares (`VaultIdentity`): Database
-  /// and Database Pro log in with it too. A key Shell made before the vault is handed over to it, so servers
+  /// logs in with it too. A key Shell made before the vault is handed over to it, so servers
   /// that already trust it keep working.
   public static func loadOrCreateDefaultKey() throws -> SecureEnclave.P256.Signing.PrivateKey {
     if !VaultIdentity.exists, let legacy = try? load(account: defaultKeyAccount) {
@@ -97,7 +97,7 @@ public nonisolated enum SSHKeychain {
   // MARK: - Per-connection passwords
 
   // SSH hosts' and databases' passwords (`ssh-password-<id>`, `db-password-<id>`) live in the shared
-  // keychain group, named after the shared record (`VaultSecrets`), so Database and Database Pro use them
+  // keychain group, named after the shared record (`VaultSecrets`), so Database use them
   // and iCloud Keychain brings them to the user's other devices. Ones saved before move there when read.
 
   public static func savePassword(_ password: String, account: String) throws {

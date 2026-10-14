@@ -6,7 +6,7 @@ import VaultKit
 
 /// The sidebar's saved SSH connections: the hosts the v57 apps share through the vault (`../Vault`).
 ///
-/// Each `SSHConfig` is a `VaultHost`, so Database and Database Pro tunnel through the same hosts, iCloud
+/// Each `SSHConfig` is a `VaultHost`, so Database tunnel through the same hosts, iCloud
 /// syncs them (the app that changes one sends it, merged field by field with edits from other devices),
 /// and the list updates live when another app or device changes it. Passwords are `VaultSecrets` items named
 /// after the host (`SSHKeychain` maps `SSHConfig.passwordAccount` to them).
@@ -84,7 +84,7 @@ final class SSHConfigStore {
     host.hostname = config.host
     host.user = config.user
     host.port = config.port
-    // A host that signs in with a key imported into Database Pro keeps it; Shell uses this device's key.
+    // A host that signs in with a key imported into Database keeps it; Shell uses this device's key.
     switch config.authMethod {
     case .password: host.auth = .password
     case .keychainKey: if host.auth != .importedKey { host.auth = .deviceKey }

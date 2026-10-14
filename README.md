@@ -4,7 +4,7 @@ Modern terminal for your needs. Pure SwiftUI, no electron-type bullshit
 - View status in the sidebar
 - Persistent sessions using `screen` or `tmux`
 - Built in SSH, keys stored in secure enclave, saved connections synced
-  through iCloud (encrypted) and shared with Database and Database Pro
+  through iCloud (encrypted) and shared with Database
 - Database connections for PostgreSQL, MySQL, MariaDB, SQL Server, SQLite,
   MongoDB, Redis, Cassandra and ScyllaDB, attached to the SSH host they run on
 - Authorized-keys manager: add or remove keys on any server's
@@ -33,7 +33,7 @@ only on macOS.
 SSH hosts, database connections, accepted host keys and every device's public
 key are the records the v57 apps share through the vault (`../Vault`, see its
 README): one encrypted store per device in the app group container, synced
-through iCloud (`iCloud.dev.v57`). Database and Database Pro list the same
+through iCloud (`iCloud.dev.v57`). Database list the same
 connections and tunnel through the same hosts; a change in any app shows in
 the others at once. Passwords are iCloud Keychain items in the shared keychain
 group. The SSH key is this device's Secure Enclave key, shared by the v57 apps

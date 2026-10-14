@@ -56,7 +56,7 @@ struct SSHConfigStoreTests {
     #expect(defaults.data(forKey: "sshConnections") == nil)
   }
 
-  @Test @MainActor func keepsAKeyImportedInDatabasePro() {
+  @Test @MainActor func keepsAKeyImportedInDatabase() {
     let vault = TestVault.make()
     vault.save(VaultHost(id: UUID().uuidString, name: "bastion", hostname: "b.example.com", auth: .importedKey, keyID: "k1"))
     let store = SSHConfigStore(vault: vault, defaults: UserDefaults(suiteName: UUID().uuidString)!)
@@ -88,7 +88,7 @@ struct DatabaseConnectionStoreTests {
 
   @Test @MainActor func keepsFieldsShellDoesntShow() {
     let vault = TestVault.make()
-    // Database Pro saved it with a replica set and a color.
+    // Database saved it with a replica set and a color.
     let id = UUID()
     vault.save(VaultDatabase(
       id: id.uuidString, name: "Atlas", engine: VaultDatabase.Engine.mongodb, host: "cluster.example.com", port: 27017,

@@ -2,7 +2,7 @@ import Foundation
 import VaultKit
 
 /// Accepted SSH host keys (SHA256 fingerprints), the role of ~/.ssh/known_hosts, shared by the v57 apps
-/// through the vault: a server trusted in Shell is trusted in Database and Database Pro, on every device.
+/// through the vault: a server trusted in Shell is trusted in Database, on every device.
 /// Keys accepted before the vault (in UserDefaults) move there when first looked up.
 final class KnownHostsStore {
   private static let legacyKey = "knownHosts"
