@@ -1,6 +1,7 @@
 import SwiftUI
 import ShellKit
 import ShellIntegrations
+import VaultKit
 #if os(macOS)
 import UpdateKit
 #endif
@@ -16,8 +17,16 @@ struct ShellApp: App {
   /// The iOS app updates through the App Store.
   private let updater = AppUpdater(github: "v57/Shell", assetName: "Shell.zip")
 
-  init() { updater.start() }
   #endif
+
+  init() {
+    #if os(macOS)
+    updater.start()
+    #endif
+    // SSH hosts, database connections and device keys sync with the other v57 apps and devices through the
+    // vault.
+    Vault.shared.startSync()
+  }
 
   var body: some Scene {
     WindowGroup {

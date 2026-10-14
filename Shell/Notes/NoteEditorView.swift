@@ -26,17 +26,29 @@ struct NoteEditorView: View {
     .toolbar {
       ToolbarItem {
         Button {
+          model.notes.setEncrypted(!isEncrypted, for: noteID)
+        } label: {
+          Image(systemName: isEncrypted ? "lock.fill" : "lock.open")
+        }
+        .help(isEncrypted ? "Decrypt this note (a plain Markdown file)" : "Encrypt this note with the key the v57 apps share")
+      }
+      ToolbarItem {
+        Button {
           model.notes.setICloudStorage(!inICloud, for: noteID)
         } label: {
           Image(systemName: inICloud ? "icloud.fill" : "icloud")
         }
-        .help(inICloud ? "Store this note on this device only (encrypted)" : "Store this note in iCloud (encrypted)")
+        .help(inICloud ? "Keep this note on this device only" : "Move this note to iCloud Drive, shared with Markdown")
       }
     }
   }
 
-  /// The current note's storage location (false until the note loads).
-  private var inICloud: Bool {
-    model.notes.notes.first { $0.id == noteID }?.storedInICloud ?? false
+  private var summary: NotesStore.NoteSummary? {
+    model.notes.notes.first { $0.id == noteID }
   }
+
+  /// The current note's storage location (false until the note loads).
+  private var inICloud: Bool { summary?.storedInICloud ?? false }
+
+  private var isEncrypted: Bool { summary?.isEncrypted ?? false }
 }

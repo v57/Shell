@@ -13,8 +13,12 @@ enum ProjectOpener {
   static func displayName(for kind: OpenWithKind) -> String {
     switch kind {
     case .xcode: return "Xcode"
+    case .code: return "Code"
     case .zed: return "Zed"
     case .vscode: return "Visual Studio Code"
+    case .markdown: return "Markdown"
+    case .git: return "Git"
+    case .dev: return "Dev"
     case .finder: return "Finder"
     }
   }
@@ -22,8 +26,12 @@ enum ProjectOpener {
   private static func bundleID(for kind: OpenWithKind) -> String {
     switch kind {
     case .xcode: return "com.apple.dt.Xcode"
+    case .code: return "dev.v57.code"
     case .zed: return "dev.zed.Zed"
     case .vscode: return "com.microsoft.VSCode"
+    case .markdown: return "dev.v57.md"
+    case .git: return "dev.v57.git"
+    case .dev: return "dev.v57.dev"
     case .finder: return "com.apple.finder"
     }
   }
@@ -49,7 +57,7 @@ enum ProjectOpener {
     case .finder:
       // Finder is the default handler for folders — plain `open`.
       NSWorkspace.shared.open(directory)
-    case .xcode, .zed, .vscode:
+    case .xcode, .code, .zed, .vscode, .markdown, .git, .dev:
       guard let app = appURL(for: kind) else { return }
       let target = targetURL(for: kind, in: directory)
       try? NSWorkspace.shared.open([target], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration())

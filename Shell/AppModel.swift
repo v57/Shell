@@ -190,24 +190,12 @@ final class AppModel {
   private var sessionCommands: [UUID: [SubmittedCommand]] = [:]
   private var localHistoryDrafts: [UUID: LocalHistoryDraft] = [:]
   private var selectionBeforeHistory: Selection?
-  /// Observation token for CloudKit remote-change notifications (kept so
-  /// the observer can be torn down; AppModel is a singleton, so it lives
-  /// for the process).
-  private var cloudKitChangeObserver: NSObjectProtocol?
-  /// Coalesces CloudKit remote-change bursts into a single store refresh.
-  /// Remote-change notifications fire in tight bursts while the CloudKit
-  /// mirror is working (each import polls our stores), and also on every
-  /// local write — refreshing once per notification is redundant main-thread
-  /// re-fetch work on top of the framework's own export loop.
-  private var cloudKitRefreshTask: Task<Void, Never>?
-  /// Whether the Notes store is currently backed by the CloudKit container
-  /// (`.notes` on) versus a local-only store (`.notes` off). Used to detect
-  /// the ON↔OFF transition in the feature-flag reactivity so the store and
-  /// its observer are only swapped when the flag actually flips (reactivity
-  /// re-arms on every observed flag change).
+  /// Whether the Notes store lists Markdown's iCloud Drive folder (`.notes` on)
+  /// or only the local folder (`.notes` off). Used to detect the ON↔OFF
+  /// transition in the feature-flag reactivity so the store is only swapped
+  /// when the flag actually flips (reactivity re-arms on every observed flag
+  /// change).
   private var notesFeatureEnabled = false
-  /// How long a remote-change burst is coalesced before one refresh runs.
-  private static let cloudKitRefreshCoalesceDelay: Duration = .milliseconds(400)
 
   #if os(macOS)
   /// Project detection over the active directory (Swift/Xcode integrations),
@@ -344,100 +332,23 @@ final class AppModel {
   /// Message when the panel can't be opened (e.g. no SSH connections).
   var authorizedKeysError: String?
 
-  /// ONE container for both the SSH-config and device-key stores (the
-  /// SwiftData hosted-runner instability scales with container churn, so
-  /// the app deliberately keeps the container count low). Falls back to a
-  /// plain local store when CloudKit setup fails.
-  private static let sharedSSHContainer: ModelContainer = {
-    (try? SSHConfigStore.makeContainer()) ?? {
-      // swiftlint:disable:next force_try
-      try! ModelContainer(
-        for: SSHConfigRecord.self, DeviceKeyRecord.self, DatabaseConnectionRecord.self,
-        configurations: ModelConfiguration("SSHConfigs", cloudKitDatabase: .none)
-      )
-    }()
-  }()
-
-  /// The notes' two containers (local + CloudKit cloud), built in a
-  /// `static let` closure — NOT inside an init: containers created inside an
-  /// @Observable init trap on their first insert (silent SIGTRAP at
-  /// `localContext.insert`; probe-verified — the old `NotesStore()` factory
-  /// path crashed while the injected `NotesStore(stores:)` path always
-  /// worked). Used when the Notes feature is enabled.
-  private static let notesStoresWithCloud: NoteStores = {
-    if let made = try? NoteStores.make() { return made }
-    // Store setup failed — degrade to two plain local stores rather than
-    // crash. Plain SQLite stores are effectively infallible.
-    let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-      .appendingPathComponent(Bundle.main.bundleIdentifier ?? "Shell", isDirectory: true)
-    // swiftlint:disable:next force_try
-    try! FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-    let local = try! ModelContainer(
-      for: NoteRecord.self,
-      configurations: ModelConfiguration(
-        "LocalNotes",
-        url: dir.appendingPathComponent("LocalNotes.store"),
-        cloudKitDatabase: .none
-      )
-    )
-    let cloud = try! ModelContainer(
-      for: NoteRecord.self,
-      configurations: ModelConfiguration(
-        "CloudNotes",
-        url: dir.appendingPathComponent("CloudNotes.store"),
-        cloudKitDatabase: .none
-      )
-    )
-    return NoteStores(local: local, cloud: cloud)
-  }()
-
-  /// Local-only notes container, used when the Notes feature is disabled so
-  /// NO CloudKit container is loaded (a disabled feature must not run
-  /// CloudKit background sync) and the notes store is not observed. Built in
-  /// a `static let` closure for the same trap-avoidance reason as above.
-  /// Safe: while Notes is off no note-insert path is reachable (the Notes
-  /// sidebar and the new-note command are gated), and a NotesStore with a nil
-  /// cloud context only SIGTRAPs on its first local *insert* — reload()/fetch
-  /// on an empty store does not. The on-disk files are reused unchanged, so
-  /// re-enabling restores the prior notes from disk.
-  private static let notesStoresLocalOnly: NoteStores = {
-    let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-      .appendingPathComponent(Bundle.main.bundleIdentifier ?? "Shell", isDirectory: true)
-    // swiftlint:disable:next force_try
-    try! FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-    let local = try! ModelContainer(
-      for: NoteRecord.self,
-      configurations: ModelConfiguration(
-        "LocalNotes",
-        url: dir.appendingPathComponent("LocalNotes.store"),
-        cloudKitDatabase: .none
-      )
-    )
-    return NoteStores(local: local, cloud: nil)
-  }()
-
   private init() {
     appearanceMode = AppearanceMode(rawValue: UserDefaults.standard.string(forKey: Self.appearanceModeKey) ?? "") ?? .system
     disableTerminalBackgrounds = UserDefaults.standard.bool(forKey: Self.disableTerminalBackgroundsKey)
-    connectionStore = SSHConfigStore(container: Self.sharedSSHContainer)
-    deviceKeys = DeviceKeyStore(container: Self.sharedSSHContainer)
-    databaseStore = DatabaseConnectionStore(container: Self.sharedSSHContainer)
+    // SSH hosts, database connections and device keys are the ones the v57 apps share through the vault
+    // (../Vault), synced through iCloud and live across apps.
+    connectionStore = SSHConfigStore()
+    deviceKeys = DeviceKeyStore()
+    databaseStore = DatabaseConnectionStore()
     // Notes gating must not read `self` here (stored properties are still
     // being initialized); read the flag first, wire `notes`, then publish it.
+    // Notes are files shared with the Markdown app (its iCloud Drive folder); while the feature is off only
+    // the local folder is listed.
     let notesFlag = FeatureFlagsStore.shared.isEnabled(.notes)
-    if notesFlag {
-      // Notes enabled: load the CloudKit-topped store and observe its
-      // remote-change notifications so cross-device edits surface at runtime.
-      notes = NotesStore(stores: Self.notesStoresWithCloud)
-      observeCloudKitRemoteChanges()
-    } else {
-      // Notes disabled: build a local-only store so NO CloudKit container is
-      // loaded and nothing is observed — a disabled feature must not run
-      // CloudKit background sync. The on-disk notes files are reused
-      // unchanged, so re-enabling restores the prior notes from disk.
-      notes = NotesStore(stores: Self.notesStoresLocalOnly)
-    }
+    notes = NotesStore(lookUpICloud: notesFlag)
     notesFeatureEnabled = notesFlag
+    // Hosts and connections saved by builds before the vault move into it once.
+    LegacyImport.run(configs: connectionStore, databases: databaseStore)
     // Publish this device's identity key to iCloud (no-op when the Secure
     // Enclave key is unreachable, e.g. locked screen — retried when the
     // authorized-keys panel opens). Part of the Authorized Keys feature.
@@ -508,22 +419,14 @@ final class AppModel {
     }
   }
 
-  /// Swaps the Notes store to match the `.notes` flag: on loads the
-  /// CloudKit-topped store and observes remote changes; off swaps to a
-  /// local-only store and stops observing. No-op unless the flag actually
-  /// flipped (reactivity re-arms on every observed flag change, so the store
-  /// must not be rebuilt every time). Persisted notes files are reused
-  /// untouched, so re-enabling restores the prior set from disk.
+  /// Swaps the Notes store to match the `.notes` flag: on lists Markdown's
+  /// iCloud Drive folder too, off only the local folder. No-op unless the flag
+  /// actually flipped (reactivity re-arms on every observed flag change, so the
+  /// store must not be rebuilt every time).
   private func configureNotesGating(notesEnabled: Bool) {
     guard notesEnabled != notesFeatureEnabled else { return }
     notesFeatureEnabled = notesEnabled
-    if notesEnabled {
-      notes = NotesStore(stores: Self.notesStoresWithCloud)
-      observeCloudKitRemoteChanges()
-    } else {
-      notes = NotesStore(stores: Self.notesStoresLocalOnly)
-      stopObservingCloudKitRemoteChanges()
-    }
+    notes = NotesStore(lookUpICloud: notesEnabled)
   }
   #endif
 
@@ -2355,7 +2258,9 @@ final class AppModel {
       let result = await Task.detached(priority: .userInitiated) {
         let actions = coordinator.refresh(directory: canonical)
         let entries = IntegrationFileLister.list(directory: canonical)
-        let openKinds = OpenWithResolver.kinds(for: entries)
+        // The lister skips dotfiles, so whether it's a repository is checked here.
+        let isRepository = FileManager.default.fileExists(atPath: canonical.appendingPathComponent(".git").path)
+        let openKinds = OpenWithResolver.kinds(for: entries, isRepository: isRepository)
         return (actions: actions, openKinds: openKinds)
       }.value
       guard let self, self.smartActionsGeneration == generation else { return }
@@ -2516,61 +2421,13 @@ final class AppModel {
     showAuthorizedKeys(for: .local)
   }
 
-  /// Re-fetches the stores whenever the CloudKit mirror imports remote
-  /// changes (the CoreData `NSPersistentStoreRemoteChange` notification;
-  /// SwiftData's CloudKit stores post it through their persistent store
-  /// coordinator). This is what makes FIRST LAUNCH self-heal: init's
-  /// reload runs before CloudKit has delivered anything, and the launch-time
-  /// scene activation is deliberately skipped, so without this the sidebar
-  /// stays empty until the next activation or restart. It also surfaces
-  /// cross-device edits while the app runs (belt-and-braces on top of the
-  /// scene-activation refresh).
-  private func observeCloudKitRemoteChanges() {
-    cloudKitChangeObserver = NotificationCenter.default.addObserver(
-      forName: .NSPersistentStoreRemoteChange,
-      object: nil,
-      queue: .main
-    ) { [weak self] _ in
-      // `queue: .main` runs this on the main queue, but the closure is still
-      // nonisolated to the compiler — hop to the main actor to refresh.
-      Task { @MainActor [weak self] in
-        self?.scheduleCloudKitRefresh()
-      }
-    }
-  }
-
-  /// Tears down the CloudKit remote-change observation. Called when the Notes
-  /// feature is disabled so a disabled feature never holds a live observer or
-  /// a pending coalesced refresh.
-  private func stopObservingCloudKitRemoteChanges() {
-    if let observer = cloudKitChangeObserver {
-      NotificationCenter.default.removeObserver(observer)
-      cloudKitChangeObserver = nil
-    }
-    cloudKitRefreshTask?.cancel()
-    cloudKitRefreshTask = nil
-  }
-
-  /// Debounces a store refresh: cancels any pending one and schedules a
-  /// single refresh shortly after the last trigger. A burst of remote-change
-  /// notifications (and the app's own writes, which also fire them) becomes
-  /// one re-fetch instead of N.
-  private func scheduleCloudKitRefresh() {
-    cloudKitRefreshTask?.cancel()
-    cloudKitRefreshTask = Task { @MainActor [weak self] in
-      try? await Task.sleep(for: Self.cloudKitRefreshCoalesceDelay)
-      guard !Task.isCancelled else { return }
-      self?.refreshOnActivation()
-    }
-  }
-
-  /// Sync trigger for the no-push stores (notes + SSH configs): re-fetch
-  /// whatever CloudKit pulled while the app ran. Called when the scene
-  /// becomes active; the launch-time activation is skipped in ContentView.
+  /// Re-reads the shared stores and the notes folders when the scene becomes
+  /// active (they also follow changes live; this catches anything missed while
+  /// the app was in the background). The launch-time activation is skipped in
+  /// ContentView.
   func refreshOnActivation() {
-    // Notes CloudKit is gated behind its feature: when off, don't observe or
-    // refresh the notes stores (persisted data is left untouched, so
-    // re-enabling restores it). SSH configs and device keys always refresh.
+    // Notes are gated behind their feature. SSH configs and device keys always
+    // refresh.
     if features.isEnabled(.notes) { notes.refreshOnActivation() }
     connectionStore.refreshOnActivation()
     if features.isEnabled(.authorizedKeys) { deviceKeys.refreshOnActivation() }

@@ -13,6 +13,7 @@
 		A10000000000000000000004 /* ShellMonitoring in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000003 /* ShellMonitoring */; };
 		A35000000000000000000002 /* ShellDatabaseEngines in Frameworks */ = {isa = PBXBuildFile; productRef = A35000000000000000000001 /* ShellDatabaseEngines */; };
 		D5C0DE000000000000000003 /* UpdateKit in Frameworks */ = {isa = PBXBuildFile; platformFilters = (macos, ); productRef = D5C0DE000000000000000002 /* UpdateKit */; };
+		9679FEAC025FAE0AB39B25A5 /* VaultKit in Frameworks */ = {isa = PBXBuildFile; productRef = 93C4E2596D30DACA6BC3EEA7 /* VaultKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -66,6 +67,7 @@
 				26C2D067302C066C008363F2 /* ShellKit in Frameworks */,
 				A35000000000000000000002 /* ShellDatabaseEngines in Frameworks */,
 				D5C0DE000000000000000003 /* UpdateKit in Frameworks */,
+				9679FEAC025FAE0AB39B25A5 /* VaultKit in Frameworks */,
 			);
 		};
 		000000000000000230000000 /* Frameworks */ = {
@@ -118,6 +120,7 @@
 				A35000000000000000000001 /* ShellDatabaseEngines */,
 				2611F6F93042CFF000E1213E /* MarkdownKit */,
 				D5C0DE000000000000000002 /* UpdateKit */,
+				93C4E2596D30DACA6BC3EEA7 /* VaultKit */,
 			);
 			productName = MyApp;
 			productReference = 000000000000000000000120 /* Shell.app */;
@@ -178,6 +181,7 @@
 				A200000000000000000000E1 /* XCLocalSwiftPackageReference "../Database" */,
 				2611F6F83042CFF000E1213E /* XCLocalSwiftPackageReference "../Markdown" */,
 				D5C0DE000000000000000001 /* XCLocalSwiftPackageReference "../UpdateKit" */,
+				ED38B9478C4FFC2CA253C5C2 /* XCLocalSwiftPackageReference "../Vault" */,
 			);
 			preferredProjectObjectVersion = 90;
 			productRefGroup = 000000000000000000000020 /* Products */;
@@ -368,7 +372,9 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				AUTOMATION_APPLE_EVENTS = NO;
-				CODE_SIGN_ENTITLEMENTS = Shell/Shell.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = "Shell/Shell-iOS.entitlements";
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = "Shell/Shell-iOS.entitlements";
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = Shell/Shell.entitlements;
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = AUCR797TMH;
@@ -389,6 +395,7 @@
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
+				INFOPLIST_KEY_UIBackgroundModes = remote-notification;
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
@@ -428,7 +435,9 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				AUTOMATION_APPLE_EVENTS = NO;
-				CODE_SIGN_ENTITLEMENTS = Shell/Shell.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = "Shell/Shell-iOS.entitlements";
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = "Shell/Shell-iOS.entitlements";
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = Shell/Shell.entitlements;
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = AUCR797TMH;
@@ -449,6 +458,7 @@
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
+				INFOPLIST_KEY_UIBackgroundModes = remote-notification;
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
@@ -579,6 +589,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../UpdateKit;
 		};
+		ED38B9478C4FFC2CA253C5C2 /* XCLocalSwiftPackageReference "../Vault" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../Vault;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -605,6 +619,11 @@
 		D5C0DE000000000000000002 /* UpdateKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = UpdateKit;
+		};
+		93C4E2596D30DACA6BC3EEA7 /* VaultKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = ED38B9478C4FFC2CA253C5C2 /* XCLocalSwiftPackageReference "../Vault" */;
+			productName = VaultKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

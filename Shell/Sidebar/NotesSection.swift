@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The Notes section: the saved notes, decrypted per visible row. Hidden
+/// The Notes section: the notes Shell shares with the Markdown app, read per visible row. Hidden
 /// entirely while the notes feature is off (this section's own gate), and its
 /// collapse state is local to this section.
 struct NotesSectionView: View {
@@ -18,6 +18,13 @@ struct NotesSectionView: View {
           NoteRow(note: note)
             .sidebarRow(.note(note.id))
             .contextMenu {
+              Button(note.isEncrypted ? "Decrypt Note" : "Encrypt Note") {
+                model.notes.setEncrypted(!note.isEncrypted, for: note.id)
+              }
+              Button(note.storedInICloud ? "Keep on This Device" : "Move to iCloud") {
+                model.notes.setICloudStorage(!note.storedInICloud, for: note.id)
+              }
+              Divider()
               Button("Delete Note", role: .destructive) {
                 model.deleteNote(note.id)
               }
@@ -59,11 +66,17 @@ private struct NoteRow: View {
           .truncationMode(.tail)
         Spacer()
         DetachReturnBadge(selection: .note(note.id))
+        if note.isEncrypted {
+          Image(systemName: "lock.fill")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .help("Encrypted with the key the v57 apps share")
+        }
         if note.storedInICloud {
           Image(systemName: "icloud.fill")
             .font(.caption2)
             .foregroundStyle(Color.blue)
-            .help("Stored in iCloud (encrypted)")
+            .help("In iCloud Drive, shared with Markdown")
             .transition(SidebarMotion.iconTransition)
         }
       }

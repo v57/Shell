@@ -1,55 +1,47 @@
 import Foundation
+import ShellDatabaseEngines
+import ShellKit
 
-/// Which database engine a connection talks to. Pure raw-value enum,
-/// persisted in the sidebar records and switchable in the new-connection
-/// form. New engines join `CaseIterable` plus the switches in
-/// `DatabaseSession`/`DatabaseConnectionStore`.
+/// Which database engine a connection talks to: every engine Database Pro's libraries have but DuckDB
+/// (DatabaseProKit, through ShellDatabaseEngines). Raw values are the shared records' engine names
+/// (`VaultDatabase.Engine`), so Database and Database Pro read the same connections.
 enum DatabaseEngine: String, Codable, CaseIterable, Identifiable {
-  case mongodb
-  case postgresql
-  case redis
+  case postgres
+  case mysql
+  case mariadb
+  case sqlserver
   case sqlite
+  case mongodb
+  case redis
+  case cassandra
+  case scylla
 
   var id: String { rawValue }
 
-  var displayName: String {
-    switch self {
-    case .mongodb: return "MongoDB"
-    case .postgresql: return "PostgreSQL"
-    case .redis: return "Redis"
-    case .sqlite: return "SQLite"
-    }
-  }
+  /// The engine in DatabaseProKit.
+  var kind: EngineKind { EngineKind(rawValue: rawValue) ?? .postgres }
+
+  var displayName: String { kind.displayName }
 
   /// Default network port, used to prefill the new-connection form when the
   /// engine changes. SQLite is file-based and has no port (the form hides it).
-  var defaultPort: UInt16 {
-    switch self {
-    case .mongodb: return 27017
-    case .postgresql: return 5432
-    case .redis: return 6379
-    case .sqlite: return 0
-    }
-  }
+  var defaultPort: UInt16 { UInt16(kind.defaultPort) }
 
   /// SF Symbol used in sidebar rows and the engine picker.
   var systemImage: String {
     switch self {
     case .mongodb: return "leaf.fill"
-    case .postgresql: return "elephant"
+    case .postgres: return "server.rack"
+    case .mysql, .mariadb: return "cylinder.split.1x2"
+    case .sqlserver: return "server.rack"
     case .redis: return "bolt.horizontal.fill"
     case .sqlite: return "internaldrive"
+    case .cassandra, .scylla: return "circle.hexagongrid"
     }
   }
 
-  /// Whether the engine is reachable on this platform. All four engines are
-  /// cross-platform — the Database package's C-driver XCFramework ships iOS
-  /// device + simulator slices and the SQLite engine uses the SDK's system
-  /// SQLite3 module, both present on macOS and iOS — so every engine is
-  /// available everywhere the app builds.
-  var isAvailable: Bool {
-    true
-  }
+  /// Every engine is pure Swift and runs on macOS and iOS.
+  var isAvailable: Bool { true }
 }
 
 /// A saved database connection. Pure value type: `Codable` (persistable,
@@ -79,6 +71,8 @@ struct DatabaseConnection: Identifiable, Codable, Hashable {
   /// Mongo: connect directly to the single server, bypassing topology
   /// discovery. Encoded as `?directConnection=true`.
   var directConnection: Bool
+  /// Encrypted connection (TLS), for hosted databases.
+  var useTLS: Bool = false
   /// Optional SSH config id when the connection is reached through an SSH
   /// tunnel. When set (and the engine is not a file-based SQLite DB) the
   /// engine connects to `127.0.0.1:<tunneledLocalPort>`, bridging to the
@@ -147,11 +141,16 @@ struct DatabaseConnection: Identifiable, Codable, Hashable {
     engine != .sqlite && sshConfigID != nil
   }
 
-  /// The remote target the SSH tunnel bridges to — the remote host's own
-  /// `localhost:<port>` (so a DB server on the SSH host's loopback is
-  /// reachable from the tunnel). Nil when no tunnel is needed.
-  var tunnelTarget: (host: String, port: Int)? {
+  /// Where the SSH tunnel connects on the far side: the SSH host's own
+  /// loopback when the database runs there (its address is local, or the
+  /// host's), else the database's address as the SSH host reaches it (a
+  /// server behind a bastion). Nil when no tunnel is needed.
+  func tunnelTarget(through config: SSHConfig) -> (host: String, port: Int)? {
     guard requiresTunnel else { return nil }
-    return ("127.0.0.1", Int(port))
+    let address = host.lowercased()
+    let onHost =
+      ["", "localhost", "127.0.0.1", "::1"].contains(address) || address == config.host.lowercased()
+      || (!config.name.isEmpty && address == config.name.lowercased())
+    return (onHost ? "127.0.0.1" : host, Int(port))
   }
 }

@@ -1,117 +1,131 @@
-import CryptoKit
 import Foundation
 import Observation
-import SwiftData
+import VaultKit
 
-/// Backs the sidebar's Notes list. Each note is a `NoteRecord` living in
-/// exactly one of two SwiftData stores:
-/// - **Local** (`cloudKitDatabase: .none`): stays on this device, encrypted
-///   with the Secure-Enclave-derived key (`NoteKeyID.device`).
-/// - **iCloud** (CloudKit-synced store, `iCloud.dev.v57.sh`): syncs across
-///   devices, encrypted with the iCloud Keychain key (`NoteKeyID.icloud`).
+/// Backs the sidebar's Notes list: Markdown files Shell shares with the Markdown app.
 ///
-/// ALL note content — title, subtitle, and text — is stored as separate
-/// AES-GCM ciphertexts, so CloudKit never sees plaintext note data (only
-/// `lastUpdate` and the key id, which are needed for sorting/fetching).
+/// - **iCloud** notes are the files in Markdown's iCloud Drive folder (`iCloud.dev.v57.md`): the notes the
+///   Markdown app shows, synced by iCloud Drive to every device.
+/// - **Local** notes are files in Shell's own folder, on this device only.
 ///
-/// **Lazy decryption**: the store exposes `NoteSummary` rows (no plaintext);
-/// views call `decryptedNote(id:)`, which decrypts on demand and caches.
-/// The sidebar's lazy List only materializes visible rows, so only visible
-/// cells decrypt; the editor decrypts content when opened. Nothing is
-/// decrypted eagerly at load.
+/// A note is a plain `.md` file or an encrypted `.mdenc` one (`EncryptedNote` in `../Vault`, sealed with the
+/// key the v57 apps share through iCloud Keychain), so Markdown opens Shell's notes and the reverse. New notes
+/// are encrypted. When two devices saved a note before seeing each other's version, iCloud Drive's copies are
+/// merged line by line (`NoteConflicts`).
+///
+/// Notes are read lazily (visible rows and the open editor), cached until the file changes. Edits are written
+/// 5 seconds after the last keystroke. A note whose file is still named "Untitled" takes its title as its
+/// file name when saved.
 @MainActor
 @Observable
 final class NotesStore {
-  /// A sidebar row: identifiers + the sort key, no plaintext.
+  /// A sidebar row: an id (stable while the app runs), the sort key and where the note lives.
   struct NoteSummary: Identifiable, Equatable {
     let id: UUID
     var lastUpdate: Date
     var storedInICloud: Bool
+    var isEncrypted: Bool = true
   }
 
-  /// Decrypted note contents, produced lazily by `decryptedNote(id:)`.
+  /// A note's text and the title and subtitle derived from it.
   struct DecryptedContents: Equatable {
     var title: String
     var subtitle: String?
     var text: String
   }
 
-  /// All notes (local + iCloud), sorted by last usage: most recently
-  /// updated first. Equal timestamps tie-break by id so the order is
-  /// deterministic across reloads (Dictionary iteration is not stable).
+  /// All notes (local + iCloud), most recently changed first.
   private(set) var notes: [NoteSummary] = []
 
-  /// The most recent encryption or persistence failure. Plaintext is never
-  /// used as a fallback.
+  /// The most recent read or write failure.
   var storageError: String?
 
-  /// Whether any note currently lives in iCloud.
+  /// Whether any note lives in iCloud.
   var hasICloudNotes: Bool { notes.contains { $0.storedInICloud } }
 
-  private let localContext: ModelContext
-  private let cloudContext: ModelContext?
-
-  // MARK: Test seam — hermetic keys. Production defaults resolve the real
-  // keychain keys; tests inject generated keys so the store logic runs on
-  // any machine (the real keychain needs an unlocked screen / iCloud
-  // session).
-  var deviceKeyProvider: () throws -> SymmetricKey = {
-    try SecureFileStore.symmetricKey(for: .notes)
-  }
-  var iCloudKeyProvider: () throws -> SymmetricKey = {
-    try ICloudNotesKey.loadOrCreate()
+  /// Whether new notes are encrypted (on unless turned off).
+  static let encryptsNewNotesKey = "encryptsNewNotes"
+  var encryptsNewNotes: Bool {
+    get { UserDefaults.standard.object(forKey: Self.encryptsNewNotesKey) as? Bool ?? true }
+    set { UserDefaults.standard.set(newValue, forKey: Self.encryptsNewNotesKey) }
   }
 
-  private var saveTasks: [UUID: Task<Void, Never>] = [:]
-  private var pendingText: [UUID: String] = [:]
-  private var decryptionCache: [UUID: DecryptedContents] = [:]
+  @ObservationIgnored let localFolder: URL
+  @ObservationIgnored private(set) var iCloudFolder: URL?
+  @ObservationIgnored private let keys: VaultKeyProvider
+  @ObservationIgnored private let bases: NoteBaseCache
+  @ObservationIgnored private var urls: [UUID: URL] = [:]
+  @ObservationIgnored private var cache: [UUID: (modified: Date, contents: DecryptedContents)] = [:]
+  @ObservationIgnored private var saveTasks: [UUID: Task<Void, Never>] = [:]
+  @ObservationIgnored private var pendingText: [UUID: String] = [:]
+  @ObservationIgnored private var presenters: [FolderPresenter] = []
 
-  /// - Parameter stores: the pre-built containers. Production callers get
-  ///   them from `NoteStores.make()`; tests from `NoteStores.makeTest()`.
-  ///   Containers MUST be created outside this init — a container created
-  ///   inside an @Observable init traps (SIGTRAP, `brk #0x1` ×2) on its
-  ///   first insert, so the old `NotesStore()` nil-branch is gone.
-  init(stores: NoteStores) {
-    localContext = stores.local.mainContext
-    cloudContext = stores.cloud?.mainContext
+  /// - Parameters:
+  ///   - localFolder: the folder of this device's notes.
+  ///   - iCloudFolder: Markdown's iCloud Drive folder; nil looks it up (off the main thread), or without iCloud
+  ///     leaves only local notes.
+  init(
+    localFolder: URL = NotesStore.defaultLocalFolder, iCloudFolder: URL? = nil, lookUpICloud: Bool = true,
+    keys: VaultKeyProvider = KeychainKeyProvider()
+  ) {
+    self.localFolder = localFolder
+    self.iCloudFolder = iCloudFolder
+    self.keys = keys
+    bases = NoteBaseCache(
+      directory: URL.cachesDirectory.appendingPathComponent("NoteBases", isDirectory: true), keys: keys)
+    try? FileManager.default.createDirectory(at: localFolder, withIntermediateDirectories: true)
+    watch(localFolder)
     reload()
+    if iCloudFolder == nil, lookUpICloud {
+      Task {
+        let folder = await Task.detached { Self.markdownICloudFolder() }.value
+        guard let folder else { return }
+        self.iCloudFolder = folder
+        self.watch(folder)
+        self.reload()
+      }
+    } else if let iCloudFolder {
+      watch(iCloudFolder)
+    }
+  }
+
+  nonisolated static var defaultLocalFolder: URL {
+    URL.applicationSupportDirectory
+      .appendingPathComponent(Bundle.main.bundleIdentifier ?? "Shell", isDirectory: true)
+      .appendingPathComponent("Notes", isDirectory: true)
+  }
+
+  /// Markdown's iCloud Drive notes folder, nil without iCloud Drive. Blocks on first use: call off the main
+  /// thread.
+  nonisolated static func markdownICloudFolder() -> URL? {
+    guard let container = FileManager.default.url(forUbiquityContainerIdentifier: VaultConfiguration.notesContainer)
+    else { return nil }
+    let documents = container.appendingPathComponent("Documents", isDirectory: true)
+    try? FileManager.default.createDirectory(at: documents, withIntermediateDirectories: true)
+    return documents
   }
 
   // MARK: - Reading
 
-  /// The title for a note: physical line one, else "Untitled". Derived at
-  /// save time and stored encrypted; decrypted on demand (cached).
   func title(for id: UUID) -> String {
     decryptedNote(id: id)?.title ?? "Untitled"
   }
 
-  /// Optional sidebar subtitle: physical line two only.
   func subtitle(for id: UUID) -> String? {
     decryptedNote(id: id)?.subtitle
   }
 
-  /// Lazy decryption — the only place ciphertext becomes plaintext. The
-  /// sidebar's List renders visible rows only, so this runs for visible
-  /// cells; results are cached per note until the note changes.
+  /// The note's text, read (and decrypted) on demand and cached until the file changes.
   func decryptedNote(id: UUID) -> DecryptedContents? {
-    if let cached = decryptionCache[id] { return cached }
-    guard let summary = notes.first(where: { $0.id == id }) else { return nil }
-    let context = summary.storedInICloud ? cloudContext : localContext
-    guard let context, let record = fetchRecord(id, in: context) else { return nil }
+    if let pending = pendingText[id] { return Self.contents(of: pending) }
+    guard let url = urls[id], let summary = notes.first(where: { $0.id == id }) else { return nil }
+    if let cached = cache[id], cached.modified == summary.lastUpdate { return cached.contents }
     do {
-      let key = try (summary.storedInICloud ? iCloudKeyProvider() : deviceKeyProvider())
-      let contents: DecryptedContents
-      if let plaintext = try NoteCrypto.decrypt(record: record, using: key) {
-        contents = DecryptedContents(
-          title: plaintext.title,
-          subtitle: plaintext.subtitle,
-          text: plaintext.text
-        )
-      } else {
-        // Empty note (no content ciphertext yet).
-        contents = DecryptedContents(title: "Untitled", subtitle: nil, text: "")
-      }
-      decryptionCache[id] = contents
+      NoteConflicts.resolveQuietly(at: url, bases: bases, keys: keys)
+      let text = try Self.read(url, keys: keys)
+      bases.setBase(text, for: url)
+      let contents = Self.contents(of: text)
+      cache[id] = (summary.lastUpdate, contents)
       return contents
     } catch {
       storageError = error.localizedDescription
@@ -119,216 +133,283 @@ final class NotesStore {
     }
   }
 
-  /// Whether a note has no meaningful content: its decrypted text is nil
-  /// (never-saved new note) or whitespace-only. Used to delete an empty note
-  /// when it's closed — a freshly created note that the user never typed
-  /// into shouldn't linger in the sidebar as "Untitled".
+  /// Whether a note has no text yet (a new note closed without typing is deleted).
   func isEmptyNote(_ id: UUID) -> Bool {
     guard let contents = decryptedNote(id: id) else { return true }
-    let trimmed = contents.text.trimmingCharacters(in: .whitespacesAndNewlines)
-    return trimmed.isEmpty
+    return contents.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
   }
 
   // MARK: - Editing
 
-  /// Creates a new empty note in the LOCAL store (device-bound key, always
-  /// available) and returns its summary. The caller selects it.
+  /// Creates an empty note (in iCloud when available, encrypted unless turned off) and returns it.
   @discardableResult
   func addNote() -> NoteSummary {
-    let record = NoteRecord(lastUpdate: Date(), keyId: NoteKeyID.device)
-    localContext.insert(record)
-    try? localContext.save()
+    let folder = iCloudFolder ?? localFolder
+    let encrypted = encryptsNewNotes
+    let url = Self.availableURL(named: "Untitled", encrypted: encrypted, in: folder)
+    do {
+      try Self.write("", to: url, keys: keys)
+    } catch {
+      storageError = error.localizedDescription
+    }
     reload()
-    return notes.first { $0.id == record.id } ?? NoteSummary(
-      id: record.id,
-      lastUpdate: record.lastUpdate,
-      storedInICloud: false
-    )
+    let id = id(for: url)
+    return notes.first { $0.id == id }
+      ?? NoteSummary(id: id, lastUpdate: .now, storedInICloud: folder == iCloudFolder, isEncrypted: encrypted)
   }
 
-  /// Deletes a note (from whichever store it lives in), cancelling any
-  /// pending autosave.
   func deleteNote(_ id: UUID) {
     saveTasks[id]?.cancel()
     saveTasks[id] = nil
     pendingText[id] = nil
-    decryptionCache.removeValue(forKey: id)
-    if let record = fetchRecord(id, in: localContext) {
-      localContext.delete(record)
-      try? localContext.save()
-    } else if let cloudContext, let record = fetchRecord(id, in: cloudContext) {
-      cloudContext.delete(record)
-      try? cloudContext.save()
+    cache[id] = nil
+    guard let url = urls[id] else { return }
+    var error: NSError?
+    NSFileCoordinator().coordinate(writingItemAt: url, options: .forDeleting, error: &error) { target in
+      try? FileManager.default.removeItem(at: target)
     }
+    if let error { storageError = error.localizedDescription }
+    urls[id] = nil
     reload()
   }
 
-  /// Replaces a note's text. The plaintext is cached immediately (so the
-  /// sidebar title follows typing) and persisted 5s after the last edit.
-  /// Unchanged text is a no-op: the editor repopulates its content when a
-  /// note opens, and treating that echo as an edit made every open bump
-  /// `lastUpdate` (resorting the sidebar) and re-encrypt + save the note.
+  /// Replaces a note's text: shown at once, written 5 seconds after the last edit. Unchanged text is a no-op
+  /// (the editor repopulates its content when a note opens).
   func updateText(_ text: String, for id: UUID) {
-    guard notes.contains(where: { $0.id == id }) else { return }
+    guard let index = notes.firstIndex(where: { $0.id == id }) else { return }
     if let current = decryptedNote(id: id), current.text == text { return }
-    decryptionCache[id] = DecryptedContents(
-      title: Self.title(for: text),
-      subtitle: Self.subtitle(for: text),
-      text: text
-    )
     pendingText[id] = text
-    // Bump the sort key immediately so the sidebar reorders while typing
-    // (the persisted date catches up when the autosave lands).
-    if let index = notes.firstIndex(where: { $0.id == id }) {
-      notes[index].lastUpdate = Date()
-      resortNotes()
-    }
-    scheduleSave(id, text: text)
-  }
-
-  // MARK: - Per-note storage location
-
-  /// Moves one note between the local and iCloud stores: decrypt with the
-  /// source key, re-encrypt with the destination key, insert into the
-  /// target store, delete from the source. Failures leave the note in
-  /// place and surface in `storageError`.
-  func setICloudStorage(_ inICloud: Bool, for id: UUID) {
-    guard let summary = notes.first(where: { $0.id == id }),
-          summary.storedInICloud != inICloud else { return }
-    do {
-      let sourceContext = summary.storedInICloud ? cloudContext : localContext
-      guard let sourceContext, let record = fetchRecord(id, in: sourceContext) else {
-        throw NotesSyncError.noteNotFound
-      }
-      guard let targetContext = inICloud ? cloudContext : localContext else {
-        storageError = "iCloud is unavailable. Sign in with your Apple Account, then try again."
-        return
-      }
-      let sourceKey = try (summary.storedInICloud ? iCloudKeyProvider() : deviceKeyProvider())
-      let targetKey = try (inICloud ? iCloudKeyProvider() : deviceKeyProvider())
-      let plaintext = try NoteCrypto.decrypt(record: record, using: sourceKey)
-
-      let targetRecord = NoteRecord(
-        id: record.id,
-        lastUpdate: Date(),
-        keyId: inICloud ? NoteKeyID.icloud : NoteKeyID.device
-      )
-      if let text = plaintext?.text {
-        let ciphers = try NoteCrypto.encrypt(text: text, using: targetKey)
-        targetRecord.titleCipher = ciphers.titleCipher
-        targetRecord.subtitleCipher = ciphers.subtitleCipher
-        targetRecord.contentCipher = ciphers.contentCipher
-      }
-      targetContext.insert(targetRecord)
-      try targetContext.save()
-      sourceContext.delete(record)
-      try sourceContext.save()
-      decryptionCache.removeValue(forKey: id)
-      storageError = nil
-      reload()
-    } catch {
-      storageError = error.localizedDescription
-      NSLog("NotesStore: could not move note to \(inICloud ? "iCloud" : "local") storage: \(error)")
-    }
-  }
-
-  // MARK: - Persistence
-
-  /// Writes every note with a pending edit immediately (scene change, quit).
-  func flush() {
-    for (id, task) in saveTasks {
-      task.cancel()
-      if let text = pendingText[id] {
-        save(id: id, text: text)
-      }
-    }
-    saveTasks.removeAll()
-  }
-
-  /// Re-fetches both stores — the no-push sync trigger. Called when the
-  /// scene becomes active so notes changed on another device (synced by
-  /// the CloudKit store while the app runs) appear promptly.
-  func refreshOnActivation() {
-    reload()
-  }
-
-  private func scheduleSave(_ id: UUID, text: String) {
+    notes[index].lastUpdate = .now
+    resort()
     saveTasks[id]?.cancel()
     saveTasks[id] = Task { [weak self] in
       try? await Task.sleep(for: .seconds(5))
       guard !Task.isCancelled else { return }
-      self?.save(id: id, text: text)
+      self?.save(id)
     }
   }
 
-  private func save(id: UUID, text: String) {
-    guard let summary = notes.first(where: { $0.id == id }) else { return }
+  // MARK: - Location and encryption
+
+  /// Moves a note between iCloud (Markdown's folder) and this device.
+  func setICloudStorage(_ inICloud: Bool, for id: UUID) {
+    guard let url = urls[id], let summary = notes.first(where: { $0.id == id }), summary.storedInICloud != inICloud
+    else { return }
+    guard let folder = inICloud ? iCloudFolder : localFolder else {
+      storageError = NotesSyncError.iCloudUnavailable.localizedDescription
+      return
+    }
+    save(id)
+    move(id, from: url, to: Self.availableURL(named: url.deletingPathExtension().lastPathComponent,
+                                              encrypted: NoteFiles.isEncrypted(url), in: folder))
+  }
+
+  /// Encrypts a note (`.mdenc`) or decrypts it to a plain `.md` file.
+  func setEncrypted(_ encrypted: Bool, for id: UUID) {
+    guard let url = urls[id], NoteFiles.isEncrypted(url) != encrypted else { return }
+    save(id)
     do {
-      let context = summary.storedInICloud ? cloudContext : localContext
-      guard let context, let record = fetchRecord(id, in: context) else {
-        throw NotesSyncError.noteNotFound
+      let text = try Self.read(url, keys: keys)
+      let target = Self.availableURL(
+        named: url.deletingPathExtension().lastPathComponent, encrypted: encrypted, in: url.deletingLastPathComponent())
+      try Self.write(text, to: target, keys: keys)
+      var error: NSError?
+      NSFileCoordinator().coordinate(writingItemAt: url, options: .forDeleting, error: &error) { old in
+        try? FileManager.default.removeItem(at: old)
       }
-      let key = try (summary.storedInICloud ? iCloudKeyProvider() : deviceKeyProvider())
-      let ciphers = try NoteCrypto.encrypt(text: text, using: key)
-      record.titleCipher = ciphers.titleCipher
-      record.subtitleCipher = ciphers.subtitleCipher
-      record.contentCipher = ciphers.contentCipher
-      record.lastUpdate = Date()
-      try context.save()
-      pendingText[id] = nil
-      if let index = notes.firstIndex(where: { $0.id == id }) {
-        notes[index].lastUpdate = record.lastUpdate
-        resortNotes()
-      }
-      storageError = nil
+      bases.moveBase(from: url, to: target)
+      rebind(id, to: target)
     } catch {
       storageError = error.localizedDescription
-      NSLog("NotesStore: could not save note: \(error)")
     }
+    reload()
   }
 
-  private func fetchRecord(_ id: UUID, in context: ModelContext) -> NoteRecord? {
-    var descriptor = FetchDescriptor<NoteRecord>(predicate: #Predicate { $0.id == id })
-    descriptor.fetchLimit = 1
-    return try? context.fetch(descriptor).first
+  // MARK: - Persistence
+
+  /// Writes every pending edit now (scene change, quit).
+  func flush() {
+    for id in Array(pendingText.keys) { save(id) }
   }
 
-  /// Re-reads both stores, merging by id (same-id conflict: newer wins).
-  private func reload() {
-    var byID: [UUID: NoteSummary] = [:]
-    let localRecords = (try? localContext.fetch(FetchDescriptor<NoteRecord>())) ?? []
-    for record in localRecords {
-      byID[record.id] = NoteSummary(id: record.id, lastUpdate: record.lastUpdate, storedInICloud: false)
+  /// Re-reads the folders (iCloud Drive brought changes, another app wrote).
+  func refreshOnActivation() {
+    reload()
+  }
+
+  private func save(_ id: UUID) {
+    saveTasks[id]?.cancel()
+    saveTasks[id] = nil
+    guard let text = pendingText.removeValue(forKey: id), var url = urls[id] else { return }
+    do {
+      try Self.write(text, to: url, keys: keys)
+      bases.setBase(text, for: url)
+      // A note still named "Untitled" takes its title as its name, as Markdown shows names.
+      let title = Self.title(for: text)
+      if url.deletingPathExtension().lastPathComponent.hasPrefix("Untitled"), title != "Untitled" {
+        let target = Self.availableURL(
+          named: Self.fileName(for: title), encrypted: NoteFiles.isEncrypted(url), in: url.deletingLastPathComponent())
+        move(id, from: url, to: target)
+        url = target
+      }
+      cache[id] = nil
+      storageError = nil
+    } catch {
+      pendingText[id] = text
+      storageError = error.localizedDescription
     }
-    if let cloudContext {
-      let cloudRecords = (try? cloudContext.fetch(FetchDescriptor<NoteRecord>())) ?? []
-      for record in cloudRecords {
-        let summary = NoteSummary(id: record.id, lastUpdate: record.lastUpdate, storedInICloud: true)
-        if let existing = byID[record.id] {
-          if summary.lastUpdate > existing.lastUpdate { byID[record.id] = summary }
-        } else {
-          byID[record.id] = summary
-        }
+    reload()
+  }
+
+  private func move(_ id: UUID, from url: URL, to target: URL) {
+    var error: NSError?
+    let coordinator = NSFileCoordinator()
+    coordinator.coordinate(writingItemAt: url, options: .forMoving, writingItemAt: target, options: .forReplacing,
+                           error: &error) { from, to in
+      do {
+        try FileManager.default.moveItem(at: from, to: to)
+        coordinator.item(at: from, didMoveTo: to)
+      } catch {
+        self.storageError = error.localizedDescription
       }
     }
-    notes = Array(byID.values)
-    resortNotes()
+    if let error {
+      storageError = error.localizedDescription
+      return
+    }
+    bases.moveBase(from: url, to: target)
+    rebind(id, to: target)
+    reload()
   }
 
-  /// Sorts `notes` by last usage: most recently updated first, equal
-  /// timestamps tie-broken by id (stable, deterministic — Dictionary
-  /// iteration order is not).
-  private func resortNotes() {
+  // MARK: - Listing
+
+  /// Re-lists both folders, keeping each file's id.
+  private func reload() {
+    var found: [NoteSummary] = []
+    var seen: [UUID: URL] = [:]
+    for (folder, inICloud) in [(localFolder, false)] + (iCloudFolder.map { [($0, true)] } ?? []) {
+      for url in Self.noteFiles(in: folder) {
+        let id = id(for: url)
+        seen[id] = url
+        let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+        let lastUpdate = pendingText[id] != nil ? (notes.first { $0.id == id }?.lastUpdate ?? modified) : modified
+        found.append(NoteSummary(id: id, lastUpdate: lastUpdate, storedInICloud: inICloud, isEncrypted: NoteFiles.isEncrypted(url)))
+      }
+    }
+    urls = seen
+    notes = found
+    resort()
+  }
+
+  private func resort() {
     notes.sort { a, b in
       if a.lastUpdate == b.lastUpdate { return a.id.uuidString < b.id.uuidString }
       return a.lastUpdate > b.lastUpdate
     }
   }
 
-  // MARK: - Title/subtitle derivation (also used at save time by NoteCrypto)
-  // Display-only derivation: a leading markdown prefix on the physical line is
-  // stripped so sidebar labels read cleanly, but the stored note text is never
-  // mutated. Supported prefixes (each including the single following space):
+  @ObservationIgnored private var idsByPath: [String: UUID] = [:]
+
+  private func id(for url: URL) -> UUID {
+    let path = url.standardizedFileURL.path
+    if let id = idsByPath[path] { return id }
+    let id = UUID()
+    idsByPath[path] = id
+    return id
+  }
+
+  private func rebind(_ id: UUID, to url: URL) {
+    if let old = urls[id] { idsByPath[old.standardizedFileURL.path] = nil }
+    idsByPath[url.standardizedFileURL.path] = id
+    urls[id] = url
+  }
+
+  /// The note files under a folder (subfolders too), iCloud placeholders of notes not downloaded yet included
+  /// (their download starts).
+  nonisolated private static func noteFiles(in folder: URL) -> [URL] {
+    let fileManager = FileManager.default
+    guard let enumerator = fileManager.enumerator(at: folder, includingPropertiesForKeys: [.isDirectoryKey]) else {
+      return []
+    }
+    var files: [URL] = []
+    for case let url as URL in enumerator {
+      var name = url.lastPathComponent
+      var file = url
+      if name.hasPrefix("."), name.hasSuffix(".icloud") {
+        name = String(name.dropFirst().dropLast(".icloud".count))
+        file = url.deletingLastPathComponent().appendingPathComponent(name)
+        try? fileManager.startDownloadingUbiquitousItem(at: file)
+      } else if name.hasPrefix(".") {
+        if (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true { enumerator.skipDescendants() }
+        continue
+      }
+      let ext = (name as NSString).pathExtension.lowercased()
+      if ext == "md" || ext == "markdown" || ext == EncryptedNote.fileExtension { files.append(file) }
+    }
+    return files
+  }
+
+  // MARK: - Files
+
+  nonisolated private static func read(_ url: URL, keys: VaultKeyProvider) throws -> String {
+    var result: Result<String, Error> = .failure(CocoaError(.fileReadUnknown))
+    var error: NSError?
+    NSFileCoordinator().coordinate(readingItemAt: url, options: [], error: &error) { url in
+      result = Result {
+        let data = try Data(contentsOf: url)
+        if NoteFiles.isEncrypted(url) { return data.isEmpty ? "" : try EncryptedNote.open(data, keys: keys) }
+        return String(decoding: data, as: UTF8.self)
+      }
+    }
+    if let error { throw error }
+    return try result.get()
+  }
+
+  nonisolated private static func write(_ text: String, to url: URL, keys: VaultKeyProvider) throws {
+    let data = NoteFiles.isEncrypted(url) ? try EncryptedNote.seal(text, keys: keys) : Data(text.utf8)
+    var writeError: Error?
+    var error: NSError?
+    NSFileCoordinator().coordinate(writingItemAt: url, options: .forReplacing, error: &error) { target in
+      do { try data.write(to: target, options: .atomic) } catch { writeError = error }
+    }
+    if let failure = error ?? writeError { throw failure }
+  }
+
+  private static func availableURL(named base: String, encrypted: Bool, in folder: URL) -> URL {
+    let ext = encrypted ? EncryptedNote.fileExtension : "md"
+    var url = folder.appendingPathComponent(base).appendingPathExtension(ext)
+    var number = 2
+    while FileManager.default.fileExists(atPath: url.path) {
+      url = folder.appendingPathComponent("\(base) \(number)").appendingPathExtension(ext)
+      number += 1
+    }
+    return url
+  }
+
+  /// A file name for a title: no slashes or colons, at most 60 characters.
+  static func fileName(for title: String) -> String {
+    let cleaned = title.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
+      .trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: ".")))
+    return cleaned.isEmpty ? "Untitled" : String(cleaned.prefix(60))
+  }
+
+  private func watch(_ folder: URL) {
+    let presenter = FolderPresenter(url: folder) { [weak self] in
+      Task { @MainActor in self?.reload() }
+    }
+    NSFileCoordinator.addFilePresenter(presenter)
+    presenters.append(presenter)
+  }
+
+  // MARK: - Title/subtitle derivation
+
+  static func contents(of text: String) -> DecryptedContents {
+    DecryptedContents(title: title(for: text), subtitle: subtitle(for: text), text: text)
+  }
+
+  // Display-only derivation: a leading markdown prefix on the physical line is stripped so sidebar labels read
+  // cleanly, but the note text is never changed. Supported prefixes (each with the single following space):
   // ATX heading '#{1,6} ', list bullet '- ' / '* ' / '+ ', blockquote '> '.
 
   static func title(for text: String) -> String {
@@ -344,10 +425,6 @@ final class NotesStore {
     return derived.isEmpty ? nil : derived
   }
 
-  /// Strips exactly one leading markdown prefix from a physical line: an ATX
-  /// heading `#` (one to six hashes) or a list-bullet / blockquote marker
-  /// (`- `, `* `, `+ `, `> `), each including the single space that follows the
-  /// marker. No text beyond the prefix is touched.
   private static func stripMarkdownPrefix(_ line: String) -> String {
     guard !line.isEmpty else { return line }
     if line.first == "#" {
@@ -357,9 +434,7 @@ final class NotesStore {
         hashCount += 1
       }
       let spaceIndex = line.index(line.startIndex, offsetBy: hashCount)
-      if (1...6).contains(hashCount),
-         spaceIndex < line.endIndex,
-         line[spaceIndex] == " " {
+      if (1...6).contains(hashCount), spaceIndex < line.endIndex, line[spaceIndex] == " " {
         return String(line[line.index(after: spaceIndex)...])
       }
       return line
@@ -381,16 +456,41 @@ final class NotesStore {
       .split(separator: "\n", omittingEmptySubsequences: false)
       .map(String.init)
   }
+}
 
-  // MARK: - Locations
+/// Note file helpers shared with the Markdown app's conventions.
+enum NoteFiles {
+  nonisolated static func isEncrypted(_ url: URL) -> Bool { EncryptedNote.isEncrypted(url) }
+}
 
-  /// The app's iCloud container URL, or nil when iCloud is unavailable
-  /// (no Apple Account / iCloud Drive disabled). Used only as a fast probe
-  /// to skip DEBUG CloudKit schema initialization when there is no iCloud
-  /// session — the CloudKit-synced stores themselves are created
-  /// unconditionally (CloudKit database sync works without iCloud Drive).
-  static func iCloudContainerURL() -> URL? {
-    FileManager.default.url(forUbiquityContainerIdentifier: nil)
+extension NoteConflicts {
+  /// Merges iCloud Drive's conflicting versions of a note, if any, against the last version this device saw.
+  nonisolated static func resolveQuietly(at url: URL, bases: NoteBaseCache, keys: VaultKeyProvider) {
+    guard (try? url.resourceValues(forKeys: [.isUbiquitousItemKey]))?.isUbiquitousItem == true else { return }
+    if let merged = try? resolve(at: url, base: bases.base(for: url), keys: keys) {
+      bases.setBase(merged, for: url)
+    }
+  }
+}
+
+/// Reports changes in a folder (another app's write, iCloud Drive's sync).
+final class FolderPresenter: NSObject, NSFilePresenter, @unchecked Sendable {
+  let presentedItemURL: URL?
+  let presentedItemOperationQueue = OperationQueue()
+  private let changed: @Sendable () -> Void
+
+  init(url: URL, changed: @escaping @Sendable () -> Void) {
+    presentedItemURL = url
+    self.changed = changed
+    presentedItemOperationQueue.maxConcurrentOperationCount = 1
+  }
+
+  func presentedSubitemDidChange(at url: URL) { changed() }
+  func presentedItemDidChange() { changed() }
+  func presentedSubitem(at oldURL: URL, didMoveTo newURL: URL) { changed() }
+  func accommodatePresentedSubitemDeletion(at url: URL, completionHandler: @escaping (Error?) -> Void) {
+    changed()
+    completionHandler(nil)
   }
 }
 
@@ -401,7 +501,7 @@ enum NotesSyncError: LocalizedError {
   var errorDescription: String? {
     switch self {
     case .iCloudUnavailable:
-      return "iCloud is unavailable. Sign in with your Apple Account, then try again."
+      return "iCloud Drive is unavailable. Sign in with your Apple Account and turn on iCloud Drive, then try again."
     case .noteNotFound:
       return "The note no longer exists."
     }

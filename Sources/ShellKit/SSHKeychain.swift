@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import Security
+import VaultKit
 
 /// Generates and stores the app's SSH identities in the Secure Enclave.
 ///
@@ -41,12 +42,14 @@ public nonisolated enum SSHKeychain {
   
   // MARK: - Identity keys (Secure Enclave)
   
-  /// Returns the app's Secure Enclave key, creating it on first use.
+  /// Returns this device's Secure Enclave key, the one every v57 app shares (`VaultIdentity`): Database
+  /// and Database Pro log in with it too. A key Shell made before the vault is handed over to it, so servers
+  /// that already trust it keep working.
   public static func loadOrCreateDefaultKey() throws -> SecureEnclave.P256.Signing.PrivateKey {
-    try loadOrCreateKey(
-      account: defaultKeyAccount,
-      label: "Shell SSH key (Secure Enclave P-256)"
-    )
+    if !VaultIdentity.exists, let legacy = try? load(account: defaultKeyAccount) {
+      try? VaultIdentity.adopt(legacy)
+    }
+    return try VaultIdentity.key()
   }
   
   private static func loadOrCreateKey(
@@ -92,18 +95,44 @@ public nonisolated enum SSHKeychain {
   }
 
   // MARK: - Per-connection passwords
-  
+
+  // SSH hosts' and databases' passwords (`ssh-password-<id>`, `db-password-<id>`) live in the shared
+  // keychain group, named after the shared record (`VaultSecrets`), so Database and Database Pro use them
+  // and iCloud Keychain brings them to the user's other devices. Ones saved before move there when read.
+
   public static func savePassword(_ password: String, account: String) throws {
+    if let id = sharedID(account) {
+      try VaultSecrets.setPassword(password, for: id)
+      delete(account: account)
+      return
+    }
     try save(Data(password.utf8), account: account, label: "Shell SSH password")
   }
-  
+
   public static func loadPassword(account: String) throws -> String? {
+    if let id = sharedID(account) {
+      if let shared = VaultSecrets.password(for: id) { return shared }
+      guard let data = try load(account: account), let legacy = String(data: data, encoding: .utf8) else {
+        return nil
+      }
+      if (try? VaultSecrets.setPassword(legacy, for: id)) != nil { delete(account: account) }
+      return legacy
+    }
     guard let data = try load(account: account) else { return nil }
     return String(data: data, encoding: .utf8)
   }
-  
+
   public static func deletePassword(account: String) {
+    if let id = sharedID(account) { try? VaultSecrets.setPassword(nil, for: id) }
     delete(account: account)
+  }
+
+  /// The shared record a password account belongs to.
+  private static func sharedID(_ account: String) -> String? {
+    for prefix in ["ssh-password-", "db-password-"] where account.hasPrefix(prefix) {
+      return String(account.dropFirst(prefix.count))
+    }
+    return nil
   }
   
   // MARK: - Internals

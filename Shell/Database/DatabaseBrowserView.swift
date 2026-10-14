@@ -143,7 +143,8 @@ struct DatabaseBrowserView: View {
     switch session.connection.engine {
     case .redis: return "key.fill"
     case .mongodb: return "shippingbox"
-    case .postgresql, .sqlite: return "tablecells"
+    case .cassandra, .scylla: return "square.grid.3x3"
+    case .postgres, .mysql, .mariadb, .sqlserver, .sqlite: return "tablecells"
     }
   }
 

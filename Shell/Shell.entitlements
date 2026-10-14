@@ -2,17 +2,36 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- iCloud.dev.v57: the vault's CloudKit container (SSH hosts, database connections, device keys the v57
+	     apps share). iCloud.dev.v57.md: Markdown's iCloud Drive folder, where the notes Shell and Markdown share
+	     live. -->
 	<key>com.apple.developer.icloud-container-identifiers</key>
 	<array>
-		<string>iCloud.dev.v57.sh</string>
+		<string>iCloud.dev.v57</string>
+		<string>iCloud.dev.v57.md</string>
 	</array>
 	<key>com.apple.developer.icloud-services</key>
 	<array>
 		<string>CloudKit</string>
+		<string>CloudDocuments</string>
 	</array>
+	<key>com.apple.developer.ubiquity-container-identifiers</key>
+	<array>
+		<string>iCloud.dev.v57.md</string>
+	</array>
+	<!-- The vault's store, in the app group container. -->
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>$(TeamIdentifierPrefix)dev.v57</string>
+	</array>
+	<!-- Shell's own items first (the default group: history, smart actions), then the group the v57 apps share
+	     (vault keys, passwords, the device's SSH key). -->
 	<key>keychain-access-groups</key>
 	<array>
 		<string>$(AppIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+		<string>$(AppIdentifierPrefix)dev.v57.shared</string>
 	</array>
+	<key>com.apple.developer.aps-environment</key>
+	<string>development</string>
 </dict>
 </plist>

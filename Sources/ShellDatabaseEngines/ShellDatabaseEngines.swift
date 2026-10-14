@@ -1,8 +1,7 @@
-// Aggregate target that links the Database package engine libraries
-// (MongoDB / PostgreSQL / Redis / SQLite). All four engines are
-// cross-platform — the C-driver XCFrameworks ship iOS device +
-// simulator slices, and SQLite uses the SDK's system SQLite3 module present
-// on both macOS and iOS — so every engine resolves on both platforms. This
-// module is the seam the Shell app links to make the DB engines available at
-// the app boundary.
+// The database engines behind the sidebar's connections: DatabasePro's
+// engine-neutral DatabaseProKit (PostgreSQL, MySQL, MariaDB, SQL Server, SQLite,
+// MongoDB, Redis, Cassandra, ScyllaDB), pure Swift on macOS and iOS. DuckDB stays
+// in Database Pro (an optional download there), so Shell doesn't offer it.
+@_exported import DatabaseProKit
+
 public enum ShellDatabaseEngines {}

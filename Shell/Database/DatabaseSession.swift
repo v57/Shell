@@ -1,11 +1,7 @@
 import Foundation
 import Observation
+import ShellDatabaseEngines
 import ShellKit
-
-import MongoDB
-import PostgreSQL
-import Redis
-import SQLite
 
 /// A single display field of a database document/row/value.
 struct DatabaseField: Identifiable {
@@ -25,11 +21,9 @@ struct DatabaseDocument: Identifiable {
 }
 
 /// Live connection lifecycle wrapper for a saved `DatabaseConnection`, powered
-/// by the Database package's engine libraries (MongoConnection /
-/// PostgresConnection / RedisConnection / SQLiteConnection). All four engines
-/// build on both macOS and iOS, so this class references every engine module
-/// unconditionally (guarded only by `canImport` so the package stays buildable
-/// if an engine is ever dropped).
+/// by Database Pro's engine-neutral DatabaseProKit (every engine but DuckDB,
+/// pure Swift on macOS and iOS). Shell keeps its own SSH tunnel; the engine
+/// connects to its local end.
 @MainActor
 @Observable
 final class DatabaseSession {
@@ -38,13 +32,6 @@ final class DatabaseSession {
     case connecting
     case connected
     case failed(String)
-  }
-
-  private enum LiveConnection {
-    case mongodb(MongoConnection)
-    case postgresql(PostgresConnection)
-    case redis(RedisConnection)
-    case sqlite(SQLiteConnection)
   }
 
   let connection: DatabaseConnection
@@ -68,7 +55,11 @@ final class DatabaseSession {
   /// Each engine's default database/namespace to select after connect.
   private var defaultDatabase: String = ""
 
-  private var live: LiveConnection?
+  private var live: (any DatabaseProKit.DatabaseSession)?
+  /// The tree node of each listed database (nil: the engine has no database level, like SQLite).
+  private var databaseNodes: [String: TreeNode?] = [:]
+  /// The object behind each listed collection/table/view name.
+  private var objects: [String: ObjectRef] = [:]
 
   init(connection: DatabaseConnection, sshConfigStore: SSHConfigStore? = nil) {
     self.connection = connection
@@ -123,36 +114,23 @@ final class DatabaseSession {
 
     defer { if case .connecting = state { state = .connected } }
     do {
-      switch connection.engine {
-      case .mongodb:
-        let conn = MongoConnection(config: mongoConfig(password: password, host: effectiveHost, port: effectivePort))
-        try await conn.connect()
-        live = .mongodb(conn)
-        databases = try await conn.listDatabases()
-        defaultDatabase = connection.database ?? databases.first ?? "admin"
-        await select(database: defaultDatabase)
-      case .postgresql:
-        let conn = PostgresConnection(config: postgresConfig(password: password, host: effectiveHost, port: effectivePort))
-        try await conn.connect()
-        live = .postgresql(conn)
-        databases = try await conn.listDatabases()
-        defaultDatabase = connection.database ?? databases.first ?? "postgres"
-        await select(database: defaultDatabase)
-      case .redis:
-        let conn = RedisConnection(config: redisConfig(password: password, host: effectiveHost, port: effectivePort))
-        try await conn.connect()
-        live = .redis(conn)
-        databases = try await conn.listDatabases().map { String($0) }
-        defaultDatabase = connection.database ?? databases.first ?? "0"
-        await select(database: defaultDatabase)
-      case .sqlite:
-        let conn = SQLiteConnection(config: sqliteConfig())
-        try await conn.connect()
-        live = .sqlite(conn)
-        databases = try await conn.listDatabases()
-        defaultDatabase = connection.database ?? databases.first ?? "main"
-        await select(database: defaultDatabase)
+      let profile = profile(host: effectiveHost, port: effectivePort)
+      let (session, _) = try await Connector.connect(profile, credentials: Credentials(password: password))
+      live = session
+      let top = try await session.children(of: nil)
+      let containers: Set<TreeNode.Kind> = [.database, .keyspace, .redisDatabase]
+      if top.contains(where: { containers.contains($0.kind) }) {
+        let listed = top.filter { containers.contains($0.kind) }
+        databases = listed.map(\.title)
+        databaseNodes = Dictionary(listed.map { ($0.title, Optional($0)) }) { first, _ in first }
+      } else {
+        // No database level (SQLite): the file is the one database.
+        let name = connection.displayName
+        databases = [name]
+        databaseNodes = [name: nil]
       }
+      defaultDatabase = connection.database.flatMap { databases.contains($0) ? $0 : nil } ?? databases.first ?? ""
+      await select(database: defaultDatabase)
       statusMessage = "Connected to \(connection.displayName)"
     } catch {
       // A failed driver connect must not leak the SSH tunnel opened for it.
@@ -160,6 +138,22 @@ final class DatabaseSession {
       state = .failed(error.localizedDescription)
       statusMessage = "Connection failed: \(error.localizedDescription)"
     }
+  }
+
+  /// The DatabaseProKit profile for this connection, aimed at `host:port` (the tunnel's local end when
+  /// tunneled). Shell opens its own SSH tunnel, so the profile has none.
+  private func profile(host: String, port: UInt16) -> ConnectionProfile {
+    var options: [String: String] = [:]
+    if let authSource = connection.authSource, !authSource.isEmpty { options["authSource"] = authSource }
+    if connection.directConnection || connection.requiresTunnel { options["directConnection"] = "true" }
+    let isFile = connection.engine == .sqlite
+    return ConnectionProfile(
+      id: connection.id, name: connection.displayName, engine: connection.engine.kind,
+      host: isFile ? "" : host, port: isFile ? nil : Int(port), user: connection.username ?? "",
+      database: connection.database ?? "", filePath: isFile ? connection.host : "", options: options,
+      useTLS: connection.useTLS,
+      // Through a tunnel the certificate names the server, not 127.0.0.1.
+      allowUntrustedCertificate: connection.requiresTunnel)
   }
 
   func disconnect() async {
@@ -173,13 +167,10 @@ final class DatabaseSession {
       statusMessage = ""
       return
     }
-    switch live {
-    case .mongodb(let c): await c.disconnect()
-    case .postgresql(let c): await c.disconnect()
-    case .redis(let c): await c.disconnect()
-    case .sqlite(let c): await c.disconnect()
-    }
+    await live.close()
     self.live = nil
+    databaseNodes = [:]
+    objects = [:]
     state = .disconnected
     databases = []
     selectedDatabase = nil
@@ -194,67 +185,61 @@ final class DatabaseSession {
 
   /// Switches the active database and reloads its collections/tables/keys.
   func select(database: String) async {
-    guard isConnected, let live else { return }
-    do {
-      switch live {
-      case .mongodb(let c): try await c.use(database: database)
-      case .postgresql(let c): try await c.use(database: database)
-      case .redis(let c): try await c.use(database: database)
-      case .sqlite(let c): try await c.use(database: database)
-      }
-      selectedDatabase = database
-      await loadCollections()
-    } catch {
-      statusMessage = error.localizedDescription
-    }
+    guard live != nil, databaseNodes.keys.contains(database) else { return }
+    selectedDatabase = database
+    await loadCollections()
   }
 
-  /// Loads the collections/tables/keys for the selected database.
+  /// Lists the selected database's collections, tables and views (through schemas and folders).
   private func loadCollections() async {
-    guard isConnected, let live, let selectedDatabase else { return }
+    guard let live, let selectedDatabase, let node = databaseNodes[selectedDatabase] else { return }
     do {
-      switch live {
-      case .mongodb(let c):
-        collections = try await c.listCollections()
-      case .postgresql(let c):
-        collections = try await c.listTables()
-      case .redis(let c):
-        collections = try await c.listKeys()
-      case .sqlite(let c):
-        collections = try await c.listTables()
+      var found: [ObjectRef] = []
+      try await collect(node, in: live, into: &found, depth: 0)
+      objects = [:]
+      collections = found.map { ref in
+        let name = Self.displayName(of: ref)
+        objects[name] = ref
+        return name
       }
     } catch {
       statusMessage = error.localizedDescription
     }
   }
 
-  /// Selects a collection/table/key and loads its documents/rows/entry.
+  private func collect(
+    _ node: TreeNode?, in session: any DatabaseProKit.DatabaseSession, into found: inout [ObjectRef], depth: Int
+  ) async throws {
+    for child in try await session.children(of: node) {
+      if let ref = child.ref {
+        found.append(ref)
+      } else if child.hasChildren, depth < 3 {
+        try await collect(child, in: session, into: &found, depth: depth + 1)
+      }
+    }
+  }
+
+  /// `name`, or `schema.name` outside the default schema.
+  private static func displayName(of ref: ObjectRef) -> String {
+    guard let schema = ref.schema, !["public", "dbo", "main", ""].contains(schema) else { return ref.name }
+    return "\(schema).\(ref.name)"
+  }
+
+  /// Selects a collection/table/key space and loads its first 100 documents/rows/keys.
   func selectCollection(_ name: String) async {
-    guard isConnected, let live else { return }
+    guard isConnected, let live, let ref = objects[name] else { return }
     selectedCollection = name
     do {
-      switch live {
-      case .mongodb(let c):
-        let docs = try await c.find(in: name, limit: 100)
-        documents = docs.map(Self.document(fromMongo:))
-        statusMessage = "\(documents.count) document(s) in \(name)"
-      case .postgresql(let pg):
-        let rows = try await pg.select(sql: "SELECT * FROM \(name)", limit: 100)
-        documents = rows.map(Self.document(fromPostgres:))
-        statusMessage = "\(rows.count) row(s) in \(name)"
-      case .sqlite(let sqlite):
-        let rows = try await sqlite.select(
-          sql: "SELECT * FROM \(Self.quotedIdentifier(name)) LIMIT 100")
-        documents = rows.map(Self.document(fromSQLite:))
-        statusMessage = "\(rows.count) row(s) in \(name)"
-      case .redis(let redis):
-        let entry = try await redis.entry(for: name)
-        documents = [Self.document(fromRedis: entry)]
-        selectedDocument = documents.first
-        statusMessage = "\(entry.typeName) · TTL \(entry.ttl)s"
-        return
+      let page = try await live.browse(BrowseRequest(ref: ref, limit: 100))
+      let names = page.fields.map(\.name)
+      documents = page.records.map { record in
+        let keys = names.isEmpty ? record.values.keys.sorted() : names
+        return DatabaseDocument(
+          id: record.id,
+          fields: keys.map { DatabaseField(name: $0, value: record.values[$0]?.displayText ?? "") })
       }
       selectedDocument = documents.first
+      statusMessage = "\(documents.count) item(s) in \(name)"
     } catch {
       statusMessage = error.localizedDescription
     }
@@ -266,9 +251,7 @@ final class DatabaseSession {
   /// since the reachable port is a locally-bound tunnel listener. Also the
   /// local bind host for the forward.
   private static let tunnelHost = "127.0.0.1"
-  /// The remote target the tunnel bridges to — the SSH host's own loopback,
-  /// where the DB server is expected to listen.
-  private static let tunnelTargetHost = "127.0.0.1"
+
 
   /// Establishes an SSH local port-forward to the remote DB's
   /// `localhost:<port>` and resolves to the bound LOCAL port the driver should
@@ -308,7 +291,9 @@ final class DatabaseSession {
       let gate = TunnelContinuationGate()
       session.onConnected = { [weak self] in
         guard let self else { return }
-        self.openTunnel(session: session, continuation: continuation, gate: gate)
+        self.openTunnel(
+          session: session, target: self.connection.tunnelTarget(through: config)?.host ?? "127.0.0.1",
+          continuation: continuation, gate: gate)
       }
       session.onTerminated = { message in
         gate.resume(continuation) { $0.resume(throwing: DatabaseConnectionTunnelError.tunnelFailed(message)) }
@@ -321,13 +306,14 @@ final class DatabaseSession {
   /// bound local port back to the awaiting continuation.
   private func openTunnel(
     session: SSHSession,
+    target: String,
     continuation: CheckedContinuation<Int, Error>,
     gate: TunnelContinuationGate
   ) {
     session.startLocalPortForward(
       bindHost: Self.tunnelHost,
       bindPort: 0,
-      targetHost: Self.tunnelTargetHost,
+      targetHost: target,
       targetPort: Int(connection.port)
     ) { result in
       DispatchQueue.main.async { [gate, continuation] in
@@ -355,105 +341,6 @@ final class DatabaseSession {
     sshSession?.stopLocalPortForward()
     sshSession?.close()
     sshSession = nil
-  }
-
-  // MARK: - Engine config builders
-
-  private func mongoConfig(password: String?, host: String, port: UInt16) -> ConnectionConfig {
-    ConnectionConfig(
-      name: connection.name,
-      host: host,
-      port: port,
-      username: connection.username,
-      password: password,
-      authSource: connection.authSource,
-      defaultDatabase: connection.database,
-      directConnection: connection.directConnection
-    )
-  }
-
-  private func postgresConfig(password: String?, host: String, port: UInt16) -> PostgresConnectionConfig {
-    PostgresConnectionConfig(
-      name: connection.name,
-      host: host,
-      port: port,
-      username: connection.username,
-      password: password,
-      defaultDatabase: connection.database
-    )
-  }
-
-  private func redisConfig(password: String?, host: String, port: UInt16) -> RedisConnectionConfig {
-    RedisConnectionConfig(
-      name: connection.name,
-      host: host,
-      port: port,
-      username: connection.username,
-      password: password,
-      databaseIndex: connection.database.flatMap { Int($0.trimmingCharacters(in: .whitespaces)) }
-    )
-  }
-
-  private func sqliteConfig() -> SQLiteConnectionConfig {
-    SQLiteConnectionConfig(name: connection.name, filePath: connection.host)
-  }
-
-  // MARK: - Conversion to normalized docs
-
-  private static func document(fromMongo doc: Document) -> DatabaseDocument {
-    // `doc` is the Database package's BSON `Document` (BSONDocument). Render
-    // it as single-line extended JSON for a stable, readable dump.
-    let json = BSONSupport.json(doc)
-    return DatabaseDocument(id: json, fields: [DatabaseField(name: "document", value: json)])
-  }
-
-  private static func document(fromPostgres row: PostgresRowData) -> DatabaseDocument {
-    let fields = row.values.map { DatabaseField(name: $0.key, value: display($0.value)) }
-    return DatabaseDocument(id: "\(row.id)", fields: fields)
-  }
-
-  private static func document(fromSQLite row: SQLiteRowData) -> DatabaseDocument {
-    let fields = row.values.map { DatabaseField(name: $0.key, value: display($0.value)) }
-    return DatabaseDocument(id: "\(row.id)", fields: fields)
-  }
-
-  private static func document(fromRedis entry: RedisKeyEntry) -> DatabaseDocument {
-    DatabaseDocument(
-      id: entry.key,
-      fields: [
-        DatabaseField(name: "key", value: entry.key),
-        DatabaseField(name: "type", value: entry.typeName),
-        DatabaseField(name: "value", value: entry.displayValue),
-        DatabaseField(name: "ttl", value: "\(entry.ttl)"),
-      ])
-  }
-
-  private static func display(_ value: PostgresValue) -> String {
-    switch value {
-    case .null: return "NULL"
-    case .bool(let b): return b ? "true" : "false"
-    case .int(let n): return "\(n)"
-    case .double(let d): return "\(d)"
-    case .string(let s): return s
-    case .date(let date): return "\(date)"
-    case .json(let s): return s
-    case .bytes(let bytes): return bytes.map { String(format: "%02x", $0) }.joined()
-    }
-  }
-
-  private static func display(_ value: SQLiteValue) -> String {
-    switch value {
-    case .null: return "NULL"
-    case .int(let n): return "\(n)"
-    case .double(let d): return "\(d)"
-    case .string(let s): return s
-    case .bytes(let bytes): return bytes.map { String(format: "%02x", $0) }.joined()
-    }
-  }
-
-  /// Double-quotes a SQLite identifier, escaping embedded quotes.
-  private static func quotedIdentifier(_ name: String) -> String {
-    "\"" + name.replacingOccurrences(of: "\"", with: "\"\"") + "\""
   }
 }
 

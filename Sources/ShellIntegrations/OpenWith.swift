@@ -9,8 +9,13 @@ import Foundation
 /// layer free of AppKit/NSWorkspace dependencies.
 public enum OpenWithKind: String, CaseIterable, Hashable, Codable, Sendable {
   case xcode
+  /// The v57 apps: Code (an editor), Markdown (notes and docs), Git, Dev (localization, icons, releases).
+  case code
   case zed
   case vscode
+  case markdown
+  case git
+  case dev
   case finder
 }
 
@@ -21,23 +26,32 @@ public enum OpenWithKind: String, CaseIterable, Hashable, Codable, Sendable {
 ///
 /// Project classification (matches the smart-action Xcode/SwiftIntegration
 /// gates):
-/// - Xcode project (`.xcodeproj` / `.xcworkspace`) → Xcode + the generic apps
-/// - SwiftPM package (`Package.swift`, no Xcode project) → Xcode + generic apps
-/// - Anything else → just the generic editors + Finder
+/// - Xcode project (`.xcodeproj` / `.xcworkspace`) or SwiftPM package
+///   (`Package.swift`) → Xcode, and Dev (localization, icons, releases)
+/// - Markdown files at the top → Markdown
+/// - A git repository (`.git`) → Git
+/// - Every directory → the editors (Code, Zed, VS Code) and Finder
 public enum OpenWithResolver {
+  /// The editors offered for every directory.
+  public static let editorKinds: [OpenWithKind] = [.code, .zed, .vscode]
   /// The generic apps offered for every directory.
-  public static let genericKinds: [OpenWithKind] = [.zed, .vscode, .finder]
+  public static let genericKinds: [OpenWithKind] = editorKinds + [.finder]
 
-  public static func kinds(for files: [DirectoryEntry]) -> [OpenWithKind] {
+  /// - Parameter isRepository: whether the directory holds `.git` (the listing skips dotfiles).
+  public static func kinds(for files: [DirectoryEntry], isRepository: Bool = false) -> [OpenWithKind] {
     // `isAvailable` is irrelevant here (we're classifying a directory, not
     // checking the toolchain); `relevance` only inspects the file names.
     let hasXcodeProject = XcodeIntegration(isAvailable: true).relevance(files: files)
     let hasPackage = SwiftIntegration(isAvailable: true).relevance(files: files)
+    let isApple = hasXcodeProject || hasPackage
+    let hasMarkdown = files.contains { !$0.isDirectory && ["md", "markdown"].contains(($0.name as NSString).pathExtension.lowercased()) }
     var result: [OpenWithKind] = []
-    if hasXcodeProject || hasPackage {
-      result.append(.xcode)
-    }
-    result.append(contentsOf: genericKinds)
+    if isApple { result.append(.xcode) }
+    result.append(contentsOf: editorKinds)
+    if hasMarkdown { result.append(.markdown) }
+    if isRepository { result.append(.git) }
+    if isApple { result.append(.dev) }
+    result.append(.finder)
     return result
   }
 }

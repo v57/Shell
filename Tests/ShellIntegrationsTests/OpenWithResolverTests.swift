@@ -8,7 +8,7 @@ struct OpenWithResolverTests {
       DirectoryEntry(name: "MyApp.xcodeproj", isDirectory: true),
       DirectoryEntry(name: "Sources", isDirectory: true),
     ]
-    #expect(OpenWithResolver.kinds(for: files) == [.xcode, .zed, .vscode, .finder])
+    #expect(OpenWithResolver.kinds(for: files) == [.xcode, .code, .zed, .vscode, .dev, .finder])
   }
 
   @Test func workspaceOffersXcodeFirst() {
@@ -21,16 +21,16 @@ struct OpenWithResolverTests {
       DirectoryEntry(name: "Package.swift", isDirectory: false),
       DirectoryEntry(name: "Sources", isDirectory: true),
     ]
-    #expect(OpenWithResolver.kinds(for: files) == [.xcode, .zed, .vscode, .finder])
+    #expect(OpenWithResolver.kinds(for: files) == [.xcode, .code, .zed, .vscode, .dev, .finder])
   }
 
   @Test func plainDirectoryOffersOnlyGenericApps() {
     let files = [DirectoryEntry(name: "notes.txt", isDirectory: false)]
-    #expect(OpenWithResolver.kinds(for: files) == [.zed, .vscode, .finder])
+    #expect(OpenWithResolver.kinds(for: files) == [.code, .zed, .vscode, .finder])
   }
 
   @Test func emptyDirectoryOffersOnlyGenericApps() {
-    #expect(OpenWithResolver.kinds(for: []) == [.zed, .vscode, .finder])
+    #expect(OpenWithResolver.kinds(for: []) == [.code, .zed, .vscode, .finder])
   }
 
   @Test func packageWithXcodeProjectOffersXcodeOnce() {
@@ -38,6 +38,21 @@ struct OpenWithResolverTests {
       DirectoryEntry(name: "Package.swift", isDirectory: false),
       DirectoryEntry(name: "App.xcodeproj", isDirectory: true),
     ]
-    #expect(OpenWithResolver.kinds(for: files) == [.xcode, .zed, .vscode, .finder])
+    #expect(OpenWithResolver.kinds(for: files) == [.xcode, .code, .zed, .vscode, .dev, .finder])
+  }
+
+  @Test func markdownFilesOfferMarkdown() {
+    let files = [DirectoryEntry(name: "README.md", isDirectory: false)]
+    #expect(OpenWithResolver.kinds(for: files) == [.code, .zed, .vscode, .markdown, .finder])
+  }
+
+  @Test func repositoryOffersGit() {
+    let files = [
+      DirectoryEntry(name: "Package.swift", isDirectory: false),
+      DirectoryEntry(name: "README.md", isDirectory: false),
+    ]
+    #expect(
+      OpenWithResolver.kinds(for: files, isRepository: true)
+        == [.xcode, .code, .zed, .vscode, .markdown, .git, .dev, .finder])
   }
 }

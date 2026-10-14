@@ -4,13 +4,15 @@ Modern terminal for your needs. Pure SwiftUI, no electron-type bullshit
 - View status in the sidebar
 - Persistent sessions using `screen` or `tmux`
 - Built in SSH, keys stored in secure enclave, saved connections synced
-  through iCloud (encrypted)
+  through iCloud (encrypted) and shared with Database and Database Pro
+- Database connections for PostgreSQL, MySQL, MariaDB, SQL Server, SQLite,
+  MongoDB, Redis, Cassandra and ScyllaDB, attached to the SSH host they run on
 - Authorized-keys manager: add or remove keys on any server's
   `~/.ssh/authorized_keys` (local or over SSH), with every device's public
   key published through iCloud
-- Device-bound encrypted quick notes (per-note iCloud option: a note can
-  live in iCloud, synced via SwiftData/CloudKit and encrypted with a key
-  stored in iCloud Keychain)
+- Notes shared with the Markdown app (its iCloud Drive folder), encrypted per
+  note
+- Open the current folder in Code, Markdown, Git or Dev
 - Encrypted local session history with replay
 - Quick actions `cmd + r`
 
@@ -27,40 +29,34 @@ The `ShellKit` library is cross-platform; the local-pty pieces
 (`LocalPTYTransport` + its `.zsh`/`.tmux`/`.screen` presets) are compiled
 only on macOS.
 
+## Shared data (the vault)
+SSH hosts, database connections, accepted host keys and every device's public
+key are the records the v57 apps share through the vault (`../Vault`, see its
+README): one encrypted store per device in the app group container, synced
+through iCloud (`iCloud.dev.v57`). Database and Database Pro list the same
+connections and tunnel through the same hosts; a change in any app shows in
+the others at once. Passwords are iCloud Keychain items in the shared keychain
+group. The SSH key is this device's Secure Enclave key, shared by the v57 apps
+on it (`VaultIdentity`), so it goes into `authorized_keys` once per device.
+
+A database connection without an SSH host of its own attaches to the saved
+host whose address is the database's server, and shows under it.
+
+Hosts and connections saved by builds before the vault (`SSHConfigs.store`)
+are imported once.
+
 ## Notes storage
-Each note is a SwiftData `NoteRecord` living in one of two stores, chosen
-per note with the cloud button in the note editor's toolbar (iCloud notes
-show a cloud badge in the sidebar):
+Notes are Markdown files shared with the Markdown app:
 
-- **Local** (default): a plain on-disk SwiftData store
-  (`cloudKitDatabase: .none`), encrypted with the device-bound Secure
-  Enclave key.
-- **iCloud**: a CloudKit-synced SwiftData store (`iCloud.dev.v57.sh`),
-  encrypted with a 256-bit key stored in **iCloud Keychain** — every device
-  signed into the same Apple Account can open the same notes. Requires the
-  CloudKit capability (enabled in `Shell.entitlements`; no push/background
-  modes — changes arrive at launch/activation).
+- **iCloud**: Markdown's iCloud Drive folder (`iCloud.dev.v57.md`), the notes
+  Markdown lists, synced by iCloud Drive.
+- **Local**: Shell's own folder, on this device only.
 
-Everything about a note — title, subtitle, and text — is stored as separate
-AES-GCM ciphertexts, so CloudKit never sees plaintext note data (only
-`lastUpdate` and the key id). Decryption is lazy: sidebar rows decrypt only
-when visible (the List renders visible cells only), and the editor decrypts
-content when opened.
-
-## SSH config sync
-Saved SSH connections live in a dedicated CloudKit-synced SwiftData store
-(`SSHConfigs`, same container, same no-push/launch-and-activation sync as
-notes). Each connection is one record whose entire config (name, host, user,
-port, auth method, flags) travels as a single AES-GCM ciphertext — CloudKit
-never sees plaintext connection data. The key is the iCloud Keychain sync
-key (usable on every device); if it can't be served, a device-bound
-Secure Enclave key is used instead and the record simply won't decrypt
-elsewhere.
-
-Saved PASSWORDS never sync: they stay in the device Keychain, so a synced
-connection keeps its auth method but needs the password entered once on
-each device. Configs saved by the old UserDefaults store are imported once
-on first launch.
+A note is a plain `.md` file or an encrypted `.mdenc` one (sealed with the
+vault key, so only the v57 apps on the user's devices read it). New notes are
+encrypted; the lock button in the editor's toolbar switches a note either way,
+the cloud button moves it between iCloud and this device. Versions two devices
+saved apart are merged line by line.
 
 ## Authorized keys
 The `key.2.on.ring` button (Local and Remote sidebar headers, before the +
@@ -68,9 +64,8 @@ button) opens the authorized-keys panel for a target machine — this Mac
 (direct file access) or the selected SSH connection (headless SSH exec,
 saved password used automatically, host key trusted on first use).
 
-Every device publishes its Secure Enclave identity key's public line to
-iCloud (`DeviceKeyRecord`, plaintext by design — public keys are meant to
-be shared; same CloudKit store, same no-push sync). The panel lists this
+Every device publishes its Secure Enclave identity key's public line to the
+vault (`VaultDeviceKey`, synced through iCloud). The panel lists this
 device's keys plus every other device's published keys, each with its
 status on the target's `~/.ssh/authorized_keys`: added keys can be
 removed, keys not yet added can be added — one click each.
@@ -158,6 +153,6 @@ final class SerialTransport: TerminalTransport {
 ## Notes
 - The terminal's child environment always gets `TERM=xterm-256color` (inherited terminfo variables are stripped) so curses apps like vim/nano behave.
 - SSH identity keys are Secure Enclave P-256 keys: device-bound, no export, no backup — install their public keys (`⌘⇧C`) on the servers you connect to.
-- Notes and local history use domain-separated AES-256-GCM keys derived through a device-bound Secure Enclave P-256 agreement key. They are available only while the device is unlocked.
-- Run a normally code-signed build: the data-protection Keychain requires Shell's Keychain Sharing entitlement, so an app built with `CODE_SIGNING_ALLOWED=NO` cannot save encrypted notes or history.
+- Local history uses domain-separated AES-256-GCM keys derived through a device-bound Secure Enclave P-256 agreement key. It is available only while the device is unlocked.
+- Run a normally code-signed build: the data-protection Keychain requires Shell's Keychain Sharing entitlement, so an app built with `CODE_SIGNING_ALLOWED=NO` cannot save encrypted history or share the vault.
 - Touch ID per-sign gating is intentionally not used (the Secure Enclave ACL can't be satisfied by swift-nio-ssh's signing path on this OS); a single Secure Enclave identity key is used instead.

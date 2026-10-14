@@ -1,171 +1,84 @@
-import CryptoKit
 import Foundation
 import Observation
-import SwiftData
-import SwiftUI
 import ShellKit
+import SwiftUI
+import VaultKit
 
-/// Persists the sidebar's saved database connections, synced through iCloud —
-/// the same shape as `SSHConfigStore`.
+/// The sidebar's saved database connections: the ones the v57 apps share through the vault (`../Vault`).
 ///
-/// Every connection is one `DatabaseConnectionRecord` in the app's shared
-/// CloudKit-synced store (alongside the SSH-config and device-key records).
-/// The store is created unconditionally; with no iCloud account it behaves as
-/// a plain local store and syncs silently when an account appears. No push or
-/// background modes: changes arrive at launch/activation
-/// (`refreshOnActivation`), exactly like SSH configs and notes.
+/// Each `DatabaseConnection` is a `VaultDatabase`, so Database and Database Pro list the same connections,
+/// iCloud syncs them, and the list updates live when another app or device changes one. Fields Shell doesn't
+/// show (Database Pro's options, colors, read-only flag) stay in the shared record.
 ///
-/// The whole connection travels as ONE AES-GCM ciphertext (engine, name, host,
-/// port, database, username, auth) — CloudKit never sees plaintext connection
-/// data. Decryption is eager but bounded (a handful of connections).
-///
-/// Saved PASSWORDS never sync — they stay in the device Keychain under
-/// `DatabaseConnection.passwordAccount` (`db-password-<id>`), so a connection
-/// synced to another device keeps its auth method but requires the password to
-/// be entered there. The password is set explicitly via `save(_:password:)` and
-/// is never read back into the `DatabaseConnection` value.
+/// A connection without an SSH host of its own attaches to the saved host whose address is the database's
+/// server (`VaultDatabase.tunnelHost`), so a database on a machine you SSH into shows under that host and
+/// connects through it. Passwords are `VaultSecrets` items named after the connection.
 @MainActor
 @Observable
 final class DatabaseConnectionStore {
-  /// Decrypted connections in sidebar order.
+  /// Connections in sidebar order (engines Shell has; DuckDB stays in Database Pro).
   private(set) var all: [DatabaseConnection] = []
-  /// The most recent encryption/persistence failure.
+  /// The most recent persistence failure.
   var storageError: String?
 
-  private let context: ModelContext
+  @ObservationIgnored private let vault: Vault
+  @ObservationIgnored private var observer: VaultChangeObserver?
+  /// Connections whose SSH host was picked automatically (none saved), so saving keeps it automatic.
+  @ObservationIgnored private var automaticHosts: [UUID: UUID] = [:]
 
-  // MARK: Test seam — hermetic keys (the real keychain needs an unlocked
-  // screen / iCloud session; tests inject generated keys).
-  var iCloudKeyProvider: () throws -> SymmetricKey = {
-    try SSHConfigKey.key(for: SSHConfigKey.icloud)
-  }
-  var deviceKeyProvider: () throws -> SymmetricKey = {
-    try SSHConfigKey.key(for: SSHConfigKey.device)
-  }
-
-  init(
-    container: ModelContainer? = nil,
-    iCloudKeyProvider: (() throws -> SymmetricKey)? = nil,
-    deviceKeyProvider: (() throws -> SymmetricKey)? = nil
-  ) {
-    // The CloudKit schema (all models) must be initialized before ANY
-    // CloudKit-configured store opens. Idempotent; DEBUG-only.
-    NoteStores.initializeCloudKitSchemaForDevelopment()
-    let resolved: ModelContainer
-    if let container {
-      resolved = container
-    } else if let made = try? DatabaseConnectionStore.makeContainer() {
-      resolved = made
-    } else {
-      // CloudKit setup failed — degrade to a plain local store rather than
-      // crash. The plain SQLite store is effectively infallible.
-      resolved = try! ModelContainer(
-        for: DatabaseConnectionRecord.self,
-        configurations: ModelConfiguration("DatabaseConnections", cloudKitDatabase: .none)
-      )
-    }
-    context = resolved.mainContext
-    if let iCloudKeyProvider { self.iCloudKeyProvider = iCloudKeyProvider }
-    if let deviceKeyProvider { self.deviceKeyProvider = deviceKeyProvider }
+  init(vault: Vault = .shared) {
+    self.vault = vault
     reload()
-  }
-
-  /// The shared store: creates a container over the database-connection model
-  /// ONLY, for callers that want a standalone container. Production code uses
-  /// the app-wide shared container (which also holds the SSH/device-key
-  /// models) instead — see `AppModel.sharedSSHContainer`.
-  static func makeContainer() throws -> ModelContainer {
-    try ModelContainer(
-      for: DatabaseConnectionRecord.self,
-      configurations: ModelConfiguration(
-        "DatabaseConnections",
-        cloudKitDatabase: .private("iCloud.dev.v57.sh")
-      )
-    )
-  }
-
-  /// Hermetic test container: plain SQLite in a temp directory, using a config
-  /// name that never collides with the app's real store.
-  static func makeTestContainer(in directory: URL) throws -> ModelContainer {
-    try ModelContainer(
-      for: DatabaseConnectionRecord.self,
-      configurations: ModelConfiguration(
-        "DatabaseConnectionsTests",
-        url: directory.appendingPathComponent("db.store"),
-        cloudKitDatabase: .none
-      )
-    )
-  }
-
-  // MARK: - Persistence API (same shape as SSHConfigStore)
-
-  /// Saves a connection and, when a non-nil `password` is provided, writes it
-  /// to the device Keychain. Passing `nil` leaves the existing password alone
-  /// (edit-without-touching-credentials); pass an explicit empty string to
-  /// clear it.
-  func save(_ connection: DatabaseConnection, password: String? = nil) {
-    do {
-      let (keyId, cipher) = try seal(connection)
-      if let record = fetch(connection.id) {
-        record.payloadCipher = cipher
-        record.keyId = keyId
-        record.engine = connection.engine.rawValue
-        record.updatedAt = Date()
-      } else {
-        context.insert(DatabaseConnectionRecord(
-          id: connection.id,
-          order: nextOrder(),
-          keyId: keyId,
-          engine: connection.engine,
-          updatedAt: Date(),
-          payloadCipher: cipher
-        ))
-      }
-      try context.save()
-      storageError = nil
-    } catch {
-      storageError = error.localizedDescription
-      NSLog("DatabaseConnectionStore: could not save connection: \(error)")
+    observer = VaultChangeObserver { [weak self] in
+      Task { @MainActor in self?.refreshOnActivation() }
     }
-    // Persist the credential to the Keychain only after the record write
-    // succeeded, so a removal never leaves an orphan secret behind.
+  }
+
+  // MARK: - Persistence API
+
+  /// Saves a connection and, when a non-nil `password` is provided, the password. Passing nil leaves the
+  /// saved password alone; an empty string clears it.
+  func save(_ connection: DatabaseConnection, password: String? = nil) {
+    let id = connection.id.uuidString
+    var record =
+      vault.databases.first { $0.id == id }
+      ?? VaultDatabase(
+        id: id, engine: connection.engine.rawValue, port: Int(connection.port), order: nextOrder())
+    Self.copy(connection, into: &record, automaticHost: automaticHosts[connection.id])
+    vault.save(record)
+    storageError = vault.error
     if let password {
       do {
         try SSHKeychain.savePassword(password, account: connection.passwordAccount)
       } catch {
         storageError = error.localizedDescription
-        NSLog("DatabaseConnectionStore: could not save a connection's password: \(error)")
       }
     }
     reload()
   }
 
   func remove(_ id: UUID) {
-    if let record = fetch(id) {
-      context.delete(record)
-      try? context.save()
-    }
+    vault.perform { try $0.delete(id: id.uuidString) }
     SSHKeychain.deletePassword(account: "db-password-\(id.uuidString)")
     reload()
   }
 
-  /// Replaces the whole list's order (drag-to-reorder). `updatedAt` is not
-  /// bumped — reordering is not a content change.
+  /// Replaces the whole list's order (drag-to-reorder).
   func reorder(_ list: [DatabaseConnection]) {
-    for (index, connection) in list.enumerated() {
-      if let record = fetch(connection.id) {
+    let records = vault.databases
+    vault.perform { store in
+      for (index, connection) in list.enumerated() {
+        guard var record = records.first(where: { $0.id == connection.id.uuidString }), record.order != index
+        else { continue }
         record.order = index
+        try store.save(record)
       }
     }
-    try? context.save()
     reload()
   }
 
-  /// Moves a subset of `all` (the local, no-SSH-tunnel connections shown in
-  /// the Local section) and reassigns `order` for the whole list, leaving
-  /// every tunneled connection in its slot. The displayed Local slice is a
-  /// filtered view of `all`, so the subset indices are mapped back into the
-  /// full array before rewriting orders.
+  /// Moves a subset of `all` (the local, no-SSH-tunnel connections shown in the Local section) and reassigns
+  /// the order of the whole list, leaving every tunneled connection in its slot.
   func moveLocalSubset(from source: IndexSet, to destination: Int) {
     guard !source.isEmpty else { return }
     let indexes = all.indices.filter { all[$0].sshConfigID == nil }
@@ -178,15 +91,15 @@ final class DatabaseConnectionStore {
     reorder(reordered)
   }
 
-  /// Re-fetches + re-decrypts — the no-push sync trigger (called when the
-  /// scene becomes active, like notes/SSH).
+  /// Re-reads the shared connections (another app or device changed them).
   func refreshOnActivation() {
+    vault.reload()
     reload()
   }
 
   // MARK: - Password access
 
-  /// The saved password for a connection (from the Keychain), nil when unset.
+  /// The saved password for a connection, nil when unset.
   func password(for connection: DatabaseConnection) -> String? {
     (try? SSHKeychain.loadPassword(account: connection.passwordAccount)) ?? nil
   }
@@ -196,58 +109,55 @@ final class DatabaseConnectionStore {
     SSHKeychain.deletePassword(account: connection.passwordAccount)
   }
 
-  // MARK: - Encryption
-
-  /// Seals a connection, preferring the iCloud Keychain sync key and falling
-  /// back to the device-bound key when the sync key cannot be served.
-  private func seal(_ connection: DatabaseConnection) throws -> (keyId: String, cipher: Data) {
-    let data = try JSONEncoder().encode(connection)
-    if let key = try? iCloudKeyProvider() {
-      return (SSHConfigKey.icloud, try SecureFileStore.seal(data, using: key))
-    }
-    let key = try deviceKeyProvider()
-    return (SSHConfigKey.device, try SecureFileStore.seal(data, using: key))
-  }
-
-  private func unseal(_ record: DatabaseConnectionRecord) throws -> DatabaseConnection? {
-    guard let payloadCipher = record.payloadCipher else { return nil }
-    let key = try (record.keyId == SSHConfigKey.device ? deviceKeyProvider() : iCloudKeyProvider())
-    let data = try SecureFileStore.open(payloadCipher, using: key)
-    return try JSONDecoder().decode(DatabaseConnection.self, from: data)
-  }
-
-  // MARK: - Store access
+  // MARK: - Mapping
 
   private func reload() {
-    let records = (try? context.fetch(
-      FetchDescriptor<DatabaseConnectionRecord>(sortBy: [SortDescriptor(\.order)])
-    )) ?? []
-    var connections: [DatabaseConnection] = []
-    for record in records {
-      do {
-        if let connection = try unseal(record) {
-          connections.append(connection)
-        }
-      } catch {
-        // Undecryptable here (e.g. a device-keyed record synced from another
-        // machine) — skip it rather than break the list.
-        NSLog("DatabaseConnectionStore: could not decrypt a connection record: \(error)")
-      }
+    let hosts = vault.hosts
+    var automatic: [UUID: UUID] = [:]
+    all = vault.databases.compactMap { record in
+      guard let connection = Self.connection(from: record, hosts: hosts) else { return nil }
+      if record.sshHostID == nil, let host = connection.sshConfigID { automatic[connection.id] = host }
+      return connection
     }
-    all = connections
+    automaticHosts = automatic
   }
 
-  private func fetch(_ id: UUID) -> DatabaseConnectionRecord? {
-    // Plain fetch + Swift filter instead of a #Predicate (same rationale as
-    // SSHConfigStore: SwiftData's predicate machinery proved unstable in the
-    // hosted test runner). The list is bounded, so filtering in Swift costs
-    // nothing.
-    let records = (try? context.fetch(FetchDescriptor<DatabaseConnectionRecord>())) ?? []
-    return records.first { $0.id == id }
+  static func connection(from record: VaultDatabase, hosts: [VaultHost]) -> DatabaseConnection? {
+    guard let engine = DatabaseEngine(rawValue: record.engine) else { return nil }
+    let host = record.tunnelHost(in: hosts)
+    var connection = DatabaseConnection(
+      id: UUID(uuidString: record.id) ?? stableUUID(record.id), engine: engine, name: record.name,
+      host: engine == .sqlite ? record.filePath : record.host, port: UInt16(clamping: max(record.port, 0)),
+      database: record.database.isEmpty ? nil : record.database, username: record.user.isEmpty ? nil : record.user,
+      authSource: record.options["authSource"], directConnection: record.options["directConnection"] == "true",
+      sshConfigID: host.map { UUID(uuidString: $0.id) ?? stableUUID($0.id) })
+    connection.useTLS = record.useTLS
+    return connection
+  }
+
+  /// Writes a connection over its shared record. An SSH host that was only picked automatically stays
+  /// unsaved, so it follows the host list.
+  static func copy(_ connection: DatabaseConnection, into record: inout VaultDatabase, automaticHost: UUID?) {
+    record.name = connection.name
+    record.engine = connection.engine.rawValue
+    if connection.engine == .sqlite {
+      record.filePath = connection.host
+      record.host = ""
+    } else {
+      record.host = connection.host
+    }
+    record.port = Int(connection.port)
+    record.database = connection.database ?? ""
+    record.user = connection.username ?? ""
+    record.options["authSource"] = connection.authSource?.isEmpty == false ? connection.authSource : nil
+    record.options["directConnection"] = connection.directConnection ? "true" : nil
+    record.useTLS = connection.useTLS
+    if connection.sshConfigID != automaticHost {
+      record.sshHostID = connection.sshConfigID?.uuidString
+    }
   }
 
   private func nextOrder() -> Int {
-    let orders = (try? context.fetch(FetchDescriptor<DatabaseConnectionRecord>()).map(\.order)) ?? []
-    return (orders.max() ?? -1) + 1
+    (vault.databases.map(\.order).max() ?? -1) + 1
   }
 }

@@ -1,124 +1,37 @@
 import CryptoKit
 import Foundation
-import SwiftData
 import Testing
 import ShellKit
+import VaultKit
 @testable import Shell
 
-/// Hermetic tests for the iCloud device-key registry. Shared container +
-/// `.serialized`, exactly like `SSHConfigStoreTests` (the hosted-runner
-/// SwiftData container churn trap applies to every store).
-@Suite(.serialized)
+/// The key registry, on a throwaway vault (publishing this device's key needs the Secure Enclave and the
+/// shared keychain, so it's covered by running the app).
 struct DeviceKeyStoreTests {
-  private static let directory: URL = {
-    FileManager.default.temporaryDirectory
-      .appendingPathComponent("device-keys-suite-\(UUID().uuidString)", isDirectory: true)
+  /// A real `authorized_keys` line for a software P-256 key.
+  private let keyLine: String = {
+    let point = P256.Signing.PrivateKey().publicKey.x963Representation
+    let blob = SSHWire.string("ecdsa-sha2-nistp256") + SSHWire.string("nistp256") + SSHWire.string(point)
+    return "ecdsa-sha2-nistp256 \(blob.base64EncodedString()) YubiKey"
   }()
-  private static let sharedContainer: ModelContainer = {
-    // swiftlint:disable:next force_try
-    try! DeviceKeyStore.makeTestContainer(in: directory)
-  }()
-
-  /// A fresh Secure Enclave key (no keychain persistence → works even with
-  /// a locked screen; the public key is all the store needs).
-  private static func freshKey() throws -> SecureEnclave.P256.Signing.PrivateKey {
-    try SecureEnclave.P256.Signing.PrivateKey()
-  }
-
-  private func makeStore(keyProvider: @escaping () throws -> SecureEnclave.P256.Signing.PrivateKey) -> DeviceKeyStore {
-    DeviceKeyStore(container: Self.sharedContainer, defaultKeyProvider: keyProvider)
-  }
-
-  @Test @MainActor func publishesThisDeviceAndUpsertsByFingerprint() throws {
-    let key = try Self.freshKey()
-    let store = makeStore(keyProvider: { key })
-    store.deviceNameProvider = { "Test Mac" }
-
-    #expect(store.publishThisDevice())
-    #expect(store.all.count == 1)
-    let published = try #require(store.all.first)
-    #expect(published.deviceName == "Test Mac")
-    #expect(published.keyLine?.hasPrefix("ecdsa-sha2-nistp256 ") == true)
-    #expect(published.fingerprint == SSHKeychain.publicKeyFingerprint(for: key))
-
-    // Re-publishing (launch/panel) updates the SAME record — no duplicates.
-    store.deviceNameProvider = { "Test Mac Renamed" }
-    #expect(store.publishThisDevice())
-    #expect(store.all.count == 1)
-    #expect(store.all.first?.deviceName == "Test Mac Renamed")
-  }
-
-  @Test @MainActor func keepsOtherDevicesRecords() throws {
-    let store = makeStore(keyProvider: { try Self.freshKey() })
-    store.deviceNameProvider = { "Device A" }
-    #expect(store.publishThisDevice())
-
-    // A different device key (another Secure Enclave key = another device).
-    let store2 = makeStore(keyProvider: { try Self.freshKey() })
-    store2.deviceNameProvider = { "Device B" }
-    #expect(store2.publishThisDevice())
-
-    // Refresh the first store's cached list, then both devices are visible
-    // (content-scoped assertions: the shared container also holds records
-    // from the other tests in this suite).
-    store.refreshOnActivation()
-    let names = store.all.compactMap(\.deviceName)
-    #expect(names.contains("Device A"))
-    #expect(names.contains("Device B"))
-  }
-
-  @Test @MainActor func listingWorksWithoutKeychain() throws {
-    // A store whose key provider always fails: reading the registry must
-    // still work (it's plaintext; only publishing needs the key).
-    let failing = makeStore(keyProvider: { throw SSHKeychain.KeychainError.invalidKeyData })
-    #expect(!failing.publishThisDevice())
-    #expect(failing.storageError != nil)
-    // Other devices' records from the previous tests are still readable.
-    #expect(failing.all.count >= 2)
-  }
-
-  @Test @MainActor func collapsesSyncedDuplicatesToTheNewest() throws {
-    // Two devices (or a reinstall) published the same key before syncing:
-    // CloudKit delivers two records with one fingerprint.
-    let context = Self.sharedContainer.mainContext
-    let fingerprint = "SHA256:duplicate-\(UUID().uuidString)"
-    let older = DeviceKeyRecord(fingerprint: fingerprint, keyLine: "ecdsa-sha2-nistp256 AAAA1 Shell (a@iPhone)",
-                                deviceName: "iPhone", updatedAt: Date(timeIntervalSince1970: 1))
-    let newer = DeviceKeyRecord(fingerprint: fingerprint, keyLine: "ecdsa-sha2-nistp256 AAAA1 Shell (a@iPhone)",
-                                deviceName: "iPhone 2", updatedAt: Date(timeIntervalSince1970: 2))
-    context.insert(older)
-    context.insert(newer)
-    try context.save()
-
-    let store = makeStore(keyProvider: { try Self.freshKey() })
-    let matching = store.all.filter { $0.fingerprint == fingerprint }
-    #expect(matching.count == 1)
-    #expect(matching.first?.deviceName == "iPhone 2")
-    let stored = try context.fetch(FetchDescriptor<DeviceKeyRecord>()).filter { $0.fingerprint == fingerprint }
-    #expect(stored.count == 1)
-  }
 
   @Test @MainActor func addsAndForgetsCustomKeys() throws {
-    let store = makeStore(keyProvider: { try Self.freshKey() })
-    let line = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl laptop@home"
-    let fingerprint = try #require(SSHKeychain.publicKeyFingerprint(forKeyLine: line))
-
-    let record = try store.addCustomKey(line: line, name: "")
-    #expect(record.deviceName == "laptop@home")
+    let store = DeviceKeyStore(vault: TestVault.make())
+    let record = try store.addCustomKey(line: keyLine, name: "Hardware key")
+    #expect(record.deviceName == "Hardware key")
     #expect(!record.isDeviceKey)
+    #expect(store.all.map(\.fingerprint) == [record.fingerprint])
+    // Adding it again updates the same entry.
+    _ = try store.addCustomKey(line: keyLine, name: "Renamed")
+    #expect(store.all.count == 1)
+    #expect(store.all.first?.deviceName == "Renamed")
+    try store.forget(fingerprint: try #require(record.fingerprint))
+    #expect(store.all.isEmpty)
+  }
 
-    // Adding it again renames the same record.
-    try store.addCustomKey(line: line, name: "Work laptop")
-    let matching = store.all.filter { $0.fingerprint == fingerprint }
-    #expect(matching.count == 1)
-    #expect(matching.first?.deviceName == "Work laptop")
-
-    #expect(throws: AuthorizedKeysError.self) {
-      try store.addCustomKey(line: "command=\"sh\" \(line)", name: nil)
-    }
-
-    try store.forget(fingerprint: fingerprint)
-    #expect(!store.all.contains { $0.fingerprint == fingerprint })
+  @Test @MainActor func rejectsNonKeyLines() {
+    let store = DeviceKeyStore(vault: TestVault.make())
+    #expect(throws: (any Error).self) { try store.addCustomKey(line: "not a key", name: nil) }
   }
 }
 

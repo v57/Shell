@@ -8,26 +8,24 @@ let package = Package(
     platforms: [.macOS(.v14), .iOS(.v17)],
     products: [.library(name: "ShellKit", targets: ["ShellKit"]), .library(name: "ShellIntegrations", targets: ["ShellIntegrations"]), .library(name: "ShellMonitoring", targets: ["ShellMonitoring"]), .library(name: "ShellDatabaseEngines", targets: ["ShellDatabaseEngines"])],
     dependencies: [
-        // Local Database package (MongoDB / PostgreSQL / Redis / SQLite engine
-        // libraries). All four engines are cross-platform — the C-driver
-        // XCFrameworks ship iOS device + simulator slices, and
-        // SQLite uses the SDK's system SQLite3 module that is present on both
-        // macOS and iOS — so every engine links and runs on both platforms.
-        .package(path: "../Database"),
+        // DatabasePro's pure-Swift engines (every engine but DuckDB is offered)
+        // and its libssh2 + mbedTLS build, which Shell links instead of its own
+        // (one copy per app: two would clash). Binary/SSH-libssh2/build-ssh.sh
+        // still builds the libssh2 that DatabasePro's Scripts/build-libssh2.sh
+        // repackages.
+        .package(path: "../DatabasePro"),
+        // The vault: the store, keys and records the v57 apps share.
+        .package(path: "../Vault"),
     ],
     targets: [
-        // Built by Binary/SSH-libssh2/build-ssh.sh. Its modulemap sits in
-        // Headers/CLibssh2/ so it can share the build's include folder with the
-        // Database package's driver XCFrameworks.
-        .binaryTarget(name: "Libssh2", path: "Binary/SSH-libssh2/Libssh2.xcframework"),
-        // Targets are the basic building blocks of a package, defining a module or a test suite.
-        // Targets can depend on other targets in this package and products from dependencies.
         .target(
             name: "ShellKit",
             dependencies: [
                 // libssh2 + mbedTLS, surfaced as the CLibssh2 module
                 // (consumed by Libssh2Connection and Libssh2PortForward).
-                "Libssh2",
+                .product(name: "Libssh2", package: "DatabasePro"),
+                // The device's SSH key, saved passwords and known hosts.
+                .product(name: "VaultKit", package: "Vault"),
             ],
             swiftSettings: [
                 .enableUpcomingFeature("ApproachableConcurrency"),
@@ -47,18 +45,14 @@ let package = Package(
                 .swiftLanguageMode(.v5),
             ]
         ),
-        // Aggregates the local ../Database engine libraries for shell/DB
-        // sidebar integration. All four engines (MongoDB / PostgreSQL / Redis
-        // / SQLite) are cross-platform now — the C-driver XCFrameworks add iOS
-        // slices and SQLite rides the SDK's system SQLite3 module — so no
-        // engine is conditionally excluded from iOS builds anymore.
+        // The database engines for the sidebar's connections: DatabasePro's
+        // engine-neutral DatabaseProKit (PostgreSQL, MySQL, MariaDB, SQL Server,
+        // SQLite, MongoDB, Redis, Cassandra, ScyllaDB), all pure Swift on macOS
+        // and iOS.
         .target(
             name: "ShellDatabaseEngines",
             dependencies: [
-                .product(name: "PostgreSQL", package: "Database"),
-                .product(name: "Redis", package: "Database"),
-                .product(name: "MongoDB", package: "Database"),
-                .product(name: "SQLite", package: "Database"),
+                .product(name: "DatabaseProKit", package: "DatabasePro"),
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v5),
