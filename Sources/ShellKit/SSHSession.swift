@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import WireKit
 
 /// Main-actor SSH transport over `Libssh2Connection`. Exposes the
 /// connection lifecycle and UI-facing prompts (host-key verification,
@@ -249,6 +250,14 @@ public final class SSHSession: TerminalTransport {
   public func stopLocalPortForward() {
     engine?.stopLocalPortForward()
   }
+
+  // MARK: - Channel streams (in-app clients)
+
+  /// Connections through this ALREADY-CONNECTED session for clients in the app
+  /// (the database browser): each one is an SSH channel the client talks to
+  /// directly, with no local port that other apps or users could connect to.
+  /// Nil before `start()`.
+  public var dialer: WireDialer? { engine?.dialer }
 }
 
 /// A thread-safe one-shot claim: used so a connect-only session's `onConnected`

@@ -1,6 +1,8 @@
 import CLibssh2
 import CryptoKit
 import Foundation
+import SSHTunnel
+import WireKit
 
 /// The outcome of a one-shot remote `exec` on an already-authenticated
 /// connection: the captured stdout plus the command's remote exit status.
@@ -150,7 +152,7 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
   /// multiplex `direct-tcpip` (port-forward) channels, so it carries no remote
   /// shell/exec. `onConnected` fires once SSH authentication succeeds.
   private let forwardingOnly: Bool
-  private let knownHosts = KnownHostsStore()
+  private let knownHosts: KnownHostsStore
 
   /// The dedicated thread owning the libssh2 session.
   private let queue = DispatchQueue(label: "ShellKit.Libssh2Connection")
@@ -162,6 +164,11 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
   /// the main thread while the owner thread's `pump` reads it every tick.
   private let forwardLock = NSLock()
   private var portForward: Libssh2PortForward?
+
+  /// Streams over `direct-tcpip` channels for in-app clients (the database browser): no local port at all.
+  /// `waker` interrupts the owner thread's poll when a stream is asked for or has bytes to send.
+  private let waker = PollWaker()
+  private let channelStreams: SSHChannelStreams
 
   // All of the following are only accessed on `queue` (the owning thread).
   private var socketFD: Int32 = -1
@@ -190,11 +197,17 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
     _ = libssh2_init(0)
   }()
 
-  init(config: SSHConfig, privateKey: SecureEnclave.P256.Signing.PrivateKey?, execCommand: String? = nil, forwardingOnly: Bool = false) {
+  init(
+    config: SSHConfig, privateKey: SecureEnclave.P256.Signing.PrivateKey?, execCommand: String? = nil,
+    forwardingOnly: Bool = false, knownHosts: KnownHostsStore = KnownHostsStore()
+  ) {
     self.config = config
     self.privateKey = privateKey
     self.execCommand = execCommand
     self.forwardingOnly = forwardingOnly
+    self.knownHosts = knownHosts
+    let waker = self.waker
+    channelStreams = SSHChannelStreams { waker.wake() }
     _ = Self.initOnce
   }
 
@@ -286,6 +299,12 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
     forwardLock.unlock()
     forward?.stop()
   }
+
+  // MARK: Channel streams (in-app clients)
+
+  /// Connections to hosts the server reaches, each a `direct-tcpip` channel of this (already-authenticated)
+  /// connection that the client talks to in-process, so nothing listens on this device.
+  var dialer: WireDialer { channelStreams.dialer }
 
   // MARK: One-shot remote exec (persistent-session scan)
 
@@ -747,8 +766,8 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
   /// connection would sit connected with the drop stuck at `remoteHomeDirectory`.
   private func watchSocket() {
     guard running else { return }
-    pumpPortForward()
-    let ready = waitForSocket(socketFD, events: Int16(POLLIN | POLLHUP), timeoutMs: 100)
+    pumpTunnels()
+    let ready = waitForSocketOrStreams(events: Int16(POLLIN | POLLHUP), timeoutMs: 100)
     if ready {
       var pfd = pollfd(fd: socketFD, events: Int16(POLLIN | POLLHUP), revents: 0)
       _ = poll(&pfd, 1, 0)
@@ -759,21 +778,35 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
       }
       // Drain any pending session packets so the SSH session stays healthy.
       _ = libssh2_session_block_directions(session!)
-      pumpPortForward()
+      pumpTunnels()
     }
-    pumpPortForward()
+    pumpTunnels()
     queue.async { [weak self] in self?.watchSocket() }
   }
 
-  /// Drives the active local port-forward on the session's owner thread. This is
-  /// the ONLY place the tunnel channels touch libssh2, satisfying libssh2's
-  /// one-thread-per-session requirement in the forwarding-only path.
-  private func pumpPortForward() {
+  /// Drives the active local port-forward and the channel streams on the
+  /// session's owner thread. This is the ONLY place the tunnel channels touch
+  /// libssh2, satisfying libssh2's one-thread-per-session requirement.
+  private func pumpTunnels() {
+    guard let sess = session else { return }
+    channelStreams.pump(session: sess)
     forwardLock.lock()
     let forward = portForward
     forwardLock.unlock()
-    guard let forward, let sess = session else { return }
-    forward.pump(session: sess, socketFD: socketFD, eagain: Self.EAGAIN)
+    forward?.pump(session: sess, socketFD: socketFD, eagain: Self.EAGAIN)
+  }
+
+  /// Polls the SSH socket for `events` (and for writing while a channel stream
+  /// has bytes waiting), waking early when a channel stream needs the owner
+  /// thread. Returns whether the socket is ready.
+  private func waitForSocketOrStreams(events: Int16, timeoutMs: Int) -> Bool {
+    var socketEvents = events
+    if channelStreams.wantsSocketOut { socketEvents |= Int16(POLLOUT) }
+    var fds = [pollfd(fd: socketFD, events: socketEvents, revents: 0)]
+    if waker.fd >= 0 { fds.append(pollfd(fd: waker.fd, events: Int16(POLLIN), revents: 0)) }
+    let ready = poll(&fds, nfds_t(fds.count), Int32(timeoutMs)) > 0
+    waker.drain()
+    return ready && fds[0].revents & (events | Int16(POLLHUP | POLLERR | POLLNVAL)) != 0
   }
 
   /// The non-blocking read/write pump. Runs on `queue`. Waits on the socket for
@@ -798,9 +831,9 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
     guard running, !channelGone else { return }
     // Drive any active local port-forward on this owner thread first, so
     // tunnel I/O is serviced even when the shell channel stays quiet.
-    pumpPortForward()
+    pumpTunnels()
 
-    let socketReady = waitForSocket(socketFD, events: Int16(POLLIN | POLLHUP), timeoutMs: 100)
+    let socketReady = waitForSocketOrStreams(events: Int16(POLLIN | POLLHUP), timeoutMs: 100)
     let channelReady = libssh2_poll_channel_read(ch, 0) == 1
 
     if channelReady || socketReady {
@@ -839,7 +872,7 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
     }
 
     flushWrites(ch)
-    pumpPortForward()
+    pumpTunnels()
     if libssh2_channel_eof(ch) != 0 {
       handleChannelEOF(ch)
     } else {
@@ -1235,6 +1268,9 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
   private func teardownSession() {
     guard let sess = session else { return }
 
+    // Channel streams are multiplexed on this session too.
+    channelStreams.closeAll(reason: "The SSH connection closed.")
+
     // Tear down any active local port-forward (its channels are multiplexed on
     // this session, so they MUST be freed before the session is freed).
     forwardLock.lock()
@@ -1263,6 +1299,8 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
   /// Reports the end of the connection on the main thread: `lost` routes to
   /// `onConnectionLost` (the owner may dial again), else `onTerminated`.
   private func finishOnMain(_ message: String, lost: Bool = false) {
+    // In-app clients learn why their connection ended.
+    channelStreams.closeAll(reason: message)
     let m = message
     DispatchQueue.main.async { [weak self] in
       guard let self, self.running || self.channel != nil else { return }

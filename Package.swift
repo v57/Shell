@@ -24,6 +24,10 @@ let package = Package(
                 // libssh2 + mbedTLS, surfaced as the CLibssh2 module
                 // (consumed by Libssh2Connection and Libssh2PortForward).
                 .product(name: "Libssh2", package: "Database"),
+                // SSH channels as in-process byte streams for the database
+                // browser (SSHChannelStreams, WireDialer): no local port.
+                .product(name: "SSHTunnel", package: "Database"),
+                .product(name: "WireKit", package: "Database"),
                 // The device's SSH key, saved passwords and known hosts.
                 .product(name: "VaultKit", package: "Vault"),
             ],

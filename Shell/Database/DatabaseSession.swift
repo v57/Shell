@@ -22,8 +22,8 @@ struct DatabaseDocument: Identifiable {
 
 /// Live connection lifecycle wrapper for a saved `DatabaseConnection`, powered
 /// by Database's engine-neutral DatabaseKit (every engine but DuckDB,
-/// pure Swift on macOS and iOS). Shell keeps its own SSH tunnel; the engine
-/// connects to its local end.
+/// pure Swift on macOS and iOS). Through SSH, Shell logs in itself and the
+/// engine talks to SSH channels in-process: nothing listens on this device.
 @MainActor
 @Observable
 final class DatabaseSession {
@@ -39,9 +39,9 @@ final class DatabaseSession {
   /// Injected by AppModel so the session can reach the SSH store without
   /// owning one; nil in tests that exercise only local connections.
   private let sshConfigStore: SSHConfigStore?
-  /// The forwarding-only SSH session backing a tunneled connection. Opened in
-  /// `establishTunnel()`, closed in `disconnect()` (or on a failed driver
-  /// connect), so the tunnel's lifecycle is tied to this connection's.
+  /// The forwarding-only SSH session carrying a tunneled connection's channels.
+  /// Opened in `establishTunnel()`, closed in `disconnect()` (or on a failed
+  /// driver connect), so the tunnel's lifecycle is tied to this connection's.
   private var sshSession: SSHSession?
   private(set) var state: State = .disconnected
   private(set) var statusMessage = ""
@@ -93,15 +93,16 @@ final class DatabaseSession {
     state = .connecting
     statusMessage = "Connecting to \(connection.subtitle)…"
 
-    // Resolve the effective driver address: either the saved host:port (a
-    // local DB connected directly) or 127.0.0.1:<tunneledLocalPort> once the
-    // SSH port-forward is established (a remote DB reached over the tunnel).
+    // How the engine reaches the database: directly at the saved host:port, or
+    // over channels of an SSH session, where the host is as the SSH server sees
+    // it (a database on the server itself is its 127.0.0.1).
     var effectiveHost = connection.host
-    var effectivePort = connection.port
+    var dialer = WireDialer.direct
     if connection.requiresTunnel {
       do {
-        effectivePort = UInt16(try await establishTunnel())
-        effectiveHost = Self.tunnelHost
+        let (sshDialer, target) = try await establishTunnel()
+        dialer = sshDialer
+        effectiveHost = target
       } catch {
         // A partly-established tunnel (e.g. auth was cancelled or the SSH
         // connection dropped) must not be retained as a dead session object.
@@ -114,8 +115,9 @@ final class DatabaseSession {
 
     defer { if case .connecting = state { state = .connected } }
     do {
-      let profile = profile(host: effectiveHost, port: effectivePort)
-      let (session, _) = try await Connector.connect(profile, credentials: Credentials(password: password))
+      let profile = profile(host: effectiveHost, port: connection.port)
+      let (session, _) = try await Connector.connect(
+        profile, credentials: Credentials(password: password), dialer: dialer)
       live = session
       let top = try await session.children(of: nil)
       let containers: Set<TreeNode.Kind> = [.database, .keyspace, .redisDatabase]
@@ -140,8 +142,8 @@ final class DatabaseSession {
     }
   }
 
-  /// The DatabaseKit profile for this connection, aimed at `host:port` (the tunnel's local end when
-  /// tunneled). Shell opens its own SSH tunnel, so the profile has none.
+  /// The DatabaseKit profile for this connection, aimed at `host:port` (as the SSH server sees it when
+  /// tunneled). Shell opens its own SSH session, so the profile has none.
   private func profile(host: String, port: UInt16) -> ConnectionProfile {
     var options: [String: String] = [:]
     if let authSource = connection.authSource, !authSource.isEmpty { options["authSource"] = authSource }
@@ -152,7 +154,8 @@ final class DatabaseSession {
       host: isFile ? "" : host, port: isFile ? nil : Int(port), user: connection.username ?? "",
       database: connection.database ?? "", filePath: isFile ? connection.host : "", options: options,
       useTLS: connection.useTLS,
-      // Through a tunnel the certificate names the server, not 127.0.0.1.
+      // Through SSH the database is often named as the server sees it (127.0.0.1,
+      // a private name), which its certificate doesn't name.
       allowUntrustedCertificate: connection.requiresTunnel)
   }
 
@@ -247,26 +250,20 @@ final class DatabaseSession {
 
   // MARK: - SSH tunnel
 
-  /// The address the DB driver connects THROUGH a tunnel: always loopback,
-  /// since the reachable port is a locally-bound tunnel listener. Also the
-  /// local bind host for the forward.
-  private static let tunnelHost = "127.0.0.1"
-
-
-  /// Establishes an SSH local port-forward to the remote DB's
-  /// `localhost:<port>` and resolves to the bound LOCAL port the driver should
-  /// connect to. Reuses the shared `SSHSession`/`SSHLocalPortForward`
-  /// machinery from the web card: the SSH session runs in forwarding-only mode
-  /// (no remote shell), opens ONE authenticated connection, and multiplexes
-  /// `direct-tcpip` channels over it — no re-dial or re-authentication.
+  /// Logs in to the connection's SSH host and resolves to a dialer for its
+  /// channels plus the database's host as the SSH server sees it. The SSH
+  /// session runs in forwarding-only mode (no remote shell), opens ONE
+  /// authenticated connection, and carries every connection the engine makes as
+  /// a `direct-tcpip` channel — no re-dial, no re-authentication, and no local
+  /// port.
   ///
   /// The tunnel's lifecycle is tied to this DB connection: it is opened here
-  /// and closed in `disconnect()` (or on a failed driver connect), so a remote
-  /// DB connection never leaks a forward.
-  private func establishTunnel() async throws -> Int {
+  /// and closed in `disconnect()` (or on a failed driver connect).
+  private func establishTunnel() async throws -> (WireDialer, String) {
     guard let config = sshConfig() else {
       throw DatabaseConnectionTunnelError.missingSSHConfig
     }
+    let target = connection.tunnelTarget(through: config)?.host ?? "127.0.0.1"
     let session = SSHSession(config: config, forwardingOnly: true)
     self.sshSession = session
 
@@ -287,46 +284,23 @@ final class DatabaseSession {
       }
     }
 
-    return try await withCheckedThrowingContinuation { continuation in
+    let dialer: WireDialer = try await withCheckedThrowingContinuation { continuation in
       let gate = TunnelContinuationGate()
-      session.onConnected = { [weak self] in
-        guard let self else { return }
-        self.openTunnel(
-          session: session, target: self.connection.tunnelTarget(through: config)?.host ?? "127.0.0.1",
-          continuation: continuation, gate: gate)
+      session.onConnected = { [weak session] in
+        gate.resume(continuation) { continuation in
+          if let dialer = session?.dialer {
+            continuation.resume(returning: dialer)
+          } else {
+            continuation.resume(throwing: DatabaseConnectionTunnelError.tunnelFailed("The SSH connection closed."))
+          }
+        }
       }
       session.onTerminated = { message in
         gate.resume(continuation) { $0.resume(throwing: DatabaseConnectionTunnelError.tunnelFailed(message)) }
       }
       session.start()
     }
-  }
-
-  /// Opens the actual port-forward once SSH auth has completed, threading the
-  /// bound local port back to the awaiting continuation.
-  private func openTunnel(
-    session: SSHSession,
-    target: String,
-    continuation: CheckedContinuation<Int, Error>,
-    gate: TunnelContinuationGate
-  ) {
-    session.startLocalPortForward(
-      bindHost: Self.tunnelHost,
-      bindPort: 0,
-      targetHost: target,
-      targetPort: Int(connection.port)
-    ) { result in
-      DispatchQueue.main.async { [gate, continuation] in
-        gate.resume(continuation) { continuation in
-          switch result {
-          case .success(let boundPort):
-            continuation.resume(returning: boundPort)
-          case .failure(let error):
-            continuation.resume(throwing: error)
-          }
-        }
-      }
-    }
+    return (dialer, target)
   }
 
   /// Resolves this connection's saved SSH config by id, if it still exists.
@@ -335,10 +309,9 @@ final class DatabaseSession {
     return sshConfigStore?.all.first { $0.id == sshConfigID }
   }
 
-  /// Closes the tunnel's listener + SSH session. Best-effort, safe to call
-  /// even when no tunnel was opened.
+  /// Closes the SSH session and with it every channel. Best-effort, safe to
+  /// call even when no tunnel was opened.
   private func closeTunnel() {
-    sshSession?.stopLocalPortForward()
     sshSession?.close()
     sshSession = nil
   }
@@ -360,16 +333,15 @@ enum DatabaseConnectionTunnelError: LocalizedError {
 }
 
 /// Guards a checked continuation against a double resume. The tunnel's
-/// `onConnected`, the port-forward completion, and `onTerminated` can all race
-/// (e.g. the SSH connection drops right after the forward resolves), so only
-/// the first resumer wins.
+/// `onConnected` and `onTerminated` can race (e.g. the SSH connection drops
+/// right after it connects), so only the first resumer wins.
 private final class TunnelContinuationGate: @unchecked Sendable {
   private let lock = NSLock()
   private var resumed = false
 
   func resume(
-    _ continuation: CheckedContinuation<Int, Error>,
-    _ body: (CheckedContinuation<Int, Error>) -> Void
+    _ continuation: CheckedContinuation<WireDialer, Error>,
+    _ body: (CheckedContinuation<WireDialer, Error>) -> Void
   ) {
     lock.lock()
     if resumed {
