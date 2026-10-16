@@ -4,6 +4,7 @@ import SwiftUI
 import ShellKit
 import ShellIntegrations
 import ShellMonitoring
+import UniformTypeIdentifiers
 
 /// The sidebar: ComponentKit's `KitSidebar` with ONE VIEW PER SECTION, each a
 /// card `KitSection` — `RunningSectionView` (below), `LocalSectionView`,
@@ -13,10 +14,9 @@ import ShellMonitoring
 ///
 /// The kit draws the rows (`SidebarRow`), the gliding selection card, inline
 /// rename (`.kitRename`), collapsing headers and drag-to-reorder
-/// (`ReorderableSection`). Shell adds what it does around the rows
-/// (`.sidebarChrome(_:)`, SidebarChrome.swift: selection routing, sheets, the
-/// stats monitor) and, for the rows that also take FILE drops, its own reorder
-/// (SidebarReorder.swift): the kit's reorder target would shadow them.
+/// (`ReorderableSection`, which also hands session and host rows their file
+/// drops). Shell adds what it does around the rows (`.sidebarChrome(_:)`,
+/// SidebarChrome.swift: selection routing, sheets, the stats monitor).
 ///
 /// This file owns the row views used by more than one section (`SessionRow`,
 /// `DatabaseConnectionRow`, `DatabaseConnectionActions`, `DetachReturnBadge`)
@@ -30,8 +30,6 @@ struct SidebarView: View {
   /// What the sections and the chrome share: the rename state, the database
   /// rename sheet, the search text and the stats monitor (see `SidebarState`).
   @State private var state = SidebarState()
-  /// The drag of a row that also takes file drops (SidebarReorder.swift).
-  @State private var drag = SidebarDragState()
 
   var body: some View {
     @Bindable var model = model
@@ -68,7 +66,6 @@ struct SidebarView: View {
     // Rows coming, going and reordering slide rather than jump (the kit stills
     // this in an inactive window and under Reduce Motion).
     .animation(.kit, value: rowIdentities)
-    .sidebarDragState(drag)
     // Everything the sidebar does around its rows — selection routing, the
     // shared sheets/alerts, the stats monitor's lifetime (SidebarChrome.swift).
     .sidebarChrome(state)
@@ -258,6 +255,35 @@ private struct TextFilesSectionView: View {
   }
 }
 #endif
+
+// MARK: - Reordering
+
+/// What a session or host row takes besides its siblings (the kit's reorder target hands it over,
+/// `ReorderableSection.alsoAccepts`): files from Finder and the Files panel on the Mac, nothing elsewhere.
+var sidebarFileTypes: [UTType] {
+  #if os(macOS)
+  FileDrop.contentTypes
+  #else
+  []
+  #endif
+}
+
+/// A move in a filtered list (`shown`, the rows the filter lets through) as a move in the whole list (`all`), whose
+/// offsets the model's moves take: the rows land where they would in `shown`, and the hidden ones keep their places.
+struct FilteredMove {
+  let source: IndexSet
+  let destination: Int
+
+  init<Item: Identifiable>(_ source: IndexSet, _ destination: Int, shown: [Item], in all: [Item]) {
+    func index(_ item: Item) -> Int? { all.firstIndex { $0.id == item.id } }
+    self.source = IndexSet(source.compactMap { shown.indices.contains($0) ? index(shown[$0]) : nil })
+    if destination < shown.count {
+      self.destination = index(shown[destination]) ?? all.count
+    } else {
+      self.destination = shown.last.flatMap(index).map { $0 + 1 } ?? all.count
+    }
+  }
+}
 
 // MARK: - Shared rows
 

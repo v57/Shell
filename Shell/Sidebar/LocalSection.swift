@@ -33,12 +33,6 @@ struct LocalSectionView: View {
   /// the sidebar — see `SidebarState.statsMonitor`).
   private var monitor: SystemStatsMonitor { state.statsMonitor }
 
-  /// The local shells reorder with Shell's own drag (they also take file drops,
-  /// SidebarReorder.swift); the web pages and databases with the kit's.
-  private var sessionReorder: SidebarReorderGroup {
-    SidebarReorderGroup(.localSessions) { model.moveLocalSession(from: $0, to: $1) }
-  }
-
   private var localSessions: [TerminalSession] {
     model.sessions.filter { model.kind(of: $0) == .local }
   }
@@ -99,32 +93,34 @@ struct LocalSectionView: View {
   @ViewBuilder
   private var rows: some View {
     let sessions = flags.isEnabled(.sessions) ? localSessions : []
-    ForEach(Array(sessions.enumerated()), id: \.element.id) { index, session in
-      if state.matches(model.displayName(for: session)) {
-        SessionRow(
-          session: session,
-          defaultLabel: model.displayName(for: session),
-          isRenaming: state.isRenamingSession(session.id),
-          onRename: { model.renameSession(session.id, to: $0) }
-        )
-        .sidebarReorderable(sessionReorder.row(at: index))
-        // Files from Finder or the Files panel: ask whether to copy them in,
-        // type their paths or go to their folder (FileDropActions.swift). Outside
-        // the reorder, whose drop target reads its handler (SidebarReorder.swift).
-        .sidebarFileDrop { files in model.requestFileDrop(files, on: .session(session.id)) }
-        .contextMenu {
-          Button("Rename…") { state.renamingSessionID = session.id }
-          if flags.isEnabled(.authorizedKeys) {
-            Button("Authorized Keys", systemImage: "key.2.on.ring.fill") {
-              model.openLocalAuthorizedKeys()
-            }.help("Manage this Mac's authorized keys")
-          }
-          Divider()
-          Button("Close Terminal", role: .destructive) {
-            model.removeSession(session.id)
-          }
+    let shown = sessions.filter { state.matches(model.displayName(for: $0)) }
+    ReorderableSection(shown, move: { source, destination in
+      let move = FilteredMove(source, destination, shown: shown, in: sessions)
+      model.moveLocalSession(from: move.source, to: move.destination)
+    }) { session in
+      SessionRow(
+        session: session,
+        defaultLabel: model.displayName(for: session),
+        isRenaming: state.isRenamingSession(session.id),
+        onRename: { model.renameSession(session.id, to: $0) }
+      )
+      .contextMenu {
+        Button("Rename…") { state.renamingSessionID = session.id }
+        if flags.isEnabled(.authorizedKeys) {
+          Button("Authorized Keys", systemImage: "key.2.on.ring.fill") {
+            model.openLocalAuthorizedKeys()
+          }.help("Manage this Mac's authorized keys")
+        }
+        Divider()
+        Button("Close Terminal", role: .destructive) {
+          model.removeSession(session.id)
         }
       }
+    }
+    // Files from Finder or the Files panel: ask whether to copy them in, type
+    // their paths or go to their folder (FileDropActions.swift).
+    .alsoAccepts(FileDrop.contentTypes) { session, _ in
+      FileDrop.perform { model.requestFileDrop($0, on: .session(session.id)) }
     }
     ForEach(flags.isEnabled(.screen) ? model.screenMonitor.sessions.filter { state.matches($0.shortName) } : []) { info in
       ScreenSessionRow(

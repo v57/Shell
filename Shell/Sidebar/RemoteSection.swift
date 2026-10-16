@@ -23,12 +23,6 @@ struct RemoteSectionView: View {
 
   private var flags: FeatureFlagsStore { .shared }
 
-  /// The saved SSH hosts reorder with Shell's own drag: a host row also takes
-  /// file drops (SidebarReorder.swift).
-  private var connectionReorder: SidebarReorderGroup {
-    SidebarReorderGroup(.sshConnections) { model.moveConnection(from: $0, to: $1) }
-  }
-
   var body: some View {
     sectionContent
       // The Edit… action on a saved SSH connection: the same form as new
@@ -45,13 +39,22 @@ struct RemoteSectionView: View {
       let online = model.connections.filter { model.sessionID(for: $0) != nil }.count
       let offline = model.connections.count - online
       KitSection("Remote", systemImage: "globe", hue: .blue, isExpanded: .expanded(collapsed: $remoteCollapsed)) {
-        ForEach(Array(model.connections.enumerated()), id: \.element.id) { index, config in
-          SSHConfigGroup(
-            config: config,
-            state: state,
-            reorder: connectionReorder.row(at: index),
-            onEdit: { editingConfig = $0 }
-          )
+        // Each host drags with its sub-rows as one group; a file dropped on the
+        // host uploads to its home folder (FileDropActions.swift).
+        let shown = model.connections.filter { SSHConfigGroup.isShown($0, model: model, state: state) }
+        ReorderableSection(shown, move: { source, destination in
+          let move = FilteredMove(source, destination, shown: shown, in: model.connections)
+          model.moveConnection(from: move.source, to: move.destination)
+        }) { config in
+          SSHConfigGroup(config: config, state: state, onEdit: { editingConfig = $0 })
+        }
+        .dragsAsGroup()
+        .alsoAccepts(sidebarFileTypes) { config, _ in
+          #if os(macOS)
+          FileDrop.perform { model.requestFileDrop($0, on: .host(config)) }
+          #else
+          false
+          #endif
         }
       } meta: {
         if model.connections.isEmpty {
@@ -89,94 +92,109 @@ private struct SSHConfigGroup: View {
   /// The sidebar's shared state (SidebarChrome.swift): the session rename, the
   /// database rename sheet and the filter.
   let state: SidebarState
-  /// This host's row in the sidebar's host list.
-  let reorder: SidebarReorder
   let onEdit: (SSHConfig) -> Void
   private var flags: FeatureFlagsStore { .shared }
-
-  /// This host's running shell rows — a reorderable list of their OWN, so
-  /// dragging a session row never moves the host row (and vice versa).
-  private var sessionReorder: SidebarReorderGroup {
-    SidebarReorderGroup(.sshSessions(config.id)) { model.moveSSHSession(for: config, from: $0, to: $1) }
-  }
 
   /// The host's sub-rows pass the filter by their own name, or all of them when
   /// the host's name matches.
   private func shows(_ name: String) -> Bool {
+    Self.shows(name, of: config, state: state)
+  }
+
+  private static func shows(_ name: String, of config: SSHConfig, state: SidebarState) -> Bool {
     state.matches(config.displayName) || state.matches(name)
   }
 
-  private var webSessions: [WebSession] {
-    flags.isEnabled(.web) ? model.webSessions.all.filter { $0.sshConfigID == config.id && shows($0.sidebarTitle) } : []
+  /// Whether the host shows while the filter is on: its name matches, or one of its sub-rows' does.
+  static func isShown(_ config: SSHConfig, model: AppModel, state: SidebarState) -> Bool {
+    state.matches(config.displayName)
+      || model.shellSessions(for: config).contains { state.matches(model.displayName(for: $0)) }
+      || !webSessions(of: config, model: model, state: state).isEmpty
+      || !databaseConnections(of: config, model: model, state: state).isEmpty
   }
 
+  private static func webSessions(of config: SSHConfig, model: AppModel, state: SidebarState) -> [WebSession] {
+    FeatureFlagsStore.shared.isEnabled(.web)
+      ? model.webSessions.all.filter { $0.sshConfigID == config.id && shows($0.sidebarTitle, of: config, state: state) }
+      : []
+  }
+
+  private static func databaseConnections(of config: SSHConfig, model: AppModel, state: SidebarState)
+    -> [DatabaseConnection]
+  {
+    FeatureFlagsStore.shared.isEnabled(.database)
+      ? model.databaseConnections.filter {
+        $0.sshConfigID == config.id && shows($0.displayName, of: config, state: state)
+      } : []
+  }
+
+  private var webSessions: [WebSession] { Self.webSessions(of: config, model: model, state: state) }
+
   private var databaseConnections: [DatabaseConnection] {
-    flags.isEnabled(.database)
-      ? model.databaseConnections.filter { $0.sshConfigID == config.id && shows($0.displayName) } : []
+    Self.databaseConnections(of: config, model: model, state: state)
   }
 
   private var shellSessions: [TerminalSession] { model.shellSessions(for: config) }
 
+  /// The host row and its sub-rows; the Remote section shows the group only when `isShown`.
   var body: some View {
-    let visibleSessions = shellSessions.filter { shows(model.displayName(for: $0)) }
-    if state.matches(config.displayName) || !visibleSessions.isEmpty || !webSessions.isEmpty
-      || !databaseConnections.isEmpty
-    {
-      hostRow
-      // Only SSH SHELL sessions get a terminal row here. A host-bound web page or
-      // database connection has its own row view in the loops below; emitting one
-      // here too would render its name twice (once with a terminal icon).
-      ForEach(Array(shellSessions.enumerated()), id: \.element.id) { index, session in
-        if shows(model.displayName(for: session)) {
-          SessionRow(
-            session: session,
-            defaultLabel: model.displayName(for: session),
-            isRenaming: state.isRenamingSession(session.id),
-            onRename: { model.renameSession(session.id, to: $0) }
-          )
-          .kitRowIndent(1)
-          .sidebarReorderable(sessionReorder.row(at: index))
-          #if os(macOS)
-          // A file dropped on a running SSH session's row: ask whether to upload it
-          // to the session's remote cwd or, for a file on this same host, to type
-          // its path or go to its folder (FileDropActions.swift). Outside the
-          // reorder, whose drop target reads its handler (SidebarReorder.swift).
-          .sidebarFileDrop { files in model.requestFileDrop(files, on: .session(session.id)) }
-          #endif
-          .contextMenu {
-            Button("Rename…") { state.renamingSessionID = session.id }
-            Divider()
-            Button("Close Connection", role: .destructive) {
-              model.removeSession(session.id)
-            }
-          }
+    let sessions = shellSessions
+    let shown = sessions.filter { shows(model.displayName(for: $0)) }
+    hostRow
+    // Only SSH SHELL sessions get a terminal row here. A host-bound web page or
+    // database connection has its own row view in the loops below; emitting one
+    // here too would render its name twice (once with a terminal icon). They are
+    // a reorderable list of their own, so dragging a session never moves the host.
+    ReorderableSection(shown, move: { source, destination in
+      let move = FilteredMove(source, destination, shown: shown, in: sessions)
+      model.moveSSHSession(for: config, from: move.source, to: move.destination)
+    }) { session in
+      SessionRow(
+        session: session,
+        defaultLabel: model.displayName(for: session),
+        isRenaming: state.isRenamingSession(session.id),
+        onRename: { model.renameSession(session.id, to: $0) }
+      )
+      .kitRowIndent(1)
+      .contextMenu {
+        Button("Rename…") { state.renamingSessionID = session.id }
+        Divider()
+        Button("Close Connection", role: .destructive) {
+          model.removeSession(session.id)
         }
       }
-      // Saved web pages bound to this host render as indented sub-rows, like the
-      // connection's terminals. Hidden when the web feature is disabled.
-      ForEach(webSessions) { web in
-        WebSessionRow(web: web, environmentName: config.displayName)
-          .kitRowIndent(1)
-      }
-      // Database connections tunneled through this host render as sub-rows,
-      // grouped per host the same way web sessions are. Hidden when the database
-      // feature is disabled; orphaned refs (a removed host) simply don't render.
-      ForEach(databaseConnections) { connection in
-        DatabaseConnectionRow(connection: connection)
-          .kitRowIndent(1)
-          .contextMenu { DatabaseConnectionActions(connection: connection) { state.beginRenameDatabase($0) } }
-      }
+    }
+    // A file dropped on a running SSH session's row: ask whether to upload it
+    // to the session's remote cwd or, for a file on this same host, to type
+    // its path or go to its folder (FileDropActions.swift).
+    .alsoAccepts(sidebarFileTypes) { session, _ in
+      #if os(macOS)
+      FileDrop.perform { model.requestFileDrop($0, on: .session(session.id)) }
+      #else
+      false
+      #endif
+    }
+    // Saved web pages bound to this host render as indented sub-rows, like the
+    // connection's terminals. Hidden when the web feature is disabled.
+    ForEach(webSessions) { web in
+      WebSessionRow(web: web, environmentName: config.displayName)
+        .kitRowIndent(1)
+    }
+    // Database connections tunneled through this host render as sub-rows,
+    // grouped per host the same way web sessions are. Hidden when the database
+    // feature is disabled; orphaned refs (a removed host) simply don't render.
+    ForEach(databaseConnections) { connection in
+      DatabaseConnectionRow(connection: connection)
+        .kitRowIndent(1)
+        .contextMenu { DatabaseConnectionActions(connection: connection) { state.beginRenameDatabase($0) } }
     }
   }
 
+  /// The saved connection. A file dropped on it (the group's drop, in the Remote
+  /// section) has no terminal cwd to follow, so it uploads to the server's home
+  /// directory (~), once confirmed.
   private var hostRow: some View {
     SSHConfigRow(config: config)
-      .sidebarReorderable(reorder)
-    #if os(macOS)
-      // A file dropped on the saved connection — no terminal cwd to follow,
-      // so it uploads to the server's home directory (~), once confirmed.
-      .sidebarFileDrop { files in model.requestFileDrop(files, on: .host(config)) }
-    #endif
       .contextMenu {
         Button("Connect") { model.connect(to: config) }
         Divider()

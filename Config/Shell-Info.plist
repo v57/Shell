@@ -31,9 +31,9 @@
 				<string>public.item</string>
 			</array>
 			<key>UTTypeDescription</key>
-			<string>Shell Sidebar Row</string>
+			<string>Sidebar Row</string>
 			<key>UTTypeIdentifier</key>
-			<string>dev.v57.shell.sidebar-row</string>
+			<string>dev.v57.componentkit.row</string>
 			<key>UTTypeTagSpecification</key>
 			<dict/>
 		</dict>

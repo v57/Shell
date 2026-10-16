@@ -170,21 +170,19 @@ enum FileDrop {
   }
 }
 
-extension View {
-  /// `fileDrop` for a sidebar row. A drag-reorderable row (`sidebarReorderable`, SidebarReorder.swift) is already a
-  /// drop target (its siblings), and SwiftUI gives a drop to the innermost target only, so the row's reorder target
-  /// takes the files too (`SidebarRowDropHandler`); this one serves a row that doesn't reorder.
-  func sidebarFileDrop(perform: @escaping ([ShellFile]) -> Void) -> some View {
-    let read: @MainActor () -> Bool = {
-      let files = FileDrop.read()
-      guard !files.isEmpty else { return false }
-      perform(files)
-      return true
-    }
-    return environment(\.sidebarRowDropHandler, SidebarRowDropHandler(contentTypes: FileDrop.contentTypes, perform: read))
-      .fileDrop(perform: perform)
+extension FileDrop {
+  /// Files dropped on a sidebar row, which the kit's reorder target hands over (`ReorderableSection.alsoAccepts`):
+  /// read from the drag pasteboard, one per file. False when there was nothing to take.
+  @MainActor
+  static func perform(_ perform: ([ShellFile]) -> Void) -> Bool {
+    let files = read()
+    guard !files.isEmpty else { return false }
+    perform(files)
+    return true
   }
+}
 
+extension View {
   /// Accepts files dropped from the Files panel, Finder or another app (see `FileDrop`).
   func fileDrop(isTargeted: Binding<Bool>? = nil, perform: @escaping ([ShellFile]) -> Void) -> some View {
     onDrop(of: FileDrop.contentTypes, isTargeted: isTargeted) { _ in
