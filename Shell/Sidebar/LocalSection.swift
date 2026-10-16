@@ -324,23 +324,25 @@ private struct ScreenSessionRow: View {
     }
   }
 
-  /// The second line: a remote row's SSH origin (so it is distinguishable from
-  /// local rows in the same section), then the attached terminal's status.
-  private var subtitle: String? {
-    let parts = [info.remoteOrigin?.displayName ?? "", attachedSession?.statusText ?? ""].filter { !$0.isEmpty }
-    return parts.isEmpty ? nil : parts.joined(separator: " · ")
-  }
-
   var body: some View {
     // The sidebar shows the short name (no "pid." prefix); the full "pid.name"
     // spec stays in the window title (navigationTitle).
     SidebarRow(
-      value: model.rowSelection(forScreen: info), info.shortName, subtitle: subtitle,
+      value: model.rowSelection(forScreen: info), info.shortName,
       systemImage: info.isProtected ? "lock.fill" : "shield.fill"
     ) {
       StatusDot(hue: info.isAttached ? .green : .gray, isHollow: !info.isAttached)
         .accessibilityLabel(info.state)
         .help(helpText)
+    }
+    // The second line: a remote row's SSH origin (so it is distinguishable from
+    // local rows in the same section), then the attached terminal's status.
+    .subtitle {
+      if let session = attachedSession {
+        SessionStatusLine(session: session, prefix: info.remoteOrigin?.displayName)
+      } else if let origin = info.remoteOrigin?.displayName {
+        Text(origin)
+      }
     }
     .kitRename(isRenaming: $isRenaming) { onRename($0) }
   }

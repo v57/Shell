@@ -222,21 +222,22 @@ private struct ActionRunRow: View {
   var body: some View {
     let status = session.actionRunStatus
     SidebarRow(
-      value: AppModel.Selection.session(session.id), spec?.action.name ?? "Action", subtitle: subtitle(status)
+      value: AppModel.Selection.session(session.id), spec?.action.name ?? "Action", systemImage: "play.fill",
+      status: status
     ) {
-      SidebarRowLiveIcon(systemImage: "play.fill", status: status)
-    } trailing: {
       DetachReturnBadge(selection: .session(session.id))
       Text(environmentLabel)
         .foregroundStyle(.kitSecondary)
     }
-  }
-
-  /// The row's second line: the failure, or the action's live last output line.
-  private func subtitle(_ status: WorkStatus) -> String? {
-    if case .failed(let message) = status, let message { return message }
-    let line = session.statusText
-    return line.isEmpty ? nil : line
+    .subtitle {
+      // The failure (the error, or the exit code), else the action's live last
+      // output line in the terminal's colours.
+      if case .failed(let message) = status, let message {
+        Text(message).monospaced().foregroundStyle(Hue.red.text)
+      } else {
+        SessionStatusLine(session: session)
+      }
+    }
   }
 }
 
@@ -296,17 +297,14 @@ struct SessionRow: View {
   let onRename: (String) -> Void
 
   var body: some View {
-    let status = session.statusText
-    SidebarRow(
-      value: AppModel.Selection.session(session.id), session.customName ?? defaultLabel,
-      subtitle: status.isEmpty ? nil : status, systemImage: "terminal"
-    ) {
+    SidebarRow(value: AppModel.Selection.session(session.id), session.customName ?? defaultLabel, systemImage: "terminal") {
       DetachReturnBadge(selection: .session(session.id))
       if let hue = stateDotHue {
         StatusDot(hue: hue)
           .transition(.scale.combined(with: .opacity))
       }
     }
+    .subtitle { SessionStatusLine(session: session) }
     .kitRename(isRenaming: $isRenaming) { onRename($0) }
     .animation(.kit, value: stateDotHue)
   }
@@ -386,28 +384,77 @@ struct DatabaseConnectionActions: View {
 
 // MARK: - Status line
 
-extension TerminalSession {
-  /// The session's status line as plain text: the transport's message, or the
-  /// n-th non-empty terminal line from the bottom (`statusRank`), from the
-  /// character pinned by clicking it (`statusStartColumn`) when one is marked.
-  /// Empty when there is nothing to show.
-  var statusText: String {
-    if let message = snapshot.message {
-      return message
+/// A session's status line under its sidebar row, in the terminal's own
+/// colours and weights (prompts, git status, vim bars): the transport's
+/// message, or the n-th non-empty terminal line from the bottom
+/// (`statusRank`), from the character pinned by clicking it
+/// (`statusStartColumn`) when one is marked. Nothing when there is no line.
+/// Runs without a colour of their own keep the row's caption style.
+struct SessionStatusLine: View {
+  var session: TerminalSession
+  /// Shown before the line, in the caption style (a remote session's host).
+  var prefix: String?
+  @Environment(\.terminalBackgroundsDisabled) private var disableBackgrounds
+  @Environment(\.colorScheme) private var colorScheme
+
+  var body: some View {
+    let line = session.statusLine(disableBackgrounds: disableBackgrounds, scheme: colorScheme)
+    let parts = [prefix.map { Text($0) }, line.characters.isEmpty ? nil : Text(line).monospaced()].compactMap { $0 }
+    if !parts.isEmpty {
+      parts.dropFirst().reduce(parts[0]) { $0 + Text(" · ") + $1 }
     }
-    guard let line = snapshot.nonEmptyLineIndexFromBottom(statusRank) else { return "" }
+  }
+}
+
+extension TerminalSession {
+  /// The status line as styled text (see `SessionStatusLine`); empty when
+  /// there is nothing to show.
+  ///
+  /// `disableBackgrounds: true` mirrors the canvas's background-suppression
+  /// theme ("Disable Background Colors"): no character backgrounds, and
+  /// explicit low-contrast colours replaced per `TerminalContrast`. `scheme`
+  /// is the EFFECTIVE colour scheme, matching the canvas's contrast keys.
+  func statusLine(disableBackgrounds: Bool, scheme: ColorScheme) -> AttributedString {
+    if let message = snapshot.message {
+      return AttributedString(message)
+    }
+    guard let line = snapshot.nonEmptyLineIndexFromBottom(statusRank) else { return AttributedString() }
     let lastColumn = snapshot.lastNonBlankColumn(ofLine: line)
-    guard lastColumn >= 0 else { return "" }
+    guard lastColumn >= 0 else { return AttributedString() }
     // Start-character mode shows the line FROM the clicked character; clamp
     // to the line's content so a click past its end doesn't empty it.
     let startColumn = statusStartMarked ? min(max(0, statusStartColumn), lastColumn) : 0
-    var text = ""
+    var result = AttributedString()
     for column in startColumn...lastColumn {
       let cell = snapshot.cell(atLine: line, column: column)
       // Blank cells (including \0) are spaces: internal spacing must survive.
-      text += cell.isBlank ? " " : String(cell.character)
+      var attributes = AttributeContainer()
+      if cell.bold { attributes.inlinePresentationIntent = .stronglyEmphasized }
+      // Inverse swaps the background into the foreground (like the canvas).
+      if disableBackgrounds {
+        attributes.foregroundColor = TerminalContrast.suppressedBackgroundForeground(
+          for: cell.inverse ? cell.background : cell.foreground, scheme: scheme)
+      } else {
+        if let color = (cell.inverse ? cell.background : cell.foreground).statusLineColor {
+          attributes.foregroundColor = color
+        }
+        if !cell.inverse, let background = cell.background.statusLineColor {
+          attributes.backgroundColor = background
+        }
+      }
+      result.append(AttributedString(cell.isBlank ? " " : String(cell.character), attributes: attributes))
     }
-    return text
+    return result
+  }
+}
+
+extension TerminalColor {
+  /// The cell colour in a status line, or nil to keep the row's own.
+  fileprivate var statusLineColor: Color? {
+    switch self {
+    case .clear, .default: nil
+    default: color
+    }
   }
 }
 
