@@ -75,7 +75,7 @@ struct ContentView: View {
     ZStack {
       NavigationSplitView(columnVisibility: $columnVisibility) {
         SidebarView(columnVisibility: $columnVisibility)
-          .navigationSplitViewColumnWidth(min: 220, ideal: KitMetrics.sidebarWidth, max: 360)
+          .navigationSplitViewColumnWidth(ideal: KitMetrics.sidebarWidth, max: 360)
       } detail: {
         // A STABLE root for the detail column: `NavigationSplitView` swaps a
         // new root view in without animation, so switching between kinds of
