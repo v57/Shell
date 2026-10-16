@@ -67,14 +67,8 @@ struct NewDatabaseConnectionView: View {
               "Engine", help: engine.isAvailable ? nil : "Not available on this platform",
               systemImage: engine.systemImage, hue: engine.isAvailable ? .indigo : .orange
             ) {
-              Picker("Engine", selection: $engine) {
-                ForEach(DatabaseEngine.allCases) { e in
-                  Text(e.displayName).tag(e)
-                }
-              }
-              .labelsHidden()
-              .pickerStyle(.menu)
-              .fixedSize()
+              KitPicker("Engine", selection: $engine, options: DatabaseEngine.allCases.map { ($0.displayName, $0) })
+                .fixedSize()
             }
             // A new connection's port follows the engine's default port. Only
             // reset when the user hasn't typed a custom port (i.e. the field still
@@ -105,8 +99,8 @@ struct NewDatabaseConnectionView: View {
             if engine != .sqlite {
               FormRow("Authorization", help: "A user name and password", systemImage: "person.badge.key") {
                 Toggle("Authorization", isOn: $authorizationEnabled)
-                  .labelsHidden()
                   .toggleStyle(.kitSwitch)
+                  .kitLabelsHidden()
               }
               .onChange(of: authorizationEnabled) { _, enabled in
                 // Hidden fields reset when the toggle is turned off.
@@ -128,8 +122,8 @@ struct NewDatabaseConnectionView: View {
                 FormRow("Auth Source", systemImage: "building.columns", field: TextField("admin", text: $authSource))
                 FormRow("Direct Connection", systemImage: "arrow.right") {
                   Toggle("Direct connection", isOn: $directConnection)
-                    .labelsHidden()
                     .toggleStyle(.kitSwitch)
+                    .kitLabelsHidden()
                 }
               }
             }
@@ -140,14 +134,10 @@ struct NewDatabaseConnectionView: View {
             footer: "Remote (non-SQLite) connections route through the selected SSH tunnel; SQLite is always local."
           ) {
             FormRow("SSH Tunnel", systemImage: "network") {
-              Picker("SSH Tunnel", selection: $sshConfigID) {
-                Text("None").tag(UUID?.none)
-                ForEach(model.connections) { config in
-                  Text(config.displayName).tag(Optional(config.id))
-                }
-              }
-              .labelsHidden()
-              .pickerStyle(.menu)
+              KitPicker(
+                "SSH Tunnel", selection: $sshConfigID,
+                options: [("None", UUID?.none)] + model.connections.map { ($0.displayName, Optional($0.id)) }
+              )
               .fixedSize()
             }
           }
