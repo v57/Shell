@@ -1,3 +1,4 @@
+import ComponentKit
 import Foundation
 import SwiftUI
 import ShellKit
@@ -8,13 +9,12 @@ import ShellKit
 /// gate).
 ///
 /// The Edit… sheet for a saved connection and the collapse state are local to
-/// this section; the session rename and the database rename sheet stay with the
-/// CONTAINER (`SidebarState` in SidebarChrome.swift — the Local section and the
-/// other sidebar container share them) and are handed in as `state`.
+/// this section; the session rename, the database rename sheet and the filter
+/// stay with the sidebar (`SidebarState` in SidebarChrome.swift — the Local
+/// section shares them) and are handed in as `state`.
 struct RemoteSectionView: View {
   @Environment(AppModel.self) private var model
-  /// The sidebar state the CONTAINER owns (SidebarChrome.swift): the session
-  /// rename and the database rename sheet, both shared with the Local section.
+  /// The sidebar's shared state (SidebarChrome.swift).
   let state: SidebarState
   /// Collapse state for this section, persisted across launches.
   @AppStorage("sidebar.remote.collapsed") private var remoteCollapsed = false
@@ -23,9 +23,8 @@ struct RemoteSectionView: View {
 
   private var flags: FeatureFlagsStore { .shared }
 
-  /// The saved SSH hosts' drag-reorder descriptor: ONE descriptor feeds both the
-  /// `ForEach`'s `.onMove` (the `List` sidebar) and each host row's drag (the
-  /// `LazyVStack` one), so either container reorders through the same model call.
+  /// The saved SSH hosts reorder with Shell's own drag: a host row also takes
+  /// file drops (SidebarReorder.swift).
   private var connectionReorder: SidebarReorderGroup {
     SidebarReorderGroup(.sshConnections) { model.moveConnection(from: $0, to: $1) }
   }
@@ -39,13 +38,14 @@ struct RemoteSectionView: View {
       }
   }
 
-  /// This section's rows; the gate is the section's own, and keeping it in a
-  /// property leaves the section's shape untouched.
+  /// This section's card; the gate is the section's own.
   @ViewBuilder
   private var sectionContent: some View {
     if flags.isEnabled(.ssh) {
-      SidebarSection {
-        ForEach(Array((remoteCollapsed || !flags.isEnabled(.ssh) ? [] : model.connections).enumerated()), id: \.element.id) { index, config in
+      let online = model.connections.filter { model.sessionID(for: $0) != nil }.count
+      let offline = model.connections.count - online
+      KitSection(Text("Remote"), isExpanded: .expanded(collapsed: $remoteCollapsed)) {
+        ForEach(Array(model.connections.enumerated()), id: \.element.id) { index, config in
           SSHConfigGroup(
             config: config,
             state: state,
@@ -53,28 +53,33 @@ struct RemoteSectionView: View {
             onEdit: { editingConfig = $0 }
           )
         }
-        .onMove(perform: connectionReorder.move)
-      } header: {
-        SidebarSectionHeader(collapsed: $remoteCollapsed) {
-          Text("Remote")
-        } trailing: {
-          if flags.isEnabled(.ssh) {
-            Button {
-              model.showingNewConnection = true
-            } label: {
-              Image(systemName: "plus")
-            }.buttonStyle(.borderless).help("New SSH connection")
+      } icon: {
+        SidebarSectionIcon(systemImage: "globe", hue: .blue)
+      } meta: {
+        if model.connections.isEmpty {
+          MetaLine("No hosts")
+        } else {
+          HStack(spacing: 4) {
+            if online > 0 {
+              StatusDot(hue: .green, size: 6)
+              Text("\(online) online")
+            }
+            if online > 0, offline > 0 {
+              Text("·").foregroundStyle(.kitTertiary)
+            }
+            if offline > 0 {
+              StatusDot(hue: .gray, size: 6)
+              Text("\(offline) offline")
+            }
           }
         }
+      } accessory: {
+        Button("New SSH Connection", systemImage: "plus") {
+          model.showingNewConnection = true
+        }
+        .help("New SSH connection")
       }
     } // end if (ssh section gate)
-  }
-
-  /// Applies a session rename and exits edit mode. The state is the container's
-  /// (the Local section renames the same rows).
-  private func commitRename(_ id: UUID, _ name: String) {
-    model.renameSession(id, to: name)
-    state.renamingSessionID = nil
   }
 }
 
@@ -83,11 +88,10 @@ struct RemoteSectionView: View {
 private struct SSHConfigGroup: View {
   @Environment(AppModel.self) private var model
   let config: SSHConfig
-  /// The sidebar state the CONTAINER owns (SidebarChrome.swift): the session
-  /// rename and the database rename sheet, both shared with the Local section.
+  /// The sidebar's shared state (SidebarChrome.swift): the session rename, the
+  /// database rename sheet and the filter.
   let state: SidebarState
-  /// This host's row in the sidebar's host list: the `List` reorders hosts
-  /// through `.onMove`, the `LazyVStack` by dragging the row.
+  /// This host's row in the sidebar's host list.
   let reorder: SidebarReorder
   let onEdit: (SSHConfig) -> Void
   private var flags: FeatureFlagsStore { .shared }
@@ -97,15 +101,84 @@ private struct SSHConfigGroup: View {
   private var sessionReorder: SidebarReorderGroup {
     SidebarReorderGroup(.sshSessions(config.id)) { model.moveSSHSession(for: config, from: $0, to: $1) }
   }
-  
+
+  /// The host's sub-rows pass the filter by their own name, or all of them when
+  /// the host's name matches.
+  private func shows(_ name: String) -> Bool {
+    state.matches(config.displayName) || state.matches(name)
+  }
+
+  private var webSessions: [WebSession] {
+    flags.isEnabled(.web) ? model.webSessions.all.filter { $0.sshConfigID == config.id && shows($0.sidebarTitle) } : []
+  }
+
+  private var databaseConnections: [DatabaseConnection] {
+    flags.isEnabled(.database)
+      ? model.databaseConnections.filter { $0.sshConfigID == config.id && shows($0.displayName) } : []
+  }
+
+  private var shellSessions: [TerminalSession] { model.shellSessions(for: config) }
+
   var body: some View {
+    let visibleSessions = shellSessions.filter { shows(model.displayName(for: $0)) }
+    if state.matches(config.displayName) || !visibleSessions.isEmpty || !webSessions.isEmpty
+      || !databaseConnections.isEmpty
+    {
+      hostRow
+      // Only SSH SHELL sessions get a terminal row here. A host-bound web page or
+      // database connection has its own row view in the loops below; emitting one
+      // here too would render its name twice (once with a terminal icon).
+      ForEach(Array(shellSessions.enumerated()), id: \.element.id) { index, session in
+        if shows(model.displayName(for: session)) {
+          SessionRow(
+            session: session,
+            defaultLabel: model.displayName(for: session),
+            isRenaming: state.isRenamingSession(session.id),
+            onRename: { model.renameSession(session.id, to: $0) }
+          )
+          .kitRowIndent(1)
+          .sidebarReorderable(sessionReorder.row(at: index))
+          #if os(macOS)
+          // A file dropped on a running SSH session's row: ask whether to upload it
+          // to the session's remote cwd or, for a file on this same host, to type
+          // its path or go to its folder (FileDropActions.swift). Outside the
+          // reorder, whose drop target reads its handler (SidebarReorder.swift).
+          .sidebarFileDrop { files in model.requestFileDrop(files, on: .session(session.id)) }
+          #endif
+          .contextMenu {
+            Button("Rename…") { state.renamingSessionID = session.id }
+            Divider()
+            Button("Close Connection", role: .destructive) {
+              model.removeSession(session.id)
+            }
+          }
+        }
+      }
+      // Saved web pages bound to this host render as indented sub-rows, like the
+      // connection's terminals. Hidden when the web feature is disabled.
+      ForEach(webSessions) { web in
+        WebSessionRow(web: web, environmentName: config.displayName)
+          .kitRowIndent(1)
+      }
+      // Database connections tunneled through this host render as sub-rows,
+      // grouped per host the same way web sessions are. Hidden when the database
+      // feature is disabled; orphaned refs (a removed host) simply don't render.
+      ForEach(databaseConnections) { connection in
+        DatabaseConnectionRow(connection: connection)
+          .kitRowIndent(1)
+          .contextMenu { DatabaseConnectionActions(connection: connection) { state.beginRenameDatabase($0) } }
+      }
+    }
+  }
+
+  private var hostRow: some View {
     SSHConfigRow(config: config)
-      .sidebarRow(.ssh(config.id), reorder: reorder)
-#if os(macOS)
+      .sidebarReorderable(reorder)
+    #if os(macOS)
       // A file dropped on the saved connection — no terminal cwd to follow,
       // so it uploads to the server's home directory (~), once confirmed.
       .sidebarFileDrop { files in model.requestFileDrop(files, on: .host(config)) }
-#endif
+    #endif
       .contextMenu {
         Button("Connect") { model.connect(to: config) }
         Divider()
@@ -115,35 +188,27 @@ private struct SSHConfigGroup: View {
         // opens IMMEDIATELY (no setup sheet) with the URL field empty — the
         // user types the host's address and the page names itself.
         if flags.isEnabled(.web) {
-          Button {
+          Button("Web Session", systemImage: "globe") {
             model.openNewWebSession(on: config)
-          } label: {
-            Label("Web Session", systemImage: "globe")
           }
         }
         if flags.isEnabled(.database) {
-          Button {
+          Button("Database", systemImage: "cylinder.split.1x2") {
             model.databasePresetSSHConfigID = config.id
             model.editingDatabaseConnection = nil
             model.showingNewDatabaseConnection = true
-          } label: {
-            Label("Database", systemImage: "cylinder.split.1x2")
           }
         }
         #if os(macOS)
         if flags.isEnabled(.screen) {
-          Button {
+          Button("Persistent Session", systemImage: "shield.fill") {
             model.createRemoteScreenSession(on: config)
-          } label: {
-            Label("Persistent Session", systemImage: "shield.fill")
           }
           // A remote create must exec on the host's LIVE connection; it is
           // the only entry here that requires the host to be connected.
           .disabled(!model.hasLiveSSHConnection(to: config))
-          Button {
+          Button("Refresh Sessions", systemImage: "arrow.clockwise") {
             model.refreshPersistentSessions()
-          } label: {
-            Label("Refresh Sessions", systemImage: "arrow.clockwise")
           }
         }
         #endif
@@ -153,72 +218,15 @@ private struct SSHConfigGroup: View {
         if flags.isEnabled(.authorizedKeys) {
           Button("Authorized Keys", systemImage: "key.2.on.ring") {
             model.showAuthorizedKeys(for: .ssh(config))
-          }.buttonStyle(.borderless).help("Manage the selected connection's authorized keys")
-            .accessibilityIdentifier("ssh-cell-\(config.host)")
+          }
+          .help("Manage the selected connection's authorized keys")
+          .accessibilityIdentifier("ssh-cell-\(config.host)")
         }
         Divider()
         Button("Delete Connection", role: .destructive) {
           model.deleteConnection(config)
         }
       }
-    // Only SSH SHELL sessions get a terminal row here. A host-bound web page or
-    // database connection has its own row view in the loops below; emitting one
-    // here too would render its name twice (once with a terminal icon).
-    ForEach(Array(model.shellSessions(for: config).enumerated()), id: \.element.id) { index, session in
-      SessionRow(
-        session: session,
-        defaultLabel: model.displayName(for: session),
-        subtitle: "\(config.user)@\(config.host):\(config.port)",
-        isRenaming: state.renamingSessionID == session.id,
-        onCommitRename: { commitRename(session.id, $0) },
-        onCancelRename: { state.renamingSessionID = nil }
-      )
-      .padding(.leading, 14)
-      .sidebarRow(.session(session.id), reorder: sessionReorder.row(at: index))
-#if os(macOS)
-      // A file dropped on a running SSH session's row: ask whether to upload it
-      // to the session's remote cwd or, for a file on this same host, to type
-      // its path or go to its folder (FileDropActions.swift).
-      .sidebarFileDrop { files in model.requestFileDrop(files, on: .session(session.id)) }
-#endif
-      .contextMenu {
-        Button("Rename…") { state.renamingSessionID = session.id }
-        Divider()
-        Button("Close Connection", role: .destructive) {
-          model.removeSession(session.id)
-        }
-      }
-    }
-    .onMove(perform: sessionReorder.move)
-    // Saved web pages bound to this host render as SSH-section rows, in the
-    // same indented sub-row layout as the connection's terminals. Hidden when
-    // the web feature is disabled.
-    if FeatureFlagsStore.shared.isEnabled(.web) {
-    ForEach(model.webSessions.all.filter { $0.sshConfigID == config.id }) { web in
-      WebSessionRow(web: web, environmentName: config.displayName)
-        .padding(.leading, 14)
-        .sidebarRow(model.rowSelection(for: web))
-    }
-    }
-    // Database connections tunneled through this host render as SSH-section
-    // sub-rows, grouped per host the same way web sessions are. Hidden when
-    // the database feature is disabled; orphaned refs (a removed host) simply
-    // don't render, matching the web-session behavior.
-    if FeatureFlagsStore.shared.isEnabled(.database) {
-    ForEach(model.databaseConnections.filter { $0.sshConfigID == config.id }) { connection in
-      DatabaseConnectionRow(connection: connection)
-        .padding(.leading, 14)
-        .sidebarRow(model.rowSelection(for: connection))
-        .contextMenu { DatabaseConnectionActions(connection: connection) { state.beginRenameDatabase($0) } }
-    }
-    }
-  }
-
-  /// Applies a session rename and exits edit mode. The state is the container's
-  /// (the Local section renames the same rows).
-  private func commitRename(_ id: UUID, _ name: String) {
-    model.renameSession(id, to: name)
-    state.renamingSessionID = nil
   }
 }
 
@@ -230,49 +238,40 @@ private struct SSHConfigRow: View {
   private var flags: FeatureFlagsStore { .shared }
 
   var body: some View {
-    HStack(spacing: 8) {
-      Image(systemName: "network")
-        .foregroundStyle(.secondary)
-      Text(config.displayName)
-      Spacer()
-      if model.sessionID(for: config) != nil {
-        Circle()
-          .fill(.green)
-          .frame(width: 7, height: 7)
+    let isConnected = model.sessionID(for: config) != nil
+    SidebarRow(value: AppModel.Selection.ssh(config.id), config.displayName, systemImage: "network") {
+      if isConnected {
+        StatusDot(hue: .green)
           .accessibilityLabel("Connected")
-          .transition(SidebarMotion.iconTransition)
+          .transition(.scale.combined(with: .opacity))
         // Trailing + menu: create an ssh-tunnelled Web/Database session for
         // this connected host. Visible only while connected, items gated by
         // their feature flag. A web session opens immediately (no sheet).
         if flags.isEnabled(.web) || flags.isEnabled(.database) {
           Menu {
             if flags.isEnabled(.web) {
-              Button {
+              Button("Web Session", systemImage: "globe") {
                 model.openNewWebSession(on: config)
-              } label: {
-                Label("Web Session", systemImage: "globe")
               }
             }
             if flags.isEnabled(.database) {
-              Button {
+              Button("Database", systemImage: "cylinder.split.1x2") {
                 model.databasePresetSSHConfigID = config.id
                 model.editingDatabaseConnection = nil
                 model.showingNewDatabaseConnection = true
-              } label: {
-                Label("Database", systemImage: "cylinder.split.1x2")
               }
             }
           } label: {
-            Image(systemName: "plus")
+            Label("New Session for This Host", systemImage: "plus")
           }
-          .buttonStyle(.borderless)
+          .menuStyle(.button)
+          .buttonStyle(.kitIcon)
           .menuIndicator(.hidden)
           .help("New session for this host")
-          .transition(SidebarMotion.iconTransition)
+          .transition(.scale.combined(with: .opacity))
         }
       }
     }
-    .sidebarAnimation(value: model.sessionID(for: config) != nil)
-    .contentShape(Rectangle())
+    .animation(.kit, value: isConnected)
   }
 }

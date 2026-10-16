@@ -34,7 +34,7 @@ final class AppModel {
   /// into the session they open (or focuses the open one) and the content
   /// area presents nothing for them. Every other case is the resting state
   /// of an open item.
-  enum Selection: Hashable {
+  nonisolated enum Selection: Hashable, Sendable {
     /// A live terminal session — the resting state of every open item: local
     /// and SSH shells, action runs, attached persistent sessions, open web
     /// pages and open database browsers.

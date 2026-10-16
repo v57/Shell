@@ -1,3 +1,4 @@
+import ComponentKit
 import SwiftUI
 
 /// The Notes section: the notes Shell shares with the Markdown app, read per visible row. Hidden
@@ -5,19 +6,24 @@ import SwiftUI
 /// collapse state is local to this section.
 struct NotesSectionView: View {
   @Environment(AppModel.self) private var model
+  /// The sidebar's shared state (SidebarChrome.swift): the filter.
+  let state: SidebarState
 
   /// Collapse state for this section, persisted across launches.
   @AppStorage("sidebar.notes.collapsed") private var notesCollapsed = false
 
   private var flags: FeatureFlagsStore { .shared }
 
+  private var notes: [NotesStore.NoteSummary] {
+    model.notes.notes.filter { state.matches(model.notes.title(for: $0.id)) }
+  }
+
   var body: some View {
     if flags.isEnabled(.notes) {
-      SidebarSection {
-        ForEach(notesCollapsed || !flags.isEnabled(.notes) ? [] : model.notes.notes) { note in
+      let count = model.notes.notes.count
+      KitSection(Text("Notes"), isExpanded: .expanded(collapsed: $notesCollapsed)) {
+        ForEach(notes) { note in
           NoteRow(note: note)
-            .sidebarRow(.note(note.id))
-            .notesFileDrop()
             .contextMenu {
               Button(note.isEncrypted ? "Decrypt Note" : "Encrypt Note") {
                 model.notes.setEncrypted(!note.isEncrypted, for: note.id)
@@ -28,60 +34,51 @@ struct NotesSectionView: View {
               }
             }
         }
-      } header: {
-        SidebarSectionHeader(collapsed: $notesCollapsed) {
-          Text("Notes")
-        } trailing: {
-          if flags.isEnabled(.notes) {
-            Button {
-              model.newNote()
-            } label: {
-              Image(systemName: "plus")
-            }.buttonStyle(.borderless).help("New note")
-          }
+      } icon: {
+        SidebarSectionIcon(systemImage: "doc.text", hue: .orange)
+      } meta: {
+        if let edited = model.notes.notes.map(\.lastUpdate).max() {
+          Text("\(count == 1 ? "1 note" : "\(count) notes")")
+            + Text("  ·  ").foregroundStyle(.kitTertiary)
+            + Text("edited \(edited, format: .relative(presentation: .named))")
+        } else {
+          MetaLine("No notes")
         }
-        .notesFileDrop()
+      } accessory: {
+        Button("New Note", systemImage: "plus") {
+          model.newNote()
+        }
+        .help("New note")
       }
+      // Text files dropped on the section: copied into encrypted notes, or linked.
+      .notesFileDrop()
     } // end if (notes section gate)
   }
 }
 
 /// A note row in the sidebar. The title is the first non-empty line of the
 /// note (editing it renames it); the preview is the next non-empty line.
-/// Both are DECRYPTED IN THE VIEW via `decryptedNote(id:)` — SwiftUI's List
-/// materializes visible rows only, so only visible cells decrypt (results
-/// cached by the store).
+/// Both are DECRYPTED IN THE VIEW via `decryptedNote(id:)` — the sidebar's
+/// `LazyVStack` materializes visible rows only, so only visible rows decrypt
+/// (results cached by the store).
 private struct NoteRow: View {
   @Environment(AppModel.self) private var model
   let note: NotesStore.NoteSummary
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 2) {
-      HStack(spacing: 8) {
-        Image(systemName: "note.text")
-          .foregroundStyle(.secondary)
-        Text(model.notes.title(for: note.id))
-          .lineLimit(1)
-          .truncationMode(.tail)
-        Spacer()
-        DetachReturnBadge(selection: .note(note.id))
-        if note.isEncrypted {
-          Image(systemName: "lock.fill")
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-            .help("Markdown keeps this note's file encrypted (it syncs encrypted either way)")
-        }
-      }
-      .sidebarAnimation(value: note.isEncrypted)
-      if let subtitle = model.notes.subtitle(for: note.id) {
-        Text(subtitle)
-          .font(.caption)
-          .foregroundStyle(.secondary)
-          .lineLimit(1)
-          .truncationMode(.tail)
+    SidebarRow(
+      value: AppModel.Selection.note(note.id), model.notes.title(for: note.id),
+      subtitle: model.notes.subtitle(for: note.id), systemImage: "note.text"
+    ) {
+      DetachReturnBadge(selection: .note(note.id))
+      if note.isEncrypted {
+        Image(systemName: "lock.fill")
+          .foregroundStyle(.kitSecondary)
+          .help("Markdown keeps this note's file encrypted (it syncs encrypted either way)")
+          .transition(.scale.combined(with: .opacity))
       }
     }
-    .contentShape(Rectangle())
+    .animation(.kit, value: note.isEncrypted)
   }
 }
 
@@ -97,7 +94,7 @@ private struct NotesFileDrop: ViewModifier {
 
   func body(content: Content) -> some View {
     #if os(macOS)
-    content.sidebarFileDrop { files in model.requestFileDrop(files, on: .notes) }
+    content.fileDrop { files in model.requestFileDrop(files, on: .notes) }
     #else
     content
     #endif

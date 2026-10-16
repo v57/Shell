@@ -171,9 +171,9 @@ enum FileDrop {
 }
 
 extension View {
-  /// `fileDrop` for a sidebar row. A drag-reorderable row of the `LazyVStack` sidebar is already a drop target
-  /// (its siblings), and SwiftUI gives a drop to the innermost target only, so the row's reorder target takes the
-  /// files too (`SidebarRowDropHandler`); this one serves every other row.
+  /// `fileDrop` for a sidebar row. A drag-reorderable row (`sidebarReorderable`, SidebarReorder.swift) is already a
+  /// drop target (its siblings), and SwiftUI gives a drop to the innermost target only, so the row's reorder target
+  /// takes the files too (`SidebarRowDropHandler`); this one serves a row that doesn't reorder.
   func sidebarFileDrop(perform: @escaping ([ShellFile]) -> Void) -> some View {
     let read: @MainActor () -> Bool = {
       let files = FileDrop.read()

@@ -1,3 +1,4 @@
+import ComponentKit
 import Foundation
 #if os(macOS)
 import AppKit
@@ -5,37 +6,33 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The sidebar's drag-to-reorder machinery for the `LazyVStack` container.
+/// Drag to reorder for the sidebar rows that ALSO take file drops (local
+/// sessions, SSH hosts and their sessions). Every other list reorders with the
+/// kit's `ReorderableSection`; these can't, because SwiftUI hands a drop to the
+/// innermost `onDrop` under the pointer only: the kit's reorder target (which
+/// accepts rows alone) would shadow the row's file drop, or the file drop the
+/// reorder. So here ONE target per row takes both: a sibling row reorders the
+/// list, a file goes to the row's `SidebarRowDropHandler` (`sidebarFileDrop`,
+/// FileDrag.swift). It looks like the kit's: the dragged row lifts as the
+/// raised card and leaves a field slot where it will land.
 ///
-/// A `List` reorders rows with `.onMove` — one call per list, in the section
-/// views — but a `LazyVStack` has no reordering of its own, so there the ROWS do
-/// it: a reorderable row is a drag source (publishing which list it is in and
+/// A reorderable row is a drag source (publishing which list it is in and
 /// where) and a drop target, and the target MOVES the dragged row to its own
-/// index as the drag passes over it, which is the live reordering a `List` shows.
-///
-/// Both containers end up calling the SAME model `move*` function for the list
-/// (`SidebarReorderGroup.move`), so a row kind reorders identically either way.
+/// index as the drag passes over it — the live reordering a `List` shows.
 
-/// One drag-reorderable list of the sidebar. WHICH list a row belongs to is what
-/// stops a drop between lists: a local session dragged over an SSH host's row is
-/// refused, exactly as `.onMove` refuses it in the `List` sidebar.
+/// One drag-reorderable list. WHICH list a row belongs to is what stops a drop
+/// between lists: a local session dragged over an SSH host's row is refused.
 enum SidebarReorderList: Hashable {
   /// The Local section's shell rows (`AppModel.moveLocalSession`).
   case localSessions
-  /// The Local section's saved web pages (`AppModel.moveLocalWebSession`).
-  case localWebSessions
-  /// The Local section's untunneled database connections
-  /// (`AppModel.moveLocalDatabaseConnection`).
-  case localDatabaseConnections
   /// The saved SSH hosts (`AppModel.moveConnection`).
   case sshConnections
   /// The running sessions under one SSH host (`AppModel.moveSSHSession(for:)`).
   case sshSessions(UUID)
 }
 
-/// One reorderable list of a section: its identity plus its move, in ONE place,
-/// so the section's `ForEach` (the `List`'s `.onMove`) and its rows (the
-/// `LazyVStack`'s drags) reorder through the same call.
+/// One reorderable list: its identity plus its move, so every row of it
+/// reorders through the same model call.
 struct SidebarReorderGroup {
   /// Which list this is — the drop check: drops only land inside the same list.
   let list: SidebarReorderList
@@ -62,11 +59,9 @@ struct SidebarReorder {
   let move: (IndexSet, Int) -> Void
 }
 
-/// The in-flight row drag of the `LazyVStack` sidebar, shared by every draggable
-/// row so a drop target can find out WHICH row is being dragged (and in which
-/// list). Owned by `SidebarView2` and published through the environment; absent
-/// in the `List` sidebar, where `List` owns drag-reordering and a row must not
-/// claim the drag gesture for itself.
+/// The in-flight row drag, shared by every draggable row so a drop target can
+/// find out WHICH row is being dragged (and in which list). Owned by
+/// `SidebarView` and published through the environment.
 @Observable
 final class SidebarDragState {
   /// The type a sidebar row drag declares and accepts (declared in Shell-Info.plist). The provider's payload is
@@ -92,7 +87,7 @@ final class SidebarDragState {
   }
 
   /// Whether `reorder` is the row being dragged. That row is drawn only as the
-  /// drag image, so in the sidebar it stays as an empty gap where it would drop.
+  /// drag image, so in the sidebar it stays as the slot it will drop into.
   func isDragging(_ reorder: SidebarReorder) -> Bool {
     list == reorder.list && index == reorder.index
   }
@@ -104,29 +99,29 @@ final class SidebarDragState {
   }
 }
 
-private struct SidebarDragStateKey: EnvironmentKey {
-  static let defaultValue: SidebarDragState? = nil
-}
-
 extension EnvironmentValues {
-  /// The in-flight row drag — set by `SidebarView2` (see `.sidebarDragState`).
-  var sidebarDragState: SidebarDragState? {
-    get { self[SidebarDragStateKey.self] }
-    set { self[SidebarDragStateKey.self] = newValue }
-  }
+  /// The in-flight row drag — set by `SidebarView` (see `.sidebarDragState`).
+  @Entry var sidebarDragState: SidebarDragState? = nil
+  /// The row's handler for drops other than a sibling's (see `SidebarRowDropHandler`).
+  @Entry var sidebarRowDropHandler: SidebarRowDropHandler? = nil
 }
 
 extension View {
-  /// Publishes the drag state to every row below. Applied once, by the
-  /// `LazyVStack` container.
+  /// Publishes the drag state to every row below. Applied once, by `SidebarView`.
   func sidebarDragState(_ state: SidebarDragState) -> some View {
     environment(\.sidebarDragState, state)
+  }
+
+  /// Makes this sidebar row reorderable by dragging within its list (and keeps
+  /// its file drop working, see the top of this file).
+  func sidebarReorderable(_ reorder: SidebarReorder) -> some View {
+    modifier(SidebarRowDrag(reorder: reorder))
   }
 }
 
 /// What a row does with OTHER drops than its siblings (files, on a session row), published by the row
 /// (`sidebarFileDrop`, FileDrag.swift) to its drag-reorder target. SwiftUI hands a drop to the innermost target
-/// under the pointer only, so in the `LazyVStack` sidebar the row's reorder target has to take those too.
+/// under the pointer only, so the row's reorder target has to take those too.
 struct SidebarRowDropHandler {
   /// The types the row accepts besides its siblings.
   let contentTypes: [UTType]
@@ -134,22 +129,9 @@ struct SidebarRowDropHandler {
   let perform: @MainActor () -> Bool
 }
 
-private struct SidebarRowDropHandlerKey: EnvironmentKey {
-  static let defaultValue: SidebarRowDropHandler? = nil
-}
-
-extension EnvironmentValues {
-  /// The row's handler for drops other than a sibling's (see `SidebarRowDropHandler`).
-  var sidebarRowDropHandler: SidebarRowDropHandler? {
-    get { self[SidebarRowDropHandlerKey.self] }
-    set { self[SidebarRowDropHandlerKey.self] = newValue }
-  }
-}
-
 /// The drop half of a row's drag-reorder: while the drag passes over a sibling
-/// row, that sibling moves the dragged row to its own index — the live
-/// reordering `.onMove` gives the `List` sidebar. Any other drop goes to the
-/// row's `SidebarRowDropHandler`, when it has one.
+/// row, that sibling moves the dragged row to its own index. Any other drop goes
+/// to the row's `SidebarRowDropHandler`, when it has one.
 struct SidebarRowDropDelegate: DropDelegate {
   let reorder: SidebarReorder
   let drag: SidebarDragState
@@ -185,7 +167,9 @@ struct SidebarRowDropDelegate: DropDelegate {
     // AT the drop target's index, which is what the drag state must remember so
     // the next hover moves the same row (and not the one it displaced).
     let destination = from < reorder.index ? reorder.index + 1 : reorder.index
-    reorder.move(IndexSet(integer: from), destination)
+    withAnimation(.kitSpring) {
+      reorder.move(IndexSet(integer: from), destination)
+    }
     drag.update(index: reorder.index)
   }
 
@@ -196,17 +180,16 @@ struct SidebarRowDropDelegate: DropDelegate {
   }
 }
 
-/// Makes a sidebar row a drag source and a drop target (`LazyVStack` only — in
-/// the `List` sidebar `drag` is nil, so the row keeps its hands off the drag
-/// gesture, which `.onMove` owns there).
-struct SidebarRowDrag: ViewModifier {
+/// Makes a sidebar row a drag source and a drop target.
+private struct SidebarRowDrag: ViewModifier {
   @Environment(\.sidebarRowDropHandler) private var other
-  let reorder: SidebarReorder?
-  let drag: SidebarDragState?
+  @Environment(\.sidebarDragState) private var drag
+  let reorder: SidebarReorder
 
   func body(content: Content) -> some View {
-    if let reorder, let drag {
+    if let drag {
       content
+        .modifier(SidebarDraggedRowSlot(reorder: reorder, drag: drag))
         .onDrag {
           // A drag always starts on the main thread, but `onDrag`'s closure is
           // not MainActor-isolated (the same assumption the ⌘W monitor makes).
@@ -219,8 +202,12 @@ struct SidebarRowDrag: ViewModifier {
             return nil
           }
           return provider
+        } preview: {
+          // The kit's dragged row: the raised card, lifted.
+          content
+            .kitLifted(true)
+            .frame(width: 220)
         }
-        .modifier(SidebarDraggedRowGap(reorder: reorder, drag: drag))
         .onDrop(
           of: [SidebarDragState.contentType] + (other?.contentTypes ?? []),
           delegate: SidebarRowDropDelegate(reorder: reorder, drag: drag, other: other))
@@ -231,18 +218,25 @@ struct SidebarRowDrag: ViewModifier {
 }
 
 /// The drag image IS the row while it is dragged, so the row itself only keeps
-/// its space. A drag can end without a drop on a row (outside the sidebar, or
-/// back on itself), so the session's end clears the drag state too. Before
-/// macOS 26 / iOS 27 nothing reports that end, and a hidden row could stay
-/// hidden, so there the row stays drawn.
-private struct SidebarDraggedRowGap: ViewModifier {
+/// its place, as the kit's field slot it will sit back into. A drag can end
+/// without a drop on a row (outside the sidebar, or back on itself), so the
+/// session's end clears the drag state too. Before macOS 26 / iOS 27 nothing
+/// reports that end, and a hidden row could stay hidden, so there the row stays
+/// drawn.
+private struct SidebarDraggedRowSlot: ViewModifier {
   let reorder: SidebarReorder
   let drag: SidebarDragState
 
   func body(content: Content) -> some View {
     if #available(macOS 26.0, iOS 27.0, *) {
+      let isDragging = drag.isDragging(reorder)
       content
-        .opacity(drag.isDragging(reorder) ? 0 : 1)
+        .opacity(isDragging ? 0 : 1)
+        .background {
+          if isDragging {
+            RoundedRectangle(cornerRadius: KitMetrics.radius, style: .continuous).fill(.kitField)
+          }
+        }
         .onDragSessionUpdated { session in
           if case .ended = session.phase { drag.end() }
         }

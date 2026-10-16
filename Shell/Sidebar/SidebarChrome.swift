@@ -1,16 +1,38 @@
+import ComponentKit
 import SwiftUI
 import ShellMonitoring
 
 /// The sidebar's SHARED state: what its sections and its own presentation need,
-/// in ONE object, so the `List` sidebar (`SidebarView`) and the `LazyVStack` one
-/// (`SidebarView2`) can both carry it. Each container owns a `@State` instance
-/// and hands it to `SidebarSections` and to `.sidebarChrome(_:)`; every
-/// per-section state stays in its section.
+/// in ONE object. `SidebarView` owns a `@State` instance and hands it to the
+/// sections and to `.sidebarChrome(_:)`; every per-section state stays in its
+/// section.
 @Observable
 final class SidebarState {
+  /// The bottom bar's filter: rows whose name doesn't contain it are hidden.
+  var searchText = ""
+
+  /// Whether a row named `name` passes the filter.
+  func matches(_ name: String) -> Bool {
+    let query = searchText.trimmingCharacters(in: .whitespaces)
+    return query.isEmpty || name.localizedCaseInsensitiveContains(query)
+  }
+
   /// The session currently being renamed (shows an inline text field). SHARED:
   /// both the Local and the Remote section rename session rows in place.
   var renamingSessionID: UUID?
+
+  /// Whether the session `id` is being renamed, as the binding `.kitRename` takes.
+  func isRenamingSession(_ id: UUID) -> Binding<Bool> {
+    Binding(
+      get: { self.renamingSessionID == id },
+      set: { renaming in
+        if renaming {
+          self.renamingSessionID = id
+        } else if self.renamingSessionID == id {
+          self.renamingSessionID = nil
+        }
+      })
+  }
 
   /// The database connection being renamed (drives the rename sheet), and the
   /// text field's draft value, pre-filled with the connection's display name.
@@ -22,11 +44,11 @@ final class SidebarState {
   /// Live CPU/GPU/wattage for the Local section header (macOS only — the reads
   /// need IOKit's AppleSMC / IOAccelerator).
   ///
-  /// Owned by the CONTAINER rather than by `LocalSectionView` because its
+  /// Owned by the sidebar rather than by `LocalSectionView` because its
   /// LIFETIME belongs to the sidebar: `SidebarChrome` starts it while the
   /// Monitoring feature is on and stops it the moment the feature flips off, and
-  /// a Section's own onAppear/onDisappear also fire when the section scrolls out
-  /// of view — which must not stop the sampling. `LocalSectionView` only RENDERS
+  /// a lazy section's own onAppear/onDisappear also fire when it scrolls out of
+  /// view — which must not stop the sampling. `LocalSectionView` only RENDERS
   /// it.
   let statsMonitor = SystemStatsMonitor()
   /// The stats graphs sheet, opened by clicking the Local section header.
@@ -48,20 +70,16 @@ final class SidebarState {
   }
 }
 
-/// What the sidebar DOES around its sections, as ONE modifier both containers
-/// apply, so the `List` sidebar and the `LazyVStack` one behave identically:
+/// What the sidebar DOES around its sections, as ONE modifier:
 ///
 ///  - the selection routing (`onChange(of: model.selection)`), which turns a
 ///    clicked row's `Selection` into a connect/attach/open action;
 ///  - the sheets and alerts whose STATE is shared by more than one section (the
 ///    web-session editor, the database rename sheet, the authorized-keys panel);
 ///  - the live-stats monitor's lifetime (`SidebarState.statsMonitor`).
-///
-/// Only the row and header RENDERING differs between the containers — see
-/// `.sidebarRow(_:reorder:)` and `SidebarSection` in SidebarContainer.swift.
 struct SidebarChrome: ViewModifier {
   @Environment(AppModel.self) private var model
-  /// The container's shared sidebar state (see `SidebarState`).
+  /// The sidebar's shared state (see `SidebarState`).
   let state: SidebarState
 
   /// The feature-flag source of truth. Reads `.isEnabled(_:)` here so a
@@ -83,7 +101,7 @@ struct SidebarChrome: ViewModifier {
       .navigationTitle("Terminals")
       // Drive the history-mode → terminals swap with a blur-replace transition
       // (both branches carry .transition(.blurReplace)).
-      .animation(.easeInOut(duration: 0.25), value: model.historyMode)
+      .animation(.kit, value: model.historyMode)
       #if os(macOS)
       .alert(item: $model.screenMonitor.actionError) { error in
         Alert(
@@ -143,17 +161,6 @@ struct SidebarChrome: ViewModifier {
         StatsGraphView(monitor: state.statsMonitor)
       }
       #endif
-      #if os(iOS)
-      .toolbar {
-        ToolbarItem(placement: .navigationBarTrailing) {
-          Button {
-            model.showingSettings = true
-          } label: {
-            Label("Settings", systemImage: "gearshape")
-          }
-        }
-      }
-      #endif
   }
 
   #if os(macOS)
@@ -167,7 +174,7 @@ struct SidebarChrome: ViewModifier {
 
 extension View {
   /// Applies the sidebar's shared behavior (selection routing, sheets, alerts,
-  /// the live-stats monitor). Both containers end with this — see `SidebarChrome`.
+  /// the live-stats monitor) — see `SidebarChrome`.
   func sidebarChrome(_ state: SidebarState) -> some View {
     modifier(SidebarChrome(state: state))
   }

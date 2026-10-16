@@ -1,3 +1,4 @@
+import ComponentKit
 import SwiftUI
 import ShellKit
 
@@ -15,29 +16,15 @@ struct WebSessionRow: View {
   private var liveSession: TerminalSession? { model.liveWebSession(for: web) }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 2) {
-      HStack(spacing: 8) {
-        Image(systemName: "globe")
-          .foregroundStyle(.secondary)
-        Text(web.name.isEmpty ? (web.url.isEmpty ? "Web Session" : web.url) : web.name)
-          .lineLimit(1)
-          .truncationMode(.middle)
-        Spacer()
-        Circle()
-          .fill(liveSession != nil ? Color.green : Color.gray)
-          .frame(width: 7, height: 7)
-          .accessibilityLabel(liveSession != nil ? "Open" : "Closed")
-          .help(liveSession != nil ? "Web session open" : "Web session closed")
-      }
-      if let subtitle {
-        Text(subtitle)
-          .font(.caption2)
-          .foregroundStyle(.secondary)
-          .lineLimit(1)
-          .truncationMode(.middle)
-      }
+    let isOpen = liveSession != nil
+    // The row carries the open page's session when it is up (so the row shows
+    // selected while its WebView is visible), else the page's own id —
+    // activating that opens it.
+    SidebarRow(value: model.rowSelection(for: web), web.sidebarTitle, subtitle: subtitle, systemImage: "globe") {
+      StatusDot(hue: isOpen ? .green : .gray, isHollow: !isOpen)
+        .accessibilityLabel(isOpen ? "Open" : "Closed")
+        .help(isOpen ? "Web session open" : "Web session closed")
     }
-    .contentShape(Rectangle())
     .contextMenu {
       Button("Open") { model.openOrFocusWebSession(web) }
       Button("Reconnect") { model.reconnectWebSession(web) }
@@ -52,5 +39,12 @@ struct WebSessionRow: View {
   private var subtitle: String? {
     if let environmentName, !environmentName.isEmpty { return environmentName }
     return web.url.isEmpty ? nil : web.url
+  }
+}
+
+extension WebSession {
+  /// The page's name in the sidebar: its name, else its URL.
+  var sidebarTitle: String {
+    name.isEmpty ? (url.isEmpty ? "Web Session" : url) : name
   }
 }

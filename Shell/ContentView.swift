@@ -1,4 +1,5 @@
 import Combine
+import ComponentKit
 import SwiftUI
 import ShellKit
 import ShellIntegrations
@@ -47,22 +48,16 @@ struct ContentView: View {
 
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   /// Whether the window appears active (key window). Animations freeze while
-  /// the window is unfocused; the sidebar container choice below deliberately
-  /// ignores it so focus never swaps the sidebar (state loss).
+  /// the window is unfocused.
   @WindowAppearsActive private var appearsActive
+  /// The split view's columns, for the sidebar's own toggle on iPad.
+  @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
 
-  /// The Animations feature, unless the system asks for reduced motion.
-  /// Decides only which sidebar CONTAINER mounts — stable across window
-  /// focus, so unfocusing never swaps SidebarView2 for SidebarView.
-  private var useAnimatedSidebar: Bool {
-    flags.isEnabled(.animations) && !reduceMotion
-  }
-
-  /// Whether anything animates right now: the feature, motion, AND the
-  /// window appearing active. Feeds the terminal, the detail transition and
-  /// (through SidebarView2) the sidebar's own motion.
+  /// Whether anything animates right now: the Animations feature, motion, AND
+  /// the window appearing active. Feeds the terminal and the detail transition
+  /// (the sidebar's motion is the kit's own).
   private var animates: Bool {
-    useAnimatedSidebar && appearsActive
+    flags.isEnabled(.animations) && !reduceMotion && appearsActive
   }
 
   /// How a detail page enters and leaves when the selection changes: the new
@@ -78,14 +73,9 @@ struct ContentView: View {
   var body: some View {
     @Bindable var model = model
     ZStack {
-      NavigationSplitView {
-        HStack(spacing: 0) {
-          if useAnimatedSidebar {
-            SidebarView2()
-          } else {
-            SidebarView()
-          }
-        }
+      NavigationSplitView(columnVisibility: $columnVisibility) {
+        SidebarView(columnVisibility: $columnVisibility)
+          .navigationSplitViewColumnWidth(min: 220, ideal: KitMetrics.sidebarWidth, max: 360)
       } detail: {
         // A STABLE root for the detail column: `NavigationSplitView` swaps a
         // new root view in without animation, so switching between kinds of

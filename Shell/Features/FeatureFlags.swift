@@ -9,10 +9,10 @@ import Observation
 /// app can turn on/off; `FeatureFlagsStore` is the sole persistence/read layer
 /// for it.
 enum FeatureID: String, CaseIterable, Identifiable {
-  /// Motion in the UI: the custom sidebar's hover, insert/remove, selection
-  /// and icon animations, detail-page transitions, the gliding terminal cursor
-  /// and output typing out. First, so it leads the features list. Also off
-  /// while the system's Reduce Motion is on.
+  /// Motion in the terminal and the pages: detail-page transitions, the
+  /// gliding terminal cursor and output typing out (the sidebar and the other
+  /// ComponentKit views follow the kit's own motion). First, so it leads the
+  /// features list. Also off while the system's Reduce Motion is on.
   case animations
   case sessions
   case screen
@@ -65,7 +65,7 @@ enum FeatureID: String, CaseIterable, Identifiable {
   /// alongside `label` on a settings toggle row.
   var description: String {
     switch self {
-    case .animations: return "Sidebar, page, cursor and output animations"
+    case .animations: return "Page, cursor and output animations"
     case .sessions: return "Local terminal sessions"
     case .screen: return "GNU screen / tmux persistent sessions"
     case .ssh: return "SSH connections and remote terminals"
