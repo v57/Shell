@@ -1,28 +1,28 @@
+import ComponentKit
 import SwiftUI
 import ShellKit
+import ShellIntegrations
 
-/// The actions list: a non-modal overlay panel over the main window
-/// (NOT a sheet) so it appears/closes instantly. A search bar at the top
-/// is always focused; Enter runs the first matching action (even with an
-/// empty query — it runs the first applicable one). Actions are grouped
-/// by category into sections; each section is a horizontal ScrollView of
-/// chips. With a terminal selected, only actions applicable to that
-/// environment are shown; with none selected everything is listed and
-/// still runnable — `runAction` defaults to the local machine (macOS;
-/// on iOS there is no local pty, so chips stay disabled).
+/// The quick actions (⌘R): ComponentKit's command palette, a non-modal overlay
+/// over the main window (NOT a sheet) so it appears/closes instantly. The search
+/// line is always focused; ↑↓ move through the results and Return runs the
+/// selected one (the first by default, even with an empty query).
+///
+/// Results are group cards: the smart actions of the active local directory's
+/// schemes (Code's CodeActions: run, build, test, lint, clean and distribute,
+/// live while one runs), your own actions, and the apps that open the
+/// directory. With a terminal selected only the actions applicable to its
+/// environment are shown; with none selected everything is listed and still
+/// runnable — `runAction` defaults to the local machine (macOS; on iOS there
+/// is no local pty, so they stay disabled). The scope pop-up picks the
+/// terminal they run in.
 struct ActionsOverlayView: View {
   @Environment(AppModel.self) private var model
   @State private var query = ""
-  @FocusState private var searchFocused: Bool
-
-  private struct Section: Identifiable {
-    let title: String
-    let actions: [Action]
-    var id: String { title }
-  }
 
   /// Applicable actions (plus everything when no session is selected),
-  /// filtered by the search query in display order.
+  /// filtered by the search query, most recently used first (never-used ones
+  /// keep their store order at the bottom).
   private var filteredActions: [Action] {
     let applicable: [Action]
     if let session = model.selectedSession {
@@ -30,212 +30,115 @@ struct ActionsOverlayView: View {
     } else {
       applicable = model.actions.all
     }
-    let q = query.trimmingCharacters(in: .whitespaces)
-    guard !q.isEmpty else { return applicable }
-    return applicable.filter {
-      $0.name.localizedCaseInsensitiveContains(q)
-      || ($0.category ?? "").localizedCaseInsensitiveContains(q)
+    let matching = applicable.filter {
+      matches($0.name) || matches($0.category ?? "") || matches($0.commands)
     }
+    return matching.enumerated().sorted { lhs, rhs in
+      switch (lhs.element.lastUsed, rhs.element.lastUsed) {
+      case let (a?, b?): return a > b
+      case (_?, nil): return true
+      case (nil, _?): return false
+      case (nil, nil): return lhs.offset < rhs.offset  // stable: store order
+      }
+    }.map(\.element)
   }
 
-  /// Filtered actions grouped by category, both levels sorted by last
-  /// usage (most recent first). Never-used items keep the default order
-  /// at the bottom: sections "General" first then alphabetically, chips
-  /// in store (creation) order.
-  private var sections: [Section] {
-    let grouped = Dictionary(grouping: filteredActions) { $0.category ?? "General" }
-    let defaultTitles = grouped.keys.sorted { a, b in
-      if a == "General" { return true }
-      if b == "General" { return false }
-      return a.localizedStandardCompare(b) == .orderedAscending
-    }
-    // A section's usage = its most recently used action.
-    let titles = defaultTitles.sorted { a, b in
-      let lastA = grouped[a]?.compactMap(\.lastUsed).max() ?? .distantPast
-      let lastB = grouped[b]?.compactMap(\.lastUsed).max() ?? .distantPast
-      if lastA != lastB { return lastA > lastB }
-      return defaultTitles.firstIndex(of: a)! < defaultTitles.firstIndex(of: b)!
-    }
-    return titles.map { title in
-      let actions = (grouped[title] ?? []).enumerated().sorted { lhs, rhs in
-        switch (lhs.element.lastUsed, rhs.element.lastUsed) {
-        case let (a?, b?): return a > b
-        case (_?, nil): return true
-        case (nil, _?): return false
-        case (nil, nil): return lhs.offset < rhs.offset  // stable: store order
-        }
-      }.map(\.element)
-      return Section(title: title, actions: actions)
-    }
+  private func matches(_ text: String) -> Bool {
+    let q = query.trimmingCharacters(in: .whitespaces)
+    return q.isEmpty || text.localizedCaseInsensitiveContains(q)
   }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 0) {
-      HStack {
-        Text("Actions").font(.headline)
-        Button {
-          model.createAction()
-        } label: {
-          Image(systemName: "plus")
-        }.buttonStyle(.borderless).help("New action")
-        Spacer()
-        Button {
-          model.showingActions = false
-        } label: {
-          Image(systemName: "xmark")
-        }
-        .buttonStyle(.borderless)
-        .help("Close (Esc)")
-      }.padding(.top, 12)
-
-      searchBar.padding(.top, 8).padding(.bottom, 10)
-      ScrollView {
-        VStack(alignment: .leading, spacing: 14) {
-          ForEach(sections) { section in
-            VStack(alignment: .leading, spacing: 6) {
-              Text(section.title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-              ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 4) {
-                  ForEach(section.actions) { action in
-                    ActionChip(action: action) { run(action) }
-                  }
-                }
-              }
-            }
-          }
-          if model.actions.all.isEmpty {
-            Text("No actions yet — use + in the toolbar to create one.")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-              .padding(.horizontal, 12)
-              .padding(.vertical, 8)
-          } else if filteredActions.isEmpty {
-            Text("No matching actions")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-              .padding(.horizontal, 12)
-              .padding(.vertical, 8)
-          }
-        }
-        .padding(.vertical, 10)
-      }
-    }
-    .frame(width: 480, height: 340)
-    .safeAreaPadding(.horizontal, 12)
-    .background {
-      RoundedRectangle(cornerRadius: 16).fill(.background)
-        .strokeBorder(.quaternary).shadow(radius: 32, y: 8)
-    }
-    .defaultFocus($searchFocused, true)
-    .onAppear {
-      Task { @MainActor in
-        searchFocused = true
-      }
-    }
-  }
-
-  /// The always-focused search field. Enter runs the first action in the
-  /// current results (even when the query is empty).
-  private var searchBar: some View {
-    HStack(spacing: 6) {
-      Image(systemName: "magnifyingglass")
-        .foregroundStyle(.secondary)
-      TextField(filteredActions.first?.name ?? "Search actions", text: $query)
-        .textFieldStyle(.plain)
-        .focused($searchFocused)
-        .onSubmit { runFirst() }
-      if !query.isEmpty {
-        Button {
-          query = ""
-          #if os(macOS)
-          claimFocus()
-          #endif
-        } label: {
-          Image(systemName: "xmark.circle.fill")
-            .foregroundStyle(.secondary)
-        }
-        .buttonStyle(.plain)
-        .help("Clear search")
-      }
-    }
-    .padding(6)
-    .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 6))
-  }
-
-  /// Runs an action, then hands focus back to the search bar when the
-  /// overlay stays open (Focus window = off), so the next query can be
-  /// typed immediately.
-  private func run(_ action: Action) {
-    model.runAction(action)
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+    KitPalette(
+      query: $query, prompt: "Run an action or search",
+      hints: [PaletteHint(["↑", "↓"], "Move"), PaletteHint(["↩"], "Run"), PaletteHint(["esc"], "Close")],
+      dismiss: { model.showingActions = false }
+    ) {
+      scope
+    } content: {
       #if os(macOS)
-      claimFocus()
+      smartActions
+      #endif
+      yourActions
+      #if os(macOS)
+      openWith
+      #endif
+    }
+    .frame(width: 560)
+    // Under the toolbar, like the board's palette, rather than mid-window.
+    .frame(maxHeight: .infinity, alignment: .top)
+    .padding(.top, 56)
+    .onAppear {
+      #if os(macOS)
+      Task { @MainActor in claimFocus() }
       #endif
     }
   }
 
-  /// Runs the first action in the filtered results, if any.
-  private func runFirst() {
-    guard let first = filteredActions.first else { return }
-    run(first)
-  }
+  // MARK: Scope
 
-  #if os(macOS)
-  /// AppKit fallback for "always focused": SwiftUI's FocusState requests
-  /// are dropped for transition-inserted overlay views (verified
-  /// empirically — the first responder stayed on the window's hosting
-  /// view), so walk the key window's view hierarchy and make the search
-  /// field's NSTextField the first responder directly. No-op when the
-  /// field is gone (overlay closed) or already focused.
-  private func claimFocus() {
-    guard let window = NSApp.keyWindow,
-          let field = Self.findTextField(in: window.contentView) else { return }
-    _ = window.makeFirstResponder(field)
-  }
-
-  private static func findTextField(in view: NSView?) -> NSTextField? {
-    guard let view else { return nil }
-    if let field = view as? NSTextField { return field }
-    for subview in view.subviews {
-      if let found = findTextField(in: subview) { return found }
-    }
-    return nil
-  }
-  #endif
-}
-
-/// A single action chip; clicking it runs the action in the current
-/// environment. With no terminal selected it runs on the local machine
-/// (macOS; disabled on iOS, where local actions need a pty that doesn't
-/// exist — see AppModel.runAction).
-private struct ActionChip: View {
-  @Environment(AppModel.self) private var model
-  let action: Action
-  let onRun: () -> Void
-
-  var body: some View {
-    Button {
-      onRun()
-    } label: {
-      Text(action.name).fontWeight(.semibold)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 4)
-        .background(.blue.gradient, in: RoundedRectangle(cornerRadius: 4))
-        .colorScheme(.dark)
-    }
-    .buttonStyle(.plain)
-    .disabled(!canRun)
-    .contextMenu {
-      Button("Edit…") {
-        model.editAction(action)
-      }
-      Button("Remove", role: .destructive) {
-        model.actions.remove(action.id)
+  /// The terminal the actions run in: the selected one, or Local when none is.
+  @ViewBuilder
+  private var scope: some View {
+    let terminals = model.sessions.filter { session in
+      switch model.kind(of: session) {
+      case .local, .ssh, .screen: true
+      default: false
       }
     }
-    .help(helpText)
+    if !terminals.isEmpty {
+      PaletteMenu(model.selectedSession.map { model.displayName(for: $0) } ?? "Local", systemImage: "terminal") {
+        ForEach(terminals) { session in
+          Button(model.displayName(for: session)) { model.selection = .session(session.id) }
+        }
+      }
+    }
+  }
+
+  // MARK: Your actions
+
+  @ViewBuilder
+  private var yourActions: some View {
+    let actions = filteredActions
+    let categories = Set(model.actions.all.map { $0.category ?? "General" }).sorted()
+    if !actions.isEmpty || query.isEmpty {
+      PaletteGroup(
+        "Your actions",
+        meta: [model.actions.all.count == 1 ? "1 action" : "\(model.actions.all.count) actions",
+               categories.joined(separator: ", ")],
+        systemImage: "bolt.fill", hue: .indigo
+      ) {
+        Button("New Action", systemImage: "plus") { model.createAction() }
+          .help("New action")
+      } items: {
+        ForEach(actions) { action in
+          PaletteItem(
+            action.name, id: action.id.uuidString, systemImage: "terminal", hue: .indigo,
+            detail: action.commands.split(separator: "\n").first.map(String.init),
+            note: runningActionIDs.contains(action.id) ? "Running" : nil,
+            isEnabled: canRun
+          ) {
+            run(action)
+          }
+          .help(helpText)
+          .contextMenu {
+            Button("Edit…") { model.editAction(action) }
+            Button("Remove", role: .destructive) { model.actions.remove(action.id) }
+          }
+        }
+        if model.actions.all.isEmpty {
+          Text("No actions yet — use + to create one.")
+            .kitFont(.caption)
+            .padding(.horizontal, 8)
+            .frame(minHeight: 32)
+        }
+      }
+    }
+  }
+
+  /// The actions with a live run, for their "Running" note.
+  private var runningActionIDs: Set<UUID> {
+    Set(model.actionSessions.filter(\.isActionRunning).compactMap { model.actionSpec(for: $0)?.action.id })
   }
 
   /// No terminal selected: macOS runs the action locally by default, iOS
@@ -269,19 +172,145 @@ private struct ActionChip: View {
     case .web(let web):
       // An action run from a web session targets the bound SSH host when it
       // has one, else the local machine.
-      if let id = web.sshConfigID,
-         let config = model.connections.first(where: { $0.id == id }) {
-        return config.displayName
-      }
-      return "Local"
+      return web.sshConfigID.flatMap { id in model.connections.first { $0.id == id }?.displayName } ?? "Local"
     case .database(let connection):
-      // An action run from a database session targets the bound SSH host when
-      // it has one, else the local machine.
-      if let id = connection.sshConfigID,
-         let config = model.connections.first(where: { $0.id == id }) {
-        return config.displayName
+      return connection.sshConfigID.flatMap { id in model.connections.first { $0.id == id }?.displayName } ?? "Local"
+    }
+  }
+
+  /// Runs an action, then hands focus back to the search line (the palette
+  /// stays open), so the next query can be typed immediately.
+  private func run(_ action: Action) {
+    model.runAction(action)
+    #if os(macOS)
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { claimFocus() }
+    #endif
+  }
+
+  #if os(macOS)
+  // MARK: Smart actions
+
+  /// A group per scheme of the active local directory: its run, build, test,
+  /// lint and clean commands, then its distribute actions. A running one turns
+  /// its live icon and Return stops it.
+  @ViewBuilder
+  private var smartActions: some View {
+    if let directory = model.smartActionDirectory {
+      ForEach(model.smartActionSchemes) { scheme in
+        let kinds = ActionKind.allCases.filter {
+          scheme.terminalCommand(for: $0) != nil && ($0.isDistribution ? scheme.supports($0) : true)
+            && (matches($0.title) || matches(scheme.name))
+        }
+        if !kinds.isEmpty {
+          PaletteGroup(
+            scheme.name, meta: [scheme.toolchain.displayName, scheme.directory.lastPathComponent],
+            systemImage: scheme.toolchain.symbolName, hue: .blue
+          ) {
+            ForEach(kinds, id: \.self) { kind in
+              smartActionItem(kind, scheme: scheme, directory: directory)
+            }
+            if kinds.contains(where: \.needsNotarization) {
+              Button("Notarization Settings…") {
+                model.notarizationSetup = NotarizationSetupRequest()
+              }
+              .buttonStyle(.kitPlain)
+              .controlSize(.small)
+              .padding(.leading, 4)
+            }
+          }
+        }
       }
-      return "Local"
+    }
+  }
+
+  private func smartActionItem(_ kind: ActionKind, scheme: ActionScheme, directory: URL) -> some View {
+    let running = model.isSmartActionRunning(kind, scheme: scheme, in: directory)
+    let style = SmartActionStyle(kind)
+    return PaletteItem(
+      kind.title, id: "\(scheme.id).\(kind.rawValue)", systemImage: style.systemImage, hue: style.hue,
+      detail: scheme.terminalCommand(for: kind), status: running ? .working : .idle,
+      returnLabel: running ? "Stop" : nil
+    ) {
+      if running {
+        model.stopSmartAction(in: directory)
+      } else {
+        model.runSmartAction(kind, scheme: scheme, in: directory)
+      }
+    }
+    .help(running ? "Stop" : "\(kind.title) \(scheme.name)")
+  }
+
+  // MARK: Open with
+
+  /// The apps that open the active local directory, as their real icons.
+  @ViewBuilder
+  private var openWith: some View {
+    let kinds = model.openWithKinds.filter { ProjectOpener.isInstalled($0) }
+    if let directory = model.smartActionDirectory, !kinds.isEmpty, query.isEmpty {
+      PaletteGroup(
+        "Open \(directory.lastPathComponent) in", meta: [kinds.count == 1 ? "1 app" : "\(kinds.count) apps"],
+        systemImage: "folder", hue: .gray
+      ) {
+        ForEach(kinds, id: \.self) { kind in
+          Button {
+            ProjectOpener.open(kind, in: directory)
+            model.showingActions = false
+          } label: {
+            Label {
+              Text(ProjectOpener.displayName(for: kind))
+            } icon: {
+              Image(nsImage: ProjectOpener.icon(for: kind))
+                .resizable()
+                .frame(width: 20, height: 20)
+            }
+          }
+          .help("Open in \(ProjectOpener.displayName(for: kind))")
+        }
+      } items: {
+        EmptyView()
+      }
+    }
+  }
+
+  /// AppKit fallback for "always focused": SwiftUI's FocusState requests
+  /// are dropped for transition-inserted overlay views (verified
+  /// empirically — the first responder stayed on the window's hosting
+  /// view), so walk the key window's view hierarchy and make the search
+  /// field's NSTextField the first responder directly. No-op when the
+  /// field is gone (overlay closed) or already focused.
+  private func claimFocus() {
+    guard let window = NSApp.keyWindow,
+          let field = Self.findTextField(in: window.contentView) else { return }
+    _ = window.makeFirstResponder(field)
+  }
+
+  private static func findTextField(in view: NSView?) -> NSTextField? {
+    guard let view else { return nil }
+    if let field = view as? NSTextField { return field }
+    for subview in view.subviews {
+      if let found = findTextField(in: subview) { return found }
+    }
+    return nil
+  }
+  #endif
+}
+
+#if os(macOS)
+/// A smart action's tile: Run green play, Build orange hammer, Test purple
+/// diamond, Lint teal seal, Clean gray trash, distribution blue.
+private struct SmartActionStyle {
+  let systemImage: String
+  let hue: Hue
+
+  init(_ kind: ActionKind) {
+    switch kind {
+    case .run: (systemImage, hue) = ("play.fill", .green)
+    case .build: (systemImage, hue) = ("hammer.fill", .orange)
+    case .test: (systemImage, hue) = ("play.diamond.fill", .purple)
+    case .lint: (systemImage, hue) = ("checkmark.seal.fill", .teal)
+    case .clean: (systemImage, hue) = ("trash.fill", .gray)
+    case .install, .export, .upload: (systemImage, hue) = ("square.and.arrow.up", .blue)
     }
   }
 }
+#endif
