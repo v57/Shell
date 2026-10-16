@@ -87,14 +87,6 @@ struct ContentView: View {
         // Switching pages cross-fades the outgoing page into the incoming
         // one (each page carries `detailTransition`).
         .animation(animates ? .smooth(duration: 0.25) : nil, value: model.selection)
-        // Every page names itself with the kit's toolbar title, which takes the
-        // system title out; without it the tools would follow the title, so the
-        // space keeps them at the trailing edge.
-        .toolbar {
-          if #available(macOS 26.0, iOS 26.0, *) {
-            ToolbarSpacer(.flexible)
-          }
-        }
       }
       .sheet(isPresented: $model.showingNewConnection) {
         NewConnectionView()
