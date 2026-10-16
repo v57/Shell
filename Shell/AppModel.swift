@@ -3,6 +3,7 @@ import AppKit
 #else
 import UIKit
 #endif
+import ComponentKit
 import CoreData
 import CryptoKit
 import Foundation
@@ -1699,13 +1700,7 @@ final class AppModel {
       #endif
       let comment = "Shell (\(NSUserName())@\(host))"
       let line = SSHKeychain.publicKeyOpenSSHLine(for: key, comment: comment)
-      #if os(macOS)
-      let pasteboard = NSPasteboard.general
-      pasteboard.clearContents()
-      pasteboard.setString(line, forType: .string)
-      #else
-      UIPasteboard.general.string = line
-      #endif
+      KitPasteboard.copy(line)
     } catch {
       publicKeyError = error.localizedDescription
     }
