@@ -25,7 +25,7 @@ struct NoteEditorView: View {
     // (ContentView keys this view by note id, so a note switch lands here too.)
     .onDisappear { UndoHygiene.discardStaleTextUndo() }
     .toolbar {
-      PlainToolbarItem(placement: .primaryAction) {
+      KitToolbarItem(placement: .primaryAction) {
         ToolGroup(iconOnly: true) {
           Button(
             isEncrypted ? "Decrypt Note" : "Encrypt Note", systemImage: isEncrypted ? "lock.fill" : "lock.open"

@@ -46,7 +46,7 @@ struct ActionRunsView: View {
     }
     .animation(.kit, value: showsTerminal)
     .toolbar {
-      PlainToolbarItem(placement: .primaryAction) {
+      KitToolbarItem(placement: .primaryAction) {
         ToolGroup(iconOnly: true) {
           Button(
             showsTerminal ? "Run Output" : "Terminal",

@@ -87,6 +87,14 @@ struct ContentView: View {
         // Switching pages cross-fades the outgoing page into the incoming
         // one (each page carries `detailTransition`).
         .animation(animates ? .smooth(duration: 0.25) : nil, value: model.selection)
+        // Every page names itself with the kit's toolbar title, which takes the
+        // system title out; without it the tools would follow the title, so the
+        // space keeps them at the trailing edge.
+        .toolbar {
+          if #available(macOS 26.0, iOS 26.0, *) {
+            ToolbarSpacer(.flexible)
+          }
+        }
       }
       .sheet(isPresented: $model.showingNewConnection) {
         NewConnectionView()
@@ -261,8 +269,7 @@ struct ContentView: View {
         NoteEditorView(noteID: note.id)
           .id(note.id)
           .transition(detailTransition)
-          .navigationTitle(model.notes.title(for: note.id))
-          .detailTitle(
+          .kitToolbarTitle(
             model.notes.title(for: note.id),
             meta: ["Note", "edited " + note.lastUpdate.formatted(.relative(presentation: .named))],
             systemImage: "doc.text", hue: .orange)
@@ -281,8 +288,7 @@ struct ContentView: View {
         OpenFilePane(file: file)
           .id(file.id)
           .transition(detailTransition)
-          .navigationTitle(file.displayName)
-          .detailTitle(
+          .kitToolbarTitle(
             file.displayName, meta: [file.isDirty ? "Edited" : "Text file", file.url.deletingLastPathComponent().path],
             systemImage: "doc.text", hue: .gray)
       } else {
@@ -362,7 +368,7 @@ struct ContentView: View {
             // lets the user switch which host the open page is tunnelled
             // through (or clear the tunnel). See webSSHTunnelPicker.
             #if os(macOS)
-            PlainToolbarItem(placement: .primaryAction) {
+            KitToolbarItem(placement: .primaryAction) {
               ToolGroup { webSSHTunnelPicker(web: web) }
             }
             #endif
@@ -411,14 +417,14 @@ struct ContentView: View {
           // reopens a shell that ended. Only on sessions that can reconnect
           // (SSH terminals), only while they are not live.
           if session.canReconnect, !isLive(session) {
-            PlainToolbarItem(placement: .primaryAction) {
+            KitToolbarItem(placement: .primaryAction) {
               ToolGroup {
                 Button("Reconnect", systemImage: "arrow.clockwise") { session.reconnectNow() }
                   .help("Reconnect now")
               }
             }
           }
-          PlainToolbarItem(placement: .primaryAction) {
+          KitToolbarItem(placement: .primaryAction) {
             HStack(spacing: KitMetrics.gutter) {
               #if os(macOS)
               smartActionTools
@@ -439,8 +445,7 @@ struct ContentView: View {
         }
       }
     }
-    .navigationTitle(model.displayName(for: session))
-    .detailTitle(
+    .kitToolbarTitle(
       model.displayName(for: session), meta: sessionMeta(session, kind: kind), systemImage: kind.titleSymbol,
       hue: kind.titleHue, status: kind.isAction ? session.actionRunStatus : .idle)
   }
@@ -517,12 +522,11 @@ struct ContentView: View {
     HistorySessionView(session: historySession)
       .id(historySession.id)
       .transition(detailTransition)
-      .navigationTitle(historySession.title)
-      .detailTitle(
+      .kitToolbarTitle(
         historySession.title, meta: ["History", historySession.activityDate.formatted(.relative(presentation: .named))],
         systemImage: "clock", hue: .orange)
       .toolbar {
-        PlainToolbarItem(placement: .primaryAction) {
+        KitToolbarItem(placement: .primaryAction) {
           ToolGroup(iconOnly: true) {
             Button("Delete History", systemImage: "trash", role: .destructive) {
               model.deleteHistorySession(historySession.id)
@@ -549,8 +553,7 @@ struct ContentView: View {
       systemImage: "terminal", title: "No Terminal Selected",
       message: "Choose a terminal in the sidebar or create a new one.")
     .transition(detailTransition)
-    .navigationTitle("Terminals")
-    .detailTitle("Terminals", meta: ["No terminal selected"], systemImage: "terminal", hue: .green)
+    .kitToolbarTitle("Terminals", meta: ["No terminal selected"], systemImage: "terminal", hue: .green)
   }
 
   /// Terminal | Files view toggle: a single button whose icon flips between
