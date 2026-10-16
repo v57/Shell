@@ -262,6 +262,10 @@ struct ContentView: View {
           .id(note.id)
           .transition(detailTransition)
           .navigationTitle(model.notes.title(for: note.id))
+          .detailTitle(
+            model.notes.title(for: note.id),
+            meta: ["Note", "edited " + note.lastUpdate.formatted(.relative(presentation: .named))],
+            systemImage: "doc.text", hue: .orange)
       } else {
         noSelection
       }
@@ -278,6 +282,9 @@ struct ContentView: View {
           .id(file.id)
           .transition(detailTransition)
           .navigationTitle(file.displayName)
+          .detailTitle(
+            file.displayName, meta: [file.isDirty ? "Edited" : "Text file", file.url.deletingLastPathComponent().path],
+            systemImage: "doc.text", hue: .gray)
       } else {
         noSelection
       }
@@ -355,8 +362,8 @@ struct ContentView: View {
             // lets the user switch which host the open page is tunnelled
             // through (or clear the tunnel). See webSSHTunnelPicker.
             #if os(macOS)
-            ToolbarItem(placement: .primaryAction) {
-              webSSHTunnelPicker(web: web)
+            PlainToolbarItem(placement: .primaryAction) {
+              ToolGroup { webSSHTunnelPicker(web: web) }
             }
             #endif
           }
@@ -369,11 +376,9 @@ struct ContentView: View {
             .id(session.id)
             .transition(detailTransition)
         } else {
-          ContentUnavailableView(
-            "Database Not Open",
-            systemImage: "server.rack",
-            description: Text("The database connection is not open.")
-          )
+          EmptyState(
+            systemImage: "server.rack", title: "Database Not Open",
+            message: "The database connection is not open.")
           .id(session.id)
           .transition(detailTransition)
         }
@@ -401,70 +406,100 @@ struct ContentView: View {
           }
         }
         .toolbar {
-            // Dial again now: skips a scheduled reconnect's wait, retries a
-            // final failure after the user fixed it (password, host key), or
-            // reopens a shell that ended. Only on sessions that can reconnect
-            // (SSH terminals), only while they are not live.
-            if session.canReconnect, !isLive(session) {
-              ToolbarItem(placement: .primaryAction) {
-                Button {
-                  session.reconnectNow()
-                } label: {
-                  Label("Reconnect", systemImage: "arrow.clockwise")
-                }
-                .help("Reconnect now")
+          // Dial again now: skips a scheduled reconnect's wait, retries a
+          // final failure after the user fixed it (password, host key), or
+          // reopens a shell that ended. Only on sessions that can reconnect
+          // (SSH terminals), only while they are not live.
+          if session.canReconnect, !isLive(session) {
+            PlainToolbarItem(placement: .primaryAction) {
+              ToolGroup {
+                Button("Reconnect", systemImage: "arrow.clockwise") { session.reconnectNow() }
+                  .help("Reconnect now")
               }
             }
-#if os(macOS)
-            // Smart actions for the active local directory (Code's
-            // CodeActions schemes): a scheme picker when the directory has
-            // several, a Run/Stop button per action of the selected scheme,
-            // and its distribute actions in a menu.
-            if let directory = model.smartActionDirectory, let scheme = selectedSmartActionScheme {
-              ToolbarItemGroup(placement: .primaryAction) {
-                if model.smartActionSchemes.count > 1 {
-                  Menu {
-                    ForEach(model.smartActionSchemes) { scheme in
-                      Button(scheme.name, systemImage: scheme.toolchain.symbolName) {
-                        smartActionsSchemeID = scheme.id
-                      }
-                    }
-                  } label: {
-                    Label(scheme.name, systemImage: "scope")
-                  }
-                  .help("Select scheme")
-                }
-                ForEach(SmartActionButton.kinds.filter { scheme.terminalCommand(for: $0) != nil }, id: \.self) { kind in
-                  SmartActionButton(kind: kind, scheme: scheme, directory: directory)
-                }
-                let distribution = ActionKind.allCases.filter { $0.isDistribution && scheme.supports($0) }
-                if !distribution.isEmpty {
-                  DistributeMenu(kinds: distribution, scheme: scheme, directory: directory)
-                }
-              }
-            }
-
-            if #available(macOS 26.0, *) {
-              ToolbarSpacer()
-            }
-            files
-
-            // Open With for the active local directory — trailing secondary
-            // action, showing the available apps' real icons.
-            if let directory = model.smartActionDirectory, !model.openWithKinds.isEmpty {
-              ToolbarItemGroup(placement: .primaryAction) {
-                OpenWithMenu(directory: directory, kinds: model.openWithKinds)
-              }
-            }
-#else
-            files
-#endif
           }
+          PlainToolbarItem(placement: .primaryAction) {
+            HStack(spacing: KitMetrics.gutter) {
+              #if os(macOS)
+              smartActionTools
+              #endif
+              // Files, then the apps that open the directory, in one card.
+              if flags.isEnabled(.files) || hasOpenWith {
+                ToolGroup(iconOnly: true) {
+                  filesButton
+                  #if os(macOS)
+                  if let directory = model.smartActionDirectory {
+                    OpenWithMenu(directory: directory, kinds: model.openWithKinds)
+                  }
+                  #endif
+                }
+              }
+            }
+          }
+        }
       }
     }
     .navigationTitle(model.displayName(for: session))
-    .navigationDirectorySubtitle(localDirectoryText)
+    .detailTitle(
+      model.displayName(for: session), meta: sessionMeta(session, kind: kind), systemImage: kind.titleSymbol,
+      hue: kind.titleHue, status: kind.isAction ? session.actionRunStatus : .idle)
   }
+
+  /// The title's status line: the directory the shell is in, else where the
+  /// session lives.
+  private func sessionMeta(_ session: TerminalSession, kind: ConnectionKind) -> [String] {
+    if !localDirectoryText.isEmpty { return [localDirectoryText] }
+    switch kind {
+    case .local: return ["This Mac"]
+    case .screen(let info): return [info.kind == .tmux ? "tmux" : "screen"]
+    case .ssh(let config): return ["\(config.user)@\(config.host)"]
+    case .action(let spec): return [spec.config?.displayName ?? "Local"]
+    case .web(let web): return [web.url]
+    case .database(let connection): return [connection.subtitle]
+    }
+  }
+
+  /// Whether the Open With apps show for the active local directory.
+  private var hasOpenWith: Bool {
+    #if os(macOS)
+    model.smartActionDirectory != nil && !model.openWithKinds.isEmpty
+    #else
+    false
+    #endif
+  }
+
+  #if os(macOS)
+  /// Smart actions for the active local directory (Code's CodeActions
+  /// schemes), in one card: a scheme picker when the directory has several, a
+  /// Run/Stop button per action of the selected scheme, and its distribute
+  /// actions in a menu.
+  @ViewBuilder
+  private var smartActionTools: some View {
+    if let directory = model.smartActionDirectory, let scheme = selectedSmartActionScheme {
+      ToolGroup(iconOnly: true) {
+        if model.smartActionSchemes.count > 1 {
+          Menu {
+            ForEach(model.smartActionSchemes) { scheme in
+              Button(scheme.name, systemImage: scheme.toolchain.symbolName) {
+                smartActionsSchemeID = scheme.id
+              }
+            }
+          } label: {
+            Label(scheme.name, systemImage: "scope")
+          }
+          .help("Select scheme")
+        }
+        ForEach(SmartActionButton.kinds.filter { scheme.terminalCommand(for: $0) != nil }, id: \.self) { kind in
+          SmartActionButton(kind: kind, scheme: scheme, directory: directory)
+        }
+        let distribution = ActionKind.allCases.filter { $0.isDistribution && scheme.supports($0) }
+        if !distribution.isEmpty {
+          DistributeMenu(kinds: distribution, scheme: scheme, directory: directory)
+        }
+      }
+    }
+  }
+  #endif
 
   /// Whether the session's link is up or being set up for the first time
   /// (no Reconnect button then).
@@ -483,28 +518,25 @@ struct ContentView: View {
       .id(historySession.id)
       .transition(detailTransition)
       .navigationTitle(historySession.title)
+      .detailTitle(
+        historySession.title, meta: ["History", historySession.activityDate.formatted(.relative(presentation: .named))],
+        systemImage: "clock", hue: .orange)
       .toolbar {
-        ToolbarItemGroup {
-          Button(role: .destructive) {
-            model.deleteHistorySession(historySession.id)
-          } label: {
-            Label("Delete History", systemImage: "trash")
+        PlainToolbarItem(placement: .primaryAction) {
+          ToolGroup(iconOnly: true) {
+            Button("Delete History", systemImage: "trash", role: .destructive) {
+              model.deleteHistorySession(historySession.id)
+            }
+            .help("Delete History")
+            Button("Replay Commands", systemImage: "play") {
+              model.replayHistorySession(historySession)
+            }
+            .help("Replay Commands")
+            Button("Create Action", systemImage: "command") {
+              model.createAction(from: historySession)
+            }
+            .help("Create Action")
           }
-          .help("Delete History")
-
-          Button {
-            model.replayHistorySession(historySession)
-          } label: {
-            Label("Replay Commands", systemImage: "play")
-          }
-          .help("Replay Commands")
-
-          Button {
-            model.createAction(from: historySession)
-          } label: {
-            Label("Create Action", systemImage: "command")
-          }
-          .help("Create Action")
         }
       }
   }
@@ -513,34 +545,27 @@ struct ContentView: View {
   /// still being opened, or an item living in its own detached window (which
   /// owns it — re-attaching restores it here).
   private var noSelection: some View {
-    ContentUnavailableView(
-      "No Terminal Selected",
-      systemImage: "terminal",
-      description: Text("Choose a terminal in the sidebar or create a new one.")
-    )
+    EmptyState(
+      systemImage: "terminal", title: "No Terminal Selected",
+      message: "Choose a terminal in the sidebar or create a new one.")
     .transition(detailTransition)
     .navigationTitle("Terminals")
+    .detailTitle("Terminals", meta: ["No terminal selected"], systemImage: "terminal", hue: .green)
   }
 
-  @ContentBuilder
-  var files: some ToolbarContent {
-    // Terminal | Files view toggle: a single button whose icon flips
-    // between the two. Shows `folder.fill` (open Files) while in the
-    // terminal and `terminal.fill` (back to the terminal) while Files
-    // is shown.
-    // The Files panel is part of the Files feature; hide the
-    // toggle button entirely when the feature is disabled.
+  /// Terminal | Files view toggle: a single button whose icon flips between
+  /// the two. Shows `folder.fill` (open Files) while in the terminal and
+  /// `terminal.fill` (back to the terminal) while Files is shown. The Files
+  /// panel is part of the Files feature; the button hides while it is off.
+  @ViewBuilder
+  private var filesButton: some View {
     if flags.isEnabled(.files) {
-      ToolbarItem(placement: .primaryAction) {
-        Button {
-          model.directoryBrowser.visible.toggle()
-        } label: {
-          Label(
-            "Files & Terminal",
-            systemImage: model.directoryBrowser.visible ? "terminal.fill" : "folder.fill")
-        }
-        .help(model.directoryBrowser.visible ? "Show Terminal" : "Show Files")
+      Button(
+        "Files & Terminal", systemImage: model.directoryBrowser.visible ? "terminal.fill" : "folder.fill"
+      ) {
+        model.directoryBrowser.visible.toggle()
       }
+      .help(model.directoryBrowser.visible ? "Show Terminal" : "Show Files")
     }
   }
 
@@ -773,19 +798,30 @@ private struct DistributeMenu: View {
 }
 #endif
 
-/// Shows a navigation subtitle only when `text` is non-empty (empty text
-/// would otherwise render an empty subtitle slot).
-private extension View {
-  @ViewBuilder
-  func navigationDirectorySubtitle(_ text: String) -> some View {
-    if text.isEmpty {
-      self
-    } else if #available(iOS 26.0, macOS 26.0, *) {
-      self.navigationSubtitle(Text(text))
-    } else {
-      self
+extension ConnectionKind {
+  /// The detail title's glyph for a session of this kind.
+  var titleSymbol: String {
+    switch self {
+    case .local: "terminal"
+    case .screen(let info): info.isProtected ? "lock.fill" : "shield.fill"
+    case .ssh: "network"
+    case .action: "play.fill"
+    case .web: "globe"
+    case .database(let connection): connection.engine.systemImage
     }
   }
+
+  /// The detail title's tile hue: green on this Mac, blue remote.
+  var titleHue: Hue {
+    switch self {
+    case .local, .screen: .green
+    case .ssh, .web: .blue
+    case .action: .purple
+    case .database: .indigo
+    }
+  }
+
+  var isAction: Bool { if case .action = self { true } else { false } }
 }
 
 #if os(macOS)

@@ -46,13 +46,16 @@ struct ActionRunsView: View {
     }
     .animation(.kit, value: showsTerminal)
     .toolbar {
-      ToolbarItem(placement: .primaryAction) {
-        Button {
-          showsTerminal.toggle()
-        } label: {
-          Label(showsTerminal ? "Run Output" : "Terminal", systemImage: showsTerminal ? "list.bullet.rectangle" : "terminal")
+      PlainToolbarItem(placement: .primaryAction) {
+        ToolGroup(iconOnly: true) {
+          Button(
+            showsTerminal ? "Run Output" : "Terminal",
+            systemImage: showsTerminal ? "list.bullet.rectangle" : "terminal"
+          ) {
+            showsTerminal.toggle()
+          }
+          .help(showsTerminal ? "Show the run's output" : "Show the run's terminal, to type into it")
         }
-        .help(showsTerminal ? "Show the run's output" : "Show the run's terminal, to type into it")
       }
     }
   }

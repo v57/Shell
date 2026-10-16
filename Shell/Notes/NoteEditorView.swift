@@ -1,3 +1,4 @@
+import ComponentKit
 import SwiftUI
 import MarkdownKit
 
@@ -24,16 +25,18 @@ struct NoteEditorView: View {
     // (ContentView keys this view by note id, so a note switch lands here too.)
     .onDisappear { UndoHygiene.discardStaleTextUndo() }
     .toolbar {
-      ToolbarItem {
-        Button {
-          model.notes.setEncrypted(!isEncrypted, for: noteID)
-        } label: {
-          Image(systemName: isEncrypted ? "lock.fill" : "lock.open")
+      PlainToolbarItem(placement: .primaryAction) {
+        ToolGroup(iconOnly: true) {
+          Button(
+            isEncrypted ? "Decrypt Note" : "Encrypt Note", systemImage: isEncrypted ? "lock.fill" : "lock.open"
+          ) {
+            model.notes.setEncrypted(!isEncrypted, for: noteID)
+          }
+          .help(
+            isEncrypted
+              ? "Keep this note as a plain Markdown file in Markdown's notes folder"
+              : "Keep this note's file encrypted, readable only by the v57 apps")
         }
-        .help(
-          isEncrypted
-            ? "Keep this note as a plain Markdown file in Markdown's notes folder"
-            : "Keep this note's file encrypted, readable only by the v57 apps")
       }
     }
   }
