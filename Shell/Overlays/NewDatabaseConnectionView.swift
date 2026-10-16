@@ -1,3 +1,4 @@
+import ComponentKit
 import SwiftUI
 import ShellKit
 
@@ -56,46 +57,57 @@ struct NewDatabaseConnectionView: View {
   private var title: String { isEditing ? "Edit Database Connection" : "New Database Connection" }
 
   var body: some View {
-    @Bindable var model = model
-    VStack(alignment: .leading, spacing: 0) {
-      Form {
-        Section("Engine") {
-          Picker("Engine", selection: $engine) {
-            ForEach(DatabaseEngine.allCases) { e in
-              Text(e.displayName).tag(e)
+    KitSheet(
+      title: title, meta: summary, systemImage: "cylinder.split.1x2", hue: .indigo, width: 480
+    ) {
+      ScrollView {
+        VStack(alignment: .leading, spacing: KitMetrics.gutter) {
+          FormCard("Engine") {
+            FormRow(
+              "Engine", help: engine.isAvailable ? nil : "Not available on this platform",
+              systemImage: engine.systemImage, hue: engine.isAvailable ? .indigo : .orange
+            ) {
+              Picker("Engine", selection: $engine) {
+                ForEach(DatabaseEngine.allCases) { e in
+                  Text(e.displayName).tag(e)
+                }
+              }
+              .labelsHidden()
+              .pickerStyle(.menu)
+              .fixedSize()
+            }
+            // A new connection's port follows the engine's default port. Only
+            // reset when the user hasn't typed a custom port (i.e. the field still
+            // holds the previous engine's default).
+            .onChange(of: engine) { oldEngine, newEngine in
+              guard !isEditing else { return }
+              if port == String(oldEngine.defaultPort) {
+                port = String(newEngine.defaultPort)
+              }
             }
           }
-          .pickerStyle(.menu)
-          // A new connection's port follows the engine's default port. Only
-          // reset when the user hasn't typed a custom port (i.e. the field still
-          // holds the previous engine's default).
-          .onChange(of: engine) { oldEngine, newEngine in
-            guard !isEditing else { return }
-            if port == String(oldEngine.defaultPort) {
-              port = String(newEngine.defaultPort)
-            }
-          }
-          // Engines that don't link on this platform can't connect; grey the
-          // picker setting rather than allow a doomed selection.
-          if !engine.isAvailable {
-            Text("\(engine.displayName) is not available on this platform.")
-              .font(.caption)
-              .foregroundStyle(.orange)
-          }
-        }
 
-        Section("Connection") {
-          TextField(engine == .sqlite ? "File Path" : "Host", text: $host)
-            .autocorrectionDisabled()
-          if engine != .sqlite {
-            TextField("Port", text: $port)
-              .textContentType(.none)
-          }
-          TextField(isEditing ? "Database (leave blank for default)" : "Database", text: $database)
-          // Authorization is gated on a switch (SQLite is file-based and uses
-          // no credentials). Off by default for new connections.
-          if engine != .sqlite {
-            Toggle("Authorization", isOn: $authorizationEnabled)
+          FormCard("Connection") {
+            FormRow(
+              engine == .sqlite ? "File Path" : "Host", systemImage: engine == .sqlite ? "doc" : "server.rack",
+              field: TextField(engine == .sqlite ? "/path/to/database.sqlite" : "localhost", text: $host)
+                .autocorrectionDisabled()
+            )
+            if engine != .sqlite {
+              FormRow("Port", systemImage: "number", field: TextField(String(engine.defaultPort), text: $port))
+            }
+            FormRow(
+              "Database", help: isEditing ? "Leave blank for the default" : nil, systemImage: "tray.2",
+              field: TextField("Default", text: $database)
+            )
+            // Authorization is gated on a switch (SQLite is file-based and uses
+            // no credentials). Off by default for new connections.
+            if engine != .sqlite {
+              FormRow("Authorization", help: "A user name and password", systemImage: "person.badge.key") {
+                Toggle("Authorization", isOn: $authorizationEnabled)
+                  .labelsHidden()
+                  .toggleStyle(.kitSwitch)
+              }
               .onChange(of: authorizationEnabled) { _, enabled in
                 // Hidden fields reset when the toggle is turned off.
                 if !enabled {
@@ -104,45 +116,65 @@ struct NewDatabaseConnectionView: View {
                   directConnection = false
                 }
               }
+            }
+            if authorizationEnabled {
+              FormRow(
+                "Username", systemImage: "person",
+                field: TextField("Username", text: $username).autocorrectionDisabled())
+              FormRow(
+                "Password", help: "Kept in the Keychain", systemImage: "key",
+                field: SecureField("Password", text: $password))
+              if engine == .mongodb {
+                FormRow("Auth Source", systemImage: "building.columns", field: TextField("admin", text: $authSource))
+                FormRow("Direct Connection", systemImage: "arrow.right") {
+                  Toggle("Direct connection", isOn: $directConnection)
+                    .labelsHidden()
+                    .toggleStyle(.kitSwitch)
+                }
+              }
+            }
           }
-          if authorizationEnabled {
-            TextField("Username", text: $username)
-              .autocorrectionDisabled()
-            SecureField("Password (Keychain)", text: $password)
-            if engine == .mongodb {
-              TextField("Auth Source (admin)", text: $authSource)
-              Toggle("Direct connection", isOn: $directConnection)
+
+          FormCard(
+            "Tunnel",
+            footer: "Remote (non-SQLite) connections route through the selected SSH tunnel; SQLite is always local."
+          ) {
+            FormRow("SSH Tunnel", systemImage: "network") {
+              Picker("SSH Tunnel", selection: $sshConfigID) {
+                Text("None").tag(UUID?.none)
+                ForEach(model.connections) { config in
+                  Text(config.displayName).tag(Optional(config.id))
+                }
+              }
+              .labelsHidden()
+              .pickerStyle(.menu)
+              .fixedSize()
             }
           }
         }
-
-        Section("Tunnel") {
-          Picker("SSH Tunnel", selection: $sshConfigID) {
-            Text("None").tag(UUID?.none)
-            ForEach(model.connections) { config in
-              Text(config.displayName).tag(Optional(config.id))
-            }
-          }
-          .pickerStyle(.menu)
-          Text("Remote (non-SQLite) connections route through the selected SSH tunnel; SQLite is always local.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-        }
+        .padding(.bottom, 2)
       }
-      .formStyle(.grouped)
-
-      HStack {
-        Spacer()
-        Button("Cancel") { dismiss() }
-          .keyboardShortcut(.cancelAction)
-        Button(isEditing ? "Save" : "Add") { commit() }
-          .keyboardShortcut(.defaultAction)
-          .disabled(!isValid)
-      }
-      .padding()
+      .scrollBounceBehavior(.basedOnSize)
+      .frame(maxHeight: 520)
+    } footer: {
+      Button("Cancel") { dismiss() }
+        .keyboardShortcut(.cancelAction)
+      Button(isEditing ? "Save" : "Add") { commit() }
+        .buttonStyle(.kitPrimary)
+        .keyboardShortcut(.defaultAction)
+        .disabled(!isValid)
     }
-    .frame(minWidth: 420, minHeight: 460)
     .navigationTitle(title)
+  }
+
+  /// The header's line: what the connection will reach.
+  private var summary: String {
+    if engine == .sqlite { return host.isEmpty ? "SQLite file" : "SQLite at \(host)" }
+    let target = host.isEmpty ? engine.displayName : "\(engine.displayName) on \(host):\(port)"
+    if let id = sshConfigID, let config = model.connections.first(where: { $0.id == id }) {
+      return "\(target) through \(config.displayName)"
+    }
+    return target
   }
 
   private var isValid: Bool {
