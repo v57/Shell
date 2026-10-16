@@ -1,3 +1,4 @@
+import ComponentKit
 import SwiftUI
 import ShellKit
 import ShellIntegrations
@@ -46,6 +47,8 @@ struct ShellApp: App {
     WindowGroup {
       ContentView()
         .environment(AppModel.shared)
+        // ComponentKit's design, in the system accent Shell has always used.
+        .componentKit(accent: .accentColor)
     }
     #if os(macOS)
     .commands {
@@ -68,6 +71,7 @@ struct ShellApp: App {
     WindowGroup("Detach", id: "detach", for: UUID.self) { itemID in
       DetachDetailView(itemID: itemID.wrappedValue ?? UUID())
         .environment(AppModel.shared)
+        .componentKit(accent: .accentColor)
     }
   }
 }
