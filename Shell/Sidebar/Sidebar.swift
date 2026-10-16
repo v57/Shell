@@ -96,30 +96,6 @@ struct SidebarView: View {
 
 // MARK: - Section header pieces
 
-/// A section header's icon: the kit's live icon at the header size for the
-/// idiom (24pt on the Mac, 30 on iPad, 32 on iPhone).
-struct SidebarSectionIcon: View {
-  let systemImage: String
-  var hue: Hue = .accent
-  var status: WorkStatus = .idle
-  @Environment(\.kitIdiom) private var idiom
-
-  var body: some View {
-    LiveIcon(systemImage: systemImage, hue: hue, status: status, size: idiom == .phone ? 32 : idiom == .pad ? 30 : 24)
-  }
-}
-
-/// A row's live icon (an action run), the size of the kit's row tiles.
-struct SidebarRowLiveIcon: View {
-  let systemImage: String
-  let status: WorkStatus
-  @Environment(\.kitIdiom) private var idiom
-
-  var body: some View {
-    LiveIcon(systemImage: systemImage, status: status, size: idiom == .phone ? 30 : idiom == .pad ? 28 : 18)
-  }
-}
-
 extension Binding where Value == Bool {
   /// A section's open state from its persisted COLLAPSED flag.
   static func expanded(collapsed: Binding<Bool>) -> Binding<Bool> {
@@ -148,7 +124,10 @@ private struct RunningSectionView: View {
     if flags.isEnabled(.actions), !runs.isEmpty {
       let running = runs.filter(\.isActionRunning).count
       let failed = runs.filter { $0.actionRunStatus.isFailed }.count
-      KitSection(Text("Running"), isExpanded: .expanded(collapsed: $runningCollapsed)) {
+      KitSection(
+        "Running", systemImage: "bolt.fill", hue: .purple, status: running > 0 ? .working : .idle,
+        isExpanded: .expanded(collapsed: $runningCollapsed)
+      ) {
         ForEach(runs) { session in
           ActionRunRow(session: session, spec: model.actionSpec(for: session))
             .contextMenu {
@@ -163,8 +142,6 @@ private struct RunningSectionView: View {
               }
             }
         }
-      } icon: {
-        SidebarSectionIcon(systemImage: "bolt.fill", hue: .purple, status: running > 0 ? .working : .idle)
       } meta: {
         MetaLine([
           running > 0 ? "\(running) running" : "",
@@ -257,7 +234,7 @@ private struct TextFilesSectionView: View {
   var body: some View {
     if !files.isEmpty {
       let unsaved = files.filter(\.isDirty).count
-      KitSection(Text("Text Files"), isExpanded: .expanded(collapsed: $filesCollapsed)) {
+      KitSection("Text Files", systemImage: "doc.text", hue: .gray, isExpanded: .expanded(collapsed: $filesCollapsed)) {
         ForEach(files) { file in
           SidebarRow(value: AppModel.Selection.openedFile(file.id), file.displayName, systemImage: "doc.text") {
             if file.isDirty {
@@ -272,8 +249,6 @@ private struct TextFilesSectionView: View {
             }
           }
         }
-      } icon: {
-        SidebarSectionIcon(systemImage: "doc.text", hue: .gray)
       } meta: {
         MetaLine([files.count == 1 ? "1 file" : "\(files.count) files", unsaved > 0 ? "\(unsaved) unsaved" : ""])
       } accessory: {

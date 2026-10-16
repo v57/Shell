@@ -21,7 +21,7 @@ struct NotesSectionView: View {
   var body: some View {
     if flags.isEnabled(.notes) {
       let count = model.notes.notes.count
-      KitSection(Text("Notes"), isExpanded: .expanded(collapsed: $notesCollapsed)) {
+      KitSection("Notes", systemImage: "doc.text", hue: .orange, isExpanded: .expanded(collapsed: $notesCollapsed)) {
         ForEach(notes) { note in
           NoteRow(note: note)
             .contextMenu {
@@ -34,8 +34,6 @@ struct NotesSectionView: View {
               }
             }
         }
-      } icon: {
-        SidebarSectionIcon(systemImage: "doc.text", hue: .orange)
       } meta: {
         if let edited = model.notes.notes.map(\.lastUpdate).max() {
           Text("\(count == 1 ? "1 note" : "\(count) notes")")

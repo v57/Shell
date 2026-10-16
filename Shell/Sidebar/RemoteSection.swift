@@ -44,7 +44,7 @@ struct RemoteSectionView: View {
     if flags.isEnabled(.ssh) {
       let online = model.connections.filter { model.sessionID(for: $0) != nil }.count
       let offline = model.connections.count - online
-      KitSection(Text("Remote"), isExpanded: .expanded(collapsed: $remoteCollapsed)) {
+      KitSection("Remote", systemImage: "globe", hue: .blue, isExpanded: .expanded(collapsed: $remoteCollapsed)) {
         ForEach(Array(model.connections.enumerated()), id: \.element.id) { index, config in
           SSHConfigGroup(
             config: config,
@@ -53,8 +53,6 @@ struct RemoteSectionView: View {
             onEdit: { editingConfig = $0 }
           )
         }
-      } icon: {
-        SidebarSectionIcon(systemImage: "globe", hue: .blue)
       } meta: {
         if model.connections.isEmpty {
           MetaLine("No hosts")

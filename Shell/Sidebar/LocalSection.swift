@@ -72,7 +72,10 @@ struct LocalSectionView: View {
   @ViewBuilder
   private var sectionContent: some View {
     if flags.isEnabled(.sessions) || flags.isEnabled(.screen) || flags.isEnabled(.history) || flags.isEnabled(.web) || flags.isEnabled(.database) {
-      KitSection(Text(model.historyMode ? "Local History" : "This Mac"), isExpanded: .expanded(collapsed: $localCollapsed)) {
+      KitSection(
+        model.historyMode ? "Local History" : "This Mac", systemImage: model.historyMode ? "clock" : "laptopcomputer",
+        hue: model.historyMode ? .orange : .green, isExpanded: .expanded(collapsed: $localCollapsed)
+      ) {
         if model.historyMode {
           ForEach(flags.isEnabled(.history) ? model.history.sessions.filter { state.matches($0.title) } : []) { record in
             SidebarRow(value: AppModel.Selection.history(record.id), record.title, systemImage: "clock") {
@@ -84,8 +87,6 @@ struct LocalSectionView: View {
           rows
             .transition(.blurReplace)
         }
-      } icon: {
-        SidebarSectionIcon(systemImage: model.historyMode ? "clock" : "laptopcomputer", hue: model.historyMode ? .orange : .green)
       } meta: {
         meta
       } accessory: {
