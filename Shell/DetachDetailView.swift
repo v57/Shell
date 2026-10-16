@@ -80,6 +80,9 @@ struct DetachDetailView: View {
             )
             .id(session.id)
           }
+        } else if case .action = kind {
+          ActionRunsView(session: session, showsAll: false)
+            .id(session.id)
         } else {
           TerminalView(session: session)
             .id(session.id)

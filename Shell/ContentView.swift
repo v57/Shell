@@ -377,6 +377,11 @@ struct ContentView: View {
           .id(session.id)
           .transition(detailTransition)
         }
+      } else if case .action = kind {
+        // An action run nobody types into: run blocks (ActionRunsView.swift).
+        ActionRunsView(session: session)
+          .id(session.id)
+          .transition(detailTransition)
       } else {
         ZStack {
           // The terminal stays mounted so its scrollback/focus state is

@@ -12,6 +12,7 @@ import ShellKit
 ///   --note <name>             shows a demo note
 ///   --actions / --settings    opens that overlay
 ///   --new-database            opens the New Database Connection sheet
+///   --run-action <name>       runs that demo action and shows its run
 ///
 /// A capture takes every scene in one launch: the next scene's arguments arrive through `Screenshots` and `open`
 /// shows them in place, after undoing what the scene before left open.
@@ -128,6 +129,12 @@ enum ScreenshotDemo {
     if flag("--actions", in: arguments) { model.showingActions = true }
     if flag("--settings", in: arguments) { model.showingSettings = true }
     if flag("--new-database", in: arguments) { model.showingNewDatabaseConnection = true }
+    if let name = value("--run-action", in: arguments), let action = model.actions.all.first(where: { $0.name == name }) {
+      model.runAction(action)
+      // The run's session, once it has started and printed something.
+      try? await Task.sleep(for: .seconds(3))
+      if let run = model.actionSessions.last { model.selection = .session(run.id) }
+    }
   }
 
   /// Until the terminal shows a prompt on its last line (and `condition` holds for its text), with no new output for
