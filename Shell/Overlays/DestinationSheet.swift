@@ -1,3 +1,4 @@
+import ComponentKit
 import SwiftUI
 import ShellIntegrations
 
@@ -30,10 +31,7 @@ struct DestinationSheet: View {
       TextField("Destination path", text: $text).textFieldStyle(.roundedBorder).font(
         .body.monospaced()
       ).onAppear { text = defaultPath }
-      Picker("", selection: $mode) {
-        Text("Move").tag(FileCommandBuilder.MoveCopyMode.move)
-        Text("Copy").tag(FileCommandBuilder.MoveCopyMode.copy)
-      }.pickerStyle(.segmented).labelsHidden()
+      KitSegmented(selection: $mode, options: [("Move", .move), ("Copy", .copy)])
       HStack {
         Button("Cancel", role: .cancel) { dismiss() }
         Spacer()

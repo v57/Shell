@@ -1,3 +1,4 @@
+import ComponentKit
 import SwiftUI
 import ShellKit
 
@@ -104,15 +105,15 @@ struct DatabaseBrowserView: View {
   private var collectionsPane: some View {
     VStack(alignment: .leading, spacing: 0) {
       if session.databases.count > 1 {
-        Picker("Database", selection: Binding(
-          get: { session.selectedDatabase ?? "" },
-          set: { newValue in
-            Task { await session.select(database: newValue) }
-          }
-        )) {
-          ForEach(session.databases, id: \.self) { Text($0).tag($0) }
-        }
-        .pickerStyle(.menu)
+        KitPicker(
+          "Database",
+          selection: Binding(
+            get: { session.selectedDatabase ?? "" },
+            set: { newValue in
+              Task { await session.select(database: newValue) }
+            }),
+          options: session.databases.map { ($0, $0) }
+        )
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
       }

@@ -1,3 +1,4 @@
+import ComponentKit
 import SwiftUI
 
 /// The Themes sheet (Shell menu → Themes…, ⌘⇧H): the forced color scheme
@@ -15,13 +16,7 @@ struct ThemesView: View {
       Text("Color Scheme")
         .font(.caption)
         .foregroundStyle(.secondary)
-      Picker("Color Scheme", selection: $model.appearanceMode) {
-        ForEach(AppearanceMode.allCases) { mode in
-          Text(mode.label).tag(mode)
-        }
-      }
-      .pickerStyle(.segmented)
-      .labelsHidden()
+      KitSegmented(selection: $model.appearanceMode, options: AppearanceMode.allCases.map { ($0.label, $0) })
 
       Toggle("Disable Background Colors", isOn: $model.disableTerminalBackgrounds)
 #if os(macOS)
