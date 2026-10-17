@@ -1,3 +1,4 @@
+import ComponentKit
 import Foundation
 import Observation
 import ShellKit
@@ -28,6 +29,12 @@ final class WebSessionRuntime {
   private(set) var tunnelURL: URL?
   private(set) var errorMessage: String?
   private(set) var isConnecting = true
+
+  /// The tunnel's state for the page's live icon (its row, the page title).
+  var status: WorkStatus {
+    if let errorMessage { return .failed(errorMessage) }
+    return isConnecting ? .working : .idle
+  }
 
   private var session: SSHSession?
   private var started = false

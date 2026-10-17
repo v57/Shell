@@ -177,6 +177,19 @@ extension TerminalSession {
   }
 }
 
+extension TerminalSession {
+  /// The link's state for a session's live icon (its row, the page title): the
+  /// work indicator while an SSH session dials (or dials again after a drop),
+  /// red once it failed.
+  var linkStatus: WorkStatus {
+    switch connectionState {
+    case .connecting, .reconnecting: .working
+    case .failed(let message): .failed(message)
+    case .starting, .connected, .closed: .idle
+    }
+  }
+}
+
 extension WorkStatus {
   var isFailed: Bool { if case .failed = self { true } else { false } }
 }
@@ -298,7 +311,10 @@ struct SessionRow: View {
   let onRename: (String) -> Void
 
   var body: some View {
-    SidebarRow(value: AppModel.Selection.session(session.id), session.customName ?? defaultLabel, systemImage: "terminal") {
+    SidebarRow(
+      value: AppModel.Selection.session(session.id), session.customName ?? defaultLabel, systemImage: "terminal",
+      status: session.linkStatus
+    ) {
       DetachReturnBadge(selection: .session(session.id))
       if let hue = stateDotHue {
         StatusDot(hue: hue)
@@ -310,22 +326,15 @@ struct SessionRow: View {
     .animation(.kit, value: stateDotHue)
   }
 
-  /// ONE dot whose hue follows the state, or none.
+  /// The dot for what the live icon doesn't show: green while the session
+  /// produced output recently (after `TerminalSession.inactivityTimeout` of
+  /// quiet it is idle and the dot hides; read via @Observable so the row
+  /// re-renders when `hasActivity` flips), gray once the shell ended.
   private var stateDotHue: Hue? {
     switch session.connectionState {
-    case .connected:
-      // Green only while the session produced output recently; after
-      // `TerminalSession.inactivityTimeout` of quiet the session is idle
-      // and the dot hides. Read via @Observable so the row re-renders when
-      // `hasActivity` flips.
-      session.hasActivity ? .green : nil
-    case .failed:
-      .red
-    case .reconnecting:
-      // The link dropped and the session is dialing again.
-      .orange
-    case .starting, .connecting, .closed:
-      .gray
+    case .connected: session.hasActivity ? .green : nil
+    case .closed: .gray
+    case .starting, .connecting, .reconnecting, .failed: nil
     }
   }
 }

@@ -439,7 +439,17 @@ struct ContentView: View {
     }
     .kitToolbarTitle(
       model.displayName(for: session), meta: sessionMeta(session, kind: kind), systemImage: kind.titleSymbol,
-      hue: kind.titleHue, status: kind.isAction ? session.actionRunStatus : .idle)
+      hue: kind.titleHue, status: titleStatus(session, kind: kind))
+  }
+
+  /// The title's live icon: an action's run, a web page's tunnel, else the
+  /// session's link.
+  private func titleStatus(_ session: TerminalSession, kind: ConnectionKind) -> WorkStatus {
+    switch kind {
+    case .action: session.actionRunStatus
+    case .web(let web): model.webSessionRuntime(for: web)?.status ?? .idle
+    default: session.linkStatus
+    }
   }
 
   /// The title's status line: the directory the shell is in, else where the
@@ -787,8 +797,6 @@ extension ConnectionKind {
     case .database: .indigo
     }
   }
-
-  var isAction: Bool { if case .action = self { true } else { false } }
 }
 
 #if os(macOS)

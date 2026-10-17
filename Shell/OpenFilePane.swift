@@ -1,5 +1,6 @@
 #if os(macOS)
 import AppKit
+import ComponentKit
 import Foundation
 import SwiftUI
 import MarkdownKit
@@ -69,8 +70,7 @@ struct OpenFilePane: View {
   var body: some View {
     Group {
       if !file.isLoaded {
-        ProgressView()
-          .frame(maxWidth: .infinity, maxHeight: .infinity)
+        WorkState(systemImage: "doc.text", title: "Opening \(file.displayName)")
       } else if let notice = file.loadNotice {
         // Non-UTF8 / oversized: visible notice, read-only, no write-back.
         readOnlyNotice(notice)

@@ -20,7 +20,10 @@ struct WebSessionRow: View {
     // The row carries the open page's session when it is up (so the row shows
     // selected while its WebView is visible), else the page's own id —
     // activating that opens it.
-    SidebarRow(value: model.rowSelection(for: web), web.sidebarTitle, subtitle: subtitle, systemImage: "globe") {
+    SidebarRow(
+      value: model.rowSelection(for: web), web.sidebarTitle, subtitle: subtitle, systemImage: "globe",
+      status: model.webSessionRuntime(for: web)?.status ?? .idle
+    ) {
       StatusDot(hue: isOpen ? .green : .gray, isHollow: !isOpen)
         .accessibilityLabel(isOpen ? "Open" : "Closed")
         .help(isOpen ? "Web session open" : "Web session closed")

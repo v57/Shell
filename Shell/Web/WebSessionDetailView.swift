@@ -1,3 +1,4 @@
+import ComponentKit
 import SwiftUI
 import WebKit
 import _WebKit_SwiftUI
@@ -7,7 +8,7 @@ import _WebKit_SwiftUI
 ///
 /// For a plain web session (`tunnel == nil`) it loads the stored URL directly.
 /// For an ssh-owned session the AppModel supplies a `WebSessionRuntime` whose
-/// observable state drives the pane: a connecting spinner until the SSH local
+/// observable state drives the pane: a connecting live icon until the SSH local
 /// port-forward is healthy, then the reachable `http://127.0.0.1:<localPort>/`
 /// URL, or a clear error in place of the blank WebView if the tunnel cannot be
 /// established or drops.
@@ -34,15 +35,11 @@ struct WebSessionDetailView: View {
     Group {
       if let tunnel {
         if let error = tunnel.errorMessage {
-          ContentUnavailableView(
-            "Web Session",
-            systemImage: "exclamationmark.octagon",
-            description: Text(error)
-          )
+          WorkState(systemImage: "globe", title: "Couldn't Connect", message: error, status: .failed(error))
         } else if let tunneled = tunnel.tunnelURL {
           webView(for: tunneled)
         } else {
-          ProgressView("Connecting to \(displayName)…")
+          WorkState(systemImage: "globe", title: "Connecting", message: "Opening the tunnel to \(displayName)…")
         }
       } else if let url {
         webView(for: url)
@@ -50,14 +47,9 @@ struct WebSessionDetailView: View {
         // A page with no URL yet: opened straight from a host's "Web Session"
         // item, so point the user at the toolbar's URL field (the address bar
         // is the toolbar search field — there is no in-content bar).
-        ContentUnavailableView(
-          "Web Session",
-          systemImage: "globe",
-          description: Text(
-            web.url.isEmpty
-              ? "Type the page's address into the URL field, then press Return."
-              : web.url)
-        )
+        EmptyState(
+          systemImage: "globe", title: "Web Session",
+          message: web.url.isEmpty ? "Type the page's address into the URL field, then press Return." : web.url)
       }
     }
     .onAppear { resolveURL(from: web.url) }
