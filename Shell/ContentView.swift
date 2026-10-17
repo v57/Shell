@@ -30,12 +30,10 @@ struct ContentView: View {
   @State private var activeDirectoryURL: URL?
   /// The picker's selected smart-action scheme (nil = the first one).
   @State private var smartActionsSchemeID: String?
-  /// A `.web` session's address bar: the text of the toolbar search field
-  /// (`.searchable` is applied to the web session's detail pane).
+  /// A `.web` session's address bar: the text of the toolbar's URL field.
   @State private var webAddressText = ""
-  /// Whether the address search field currently holds focus, so an in-flight
-  /// tunnel update never clobbers the user's typing.
-  @FocusState private var webAddressFocused: Bool
+  /// Whether an action run's page shows its terminal instead of its output.
+  @State private var actionShowsTerminal = false
   /// Presents the first-launch "choose your features" welcome sheet on a fresh
   /// install, when the feature-flags store has never been configured.
   @State private var showFirstLaunchWelcome = false
@@ -87,6 +85,11 @@ struct ContentView: View {
         // Switching pages cross-fades the outgoing page into the incoming
         // one (each page carries `detailTransition`).
         .animation(animates ? .smooth(duration: 0.25) : nil, value: model.selection)
+        // The kit's toolbar, on the column rather than on each page, so it
+        // stays put while the pages cross-fade under it: the page's title and
+        // its tools, compacting to icons and then into "…" as room runs out.
+        .kitToolbar(pageTitle.title, title: { pageTitle.view }, tools: { pageTools })
+        .kitSidebarToggle(columnVisibility: $columnVisibility)
       }
       .sheet(isPresented: $model.showingNewConnection) {
         NewConnectionView()
@@ -214,6 +217,7 @@ struct ContentView: View {
     .onChange(of: model.selection) { _, _ in
       refreshLocalDirectory()
       syncFileBrowser()
+      actionShowsTerminal = false
     }
     .onChange(of: flags.isEnabled(.files)) { _, _ in
       syncFileBrowser()
@@ -261,10 +265,6 @@ struct ContentView: View {
         NoteEditorView(noteID: note.id)
           .id(note.id)
           .transition(detailTransition)
-          .kitToolbarTitle(
-            model.notes.title(for: note.id),
-            meta: ["Note", "edited " + note.lastUpdate.formatted(.relative(presentation: .named))],
-            systemImage: "doc.text", hue: .orange)
       } else {
         noSelection
       }
@@ -280,9 +280,6 @@ struct ContentView: View {
         OpenFilePane(file: file)
           .id(file.id)
           .transition(detailTransition)
-          .kitToolbarTitle(
-            file.displayName, meta: [file.isDirty ? "Edited" : "Text file", file.url.deletingLastPathComponent().path],
-            systemImage: "doc.text", hue: .gray)
       } else {
         noSelection
       }
@@ -305,40 +302,19 @@ struct ContentView: View {
     Group {
       if case .web(let web) = kind {
         // A web session renders its URL in the system SwiftUI WebView
-        // (no terminal, no Files panel, no terminal toolbar). For an
-        // ssh-owned session the tunnel runtime supplies the reachable
-        // local URL (or a connecting/error state) instead of the raw URL.
+        // (no terminal, no Files panel). For an ssh-owned session the tunnel
+        // runtime supplies the reachable local URL (or a connecting/error
+        // state) instead of the raw URL; the toolbar holds its address.
         let tunnel = model.webSessionRuntime(for: web)
-        // The address bar value: the tunneled local URL for an ssh-owned
-        // session once the tunnel is up, otherwise the stored web URL —
-        // so the displayed value matches what the WebView actually loads.
-        let effectiveURLText: String = tunnel?.tunnelURL?.absoluteString ?? web.url
+        let effectiveURLText = webURLText(web)
         WebSessionDetailView(web: web, tunnel: tunnel)
           .id(session.id)
           .transition(detailTransition)
-          // The address bar is the window toolbar's search field: the
-          // `searchable` modifier hands the field to the toolbar (a
-          // plain TextField stacked above the WebView cannot sit there),
-          // and Return — via `.onSubmit(of: .search)` — commits the
-          // edited text to navigate the WebView.
-          .searchable(text: $webAddressText, prompt: "URL")
-          // Focus tracking, and keeping the toolbar visible while the
-          // field is active. Must come AFTER `.searchable` to apply to
-          // the toolbar search field.
-          .modifier(WebAddressSearchBehavior(focused: $webAddressFocused))
-          .onSubmit(of: .search) {
-            // Only navigate when the edited text actually differs from
-            // what's displayed — submitting an unchanged address is a
-            // no-op (avoids an unnecessary reconnect/reload).
-            guard webAddressText != effectiveURLText else { return }
-            model.updateWebSessionURL(web, to: webAddressText)
-          }
-          .onChange(of: effectiveURLText) { _, newText in
-            // Keep the field in sync with the effective URL — an
-            // ssh-owned page's bar follows the tunnel's local URL as it
-            // comes up. While the user is editing, never overwrite
-            // their keystrokes.
-            if !webAddressFocused { webAddressText = newText }
+          .onChange(of: effectiveURLText) { oldText, newText in
+            // Keep the field on the effective URL (an ssh-owned page's bar
+            // follows the tunnel's local URL as it comes up), unless the user
+            // has typed something else into it.
+            if webAddressText == oldText { webAddressText = newText }
           }
           // `webAddressText` is ContentView state (not the pane's), so
           // re-seed it when a different web session is selected.
@@ -346,24 +322,9 @@ struct ContentView: View {
             webAddressText = effectiveURLText
           }
           .onAppear {
-            // Seed the field with the effective URL. The field is NOT
-            // focused on appear — a toolbar search field that grabs
-            // focus on open would immediately engage search (and, on
-            // iOS, raise the keyboard over the page), which is not what
-            // opening a saved page should do. The user taps the field
-            // when they want to type an address.
+            // Seed the field with the effective URL, without focusing it: the
+            // user clicks the field when they want to type an address.
             webAddressText = effectiveURLText
-          }
-          .onDisappear { webAddressFocused = false }
-          .toolbar {
-            // The SSH-tunnel picker is a web-session-only control: it
-            // lets the user switch which host the open page is tunnelled
-            // through (or clear the tunnel). See webSSHTunnelPicker.
-            #if os(macOS)
-            KitToolbarItem(placement: .primaryAction) {
-              ToolGroup { webSSHTunnelPicker(web: web) }
-            }
-            #endif
           }
       } else if case .database(let connection) = kind {
         // A database session renders the per-engine documents/tables
@@ -382,7 +343,7 @@ struct ContentView: View {
         }
       } else if case .action = kind {
         // An action run nobody types into: run blocks (ActionRunsView.swift).
-        ActionRunsView(session: session)
+        ActionRunsView(session: session, showsTerminal: $actionShowsTerminal)
           .id(session.id)
           .transition(detailTransition)
       } else {
@@ -403,43 +364,164 @@ struct ContentView: View {
               .background(.background)
           }
         }
-        .toolbar {
-          // Dial again now: skips a scheduled reconnect's wait, retries a
-          // final failure after the user fixed it (password, host key), or
-          // reopens a shell that ended. Only on sessions that can reconnect
-          // (SSH terminals), only while they are not live.
-          if session.canReconnect, !isLive(session) {
-            KitToolbarItem(placement: .primaryAction) {
-              ToolGroup {
-                Button("Reconnect", systemImage: "arrow.clockwise") { session.reconnectNow() }
-                  .help("Reconnect now")
-              }
+      }
+    }
+  }
+
+  // MARK: - Toolbar
+
+  /// The selected page's title in the kit's toolbar, matching `detailPane`.
+  private var pageTitle: PageTitle {
+    switch model.selection {
+    case .session(let id):
+      if let session = model.session(id), !model.isDetached(id) {
+        let kind = model.kind(of: session)
+        return PageTitle(
+          model.displayName(for: session), meta: sessionMeta(session, kind: kind), systemImage: kind.titleSymbol,
+          hue: kind.titleHue, status: titleStatus(session, kind: kind))
+      }
+    case .note(let id):
+      if let note = model.note(id), !model.isDetached(id) {
+        return PageTitle(
+          model.notes.title(for: note.id),
+          meta: ["Note", "edited " + note.lastUpdate.formatted(.relative(presentation: .named))],
+          systemImage: "doc.text", hue: .orange)
+      }
+    case .history(let id):
+      if let record = model.historySession(id), !model.isDetached(id) {
+        return PageTitle(
+          record.title, meta: ["History", record.activityDate.formatted(.relative(presentation: .named))],
+          systemImage: "clock", hue: .orange)
+      }
+    #if os(macOS)
+    case .openedFile(let id):
+      if let file = model.openedFile(id), !model.isDetached(id) {
+        return PageTitle(
+          file.displayName, meta: [file.isDirty ? "Edited" : "Text file", file.url.deletingLastPathComponent().path],
+          systemImage: "doc.text", hue: .gray)
+      }
+    #endif
+    default:
+      break
+    }
+    return PageTitle("Terminals", meta: ["No terminal selected"], systemImage: "terminal", hue: .green)
+  }
+
+  /// The selected page's tools in the kit's toolbar, matching `detailPane`.
+  @ToolbarSlotBuilder
+  private var pageTools: [ToolbarSlot] {
+    if let session = presentedSession {
+      sessionTools(session)
+    } else if case .note(let id) = model.selection, model.note(id) != nil, !model.isDetached(id) {
+      ToolGroup(iconOnly: true) { NoteEncryptButton(noteID: id) }
+    } else if case .history(let id) = model.selection, let record = model.historySession(id), !model.isDetached(id) {
+      historyTools(record)
+    }
+  }
+
+  /// A live session's tools: a web page's address (and tunnel), an action
+  /// run's terminal switch, a terminal's Reconnect, smart actions, Files and
+  /// Open With. Open With folds first as the window narrows, then the smart
+  /// actions.
+  @ToolbarSlotBuilder
+  private func sessionTools(_ session: TerminalSession) -> [ToolbarSlot] {
+    let kind = model.kind(of: session)
+    if case .web(let web) = kind {
+      #if os(macOS)
+      ToolbarSlot(priority: 1) {
+        ToolGroup { webSSHTunnelPicker(web: web) }
+      } menu: {
+        Picker(
+          "SSH Tunnel",
+          selection: Binding(get: { web.sshConfigID }, set: { model.updateWebSessionSSH(web, to: $0) })
+        ) {
+          Text("None (open directly)").tag(UUID?.none)
+          ForEach(model.connections) { Text($0.displayName).tag(UUID?.some($0.id)) }
+        }
+      }
+      #endif
+      ToolbarSlot { webAddressField(web) }
+    } else if case .action = kind {
+      ToolGroup(iconOnly: true) { ActionTerminalToggle(showsTerminal: $actionShowsTerminal) }
+    } else if case .database = kind {
+      []
+    } else {
+      // Dial again now: skips a scheduled reconnect's wait, retries a final
+      // failure after the user fixed it (password, host key), or reopens a
+      // shell that ended. Only on sessions that can reconnect (SSH
+      // terminals), only while they are not live.
+      if session.canReconnect, !isLive(session) {
+        ToolGroup {
+          Button("Reconnect", systemImage: "arrow.clockwise") { session.reconnectNow() }
+            .help("Reconnect now")
+        }
+      }
+      #if os(macOS)
+      if model.smartActionDirectory != nil, selectedSmartActionScheme != nil {
+        ToolbarSlot(priority: 1) { smartActionTools } menu: { smartActionMenu }
+      }
+      #endif
+      if flags.isEnabled(.files) || hasOpenWith {
+        // Files, then the apps that open the directory, in one card.
+        ToolbarSlot(priority: 0) {
+          ToolGroup(iconOnly: true) {
+            filesButton
+            #if os(macOS)
+            if let directory = model.smartActionDirectory {
+              OpenWithMenu(directory: directory, kinds: model.openWithKinds)
             }
+            #endif
           }
-          KitToolbarItem(placement: .primaryAction) {
-            HStack(spacing: KitMetrics.gutter) {
-              #if os(macOS)
-              smartActionTools
-              #endif
-              // Files, then the apps that open the directory, in one card.
-              if flags.isEnabled(.files) || hasOpenWith {
-                ToolGroup(iconOnly: true) {
-                  filesButton
-                  #if os(macOS)
-                  if let directory = model.smartActionDirectory {
-                    OpenWithMenu(directory: directory, kinds: model.openWithKinds)
-                  }
-                  #endif
-                }
-              }
-            }
+        } menu: {
+          filesButton
+          #if os(macOS)
+          if let directory = model.smartActionDirectory {
+            Menu("Open With") { OpenWithMenu(directory: directory, kinds: model.openWithKinds) }
           }
+          #endif
         }
       }
     }
-    .kitToolbarTitle(
-      model.displayName(for: session), meta: sessionMeta(session, kind: kind), systemImage: kind.titleSymbol,
-      hue: kind.titleHue, status: titleStatus(session, kind: kind))
+  }
+
+  /// A history session's tools: delete it, replay its commands, or make them
+  /// an action.
+  private func historyTools(_ historySession: HistorySession) -> some View {
+    ToolGroup(iconOnly: true) {
+      Button("Delete History", systemImage: "trash", role: .destructive) {
+        model.deleteHistorySession(historySession.id)
+      }
+      .help("Delete History")
+      Button("Replay Commands", systemImage: "play") {
+        model.replayHistorySession(historySession)
+      }
+      .help("Replay Commands")
+      Button("Create Action", systemImage: "command") {
+        model.createAction(from: historySession)
+      }
+      .help("Create Action")
+    }
+  }
+
+  /// A web page's address: what the WebView loads (the tunnel's local URL for
+  /// an ssh-owned page once it is up, else the stored URL), or what the user
+  /// typed; Return opens it.
+  private func webAddressField(_ web: WebSession) -> some View {
+    KitSearchField(text: $webAddressText, prompt: "URL")
+      .frame(width: 320)
+      .onSubmit {
+        // Submitting the address already shown is a no-op (no reconnect or
+        // reload).
+        guard webAddressText != webURLText(web) else { return }
+        model.updateWebSessionURL(web, to: webAddressText)
+      }
+  }
+
+  /// The address the web page shows: the tunneled local URL for an ssh-owned
+  /// session once the tunnel is up, otherwise the stored web URL, so the bar
+  /// matches what the WebView actually loads.
+  private func webURLText(_ web: WebSession) -> String {
+    model.webSessionRuntime(for: web)?.tunnelURL?.absoluteString ?? web.url
   }
 
   /// The title's live icon: an action's run, a web page's tunnel, else the
@@ -455,15 +537,7 @@ struct ContentView: View {
   /// The title's status line: the directory the shell is in, else where the
   /// session lives.
   private func sessionMeta(_ session: TerminalSession, kind: ConnectionKind) -> [String] {
-    if !localDirectoryText.isEmpty { return [localDirectoryText] }
-    switch kind {
-    case .local: return ["This Mac"]
-    case .screen(let info): return [info.kind == .tmux ? "tmux" : "screen"]
-    case .ssh(let config): return ["\(config.user)@\(config.host)"]
-    case .action(let spec): return [spec.config?.displayName ?? "Local"]
-    case .web(let web): return [web.url]
-    case .database(let connection): return [connection.subtitle]
-    }
+    localDirectoryText.isEmpty ? kind.titleMeta : [localDirectoryText]
   }
 
   /// Whether the Open With apps show for the active local directory.
@@ -504,6 +578,33 @@ struct ContentView: View {
       }
     }
   }
+
+  /// The smart actions as rows of the toolbar's "…" menu once they fold.
+  @ViewBuilder
+  private var smartActionMenu: some View {
+    if let directory = model.smartActionDirectory, let scheme = selectedSmartActionScheme {
+      if model.smartActionSchemes.count > 1 {
+        Picker(
+          "Scheme", selection: Binding(get: { scheme.id }, set: { smartActionsSchemeID = $0 })
+        ) {
+          ForEach(model.smartActionSchemes) { Text($0.name).tag($0.id) }
+        }
+      }
+      ForEach(SmartActionButton.kinds.filter { scheme.terminalCommand(for: $0) != nil }, id: \.self) { kind in
+        SmartActionButton(kind: kind, scheme: scheme, directory: directory)
+      }
+      let distribution = ActionKind.allCases.filter { $0.isDistribution && scheme.supports($0) }
+      if !distribution.isEmpty {
+        Menu("Distribute") {
+          ForEach(distribution, id: \.self) { kind in
+            Button(kind.title, systemImage: "square.and.arrow.up") {
+              model.runSmartAction(kind, scheme: scheme, in: directory)
+            }
+          }
+        }
+      }
+    }
+  }
   #endif
 
   /// Whether the session's link is up or being set up for the first time
@@ -515,34 +616,12 @@ struct ContentView: View {
     }
   }
 
-  /// The detail pane for an archived history session, with its delete /
-  /// replay / create-action toolbar.
-  @ViewBuilder
+  /// The detail pane for an archived history session (its delete / replay /
+  /// create-action tools are `historyTools`).
   private func historyDetail(_ historySession: HistorySession) -> some View {
     HistorySessionView(session: historySession)
       .id(historySession.id)
       .transition(detailTransition)
-      .kitToolbarTitle(
-        historySession.title, meta: ["History", historySession.activityDate.formatted(.relative(presentation: .named))],
-        systemImage: "clock", hue: .orange)
-      .toolbar {
-        KitToolbarItem(placement: .primaryAction) {
-          ToolGroup(iconOnly: true) {
-            Button("Delete History", systemImage: "trash", role: .destructive) {
-              model.deleteHistorySession(historySession.id)
-            }
-            .help("Delete History")
-            Button("Replay Commands", systemImage: "play") {
-              model.replayHistorySession(historySession)
-            }
-            .help("Replay Commands")
-            Button("Create Action", systemImage: "command") {
-              model.createAction(from: historySession)
-            }
-            .help("Create Action")
-          }
-        }
-      }
   }
 
   /// Shown when nothing presentable is selected: nothing at all, a saved row
@@ -553,7 +632,6 @@ struct ContentView: View {
       systemImage: "terminal", title: "No Terminal Selected",
       message: "Choose a terminal in the sidebar or create a new one.")
     .transition(detailTransition)
-    .kitToolbarTitle("Terminals", meta: ["No terminal selected"], systemImage: "terminal", hue: .green)
   }
 
   /// Terminal | Files view toggle: a single button whose icon flips between
@@ -788,6 +866,18 @@ extension ConnectionKind {
     }
   }
 
+  /// The detail title's status line: where a session of this kind lives.
+  var titleMeta: [String] {
+    switch self {
+    case .local: ["This Mac"]
+    case .screen(let info): [info.kind == .tmux ? "tmux" : "screen"]
+    case .ssh(let config): ["\(config.user)@\(config.host)"]
+    case .action(let spec): [spec.config?.displayName ?? "Local"]
+    case .web(let web): [web.url]
+    case .database(let connection): [connection.subtitle]
+    }
+  }
+
   /// The detail title's tile hue: green on this Mac, blue remote.
   var titleHue: Hue {
     switch self {
@@ -831,25 +921,22 @@ private struct OpenWithMenu: View {
 }
 #endif // os(macOS)
 
-/// The web address bar's focus binding and toolbar behavior. By default the
-/// search field hides the rest of the toolbar while it is active (on iOS the
-/// navigation bar's back button disappears until the field is cleared), so
-/// the toolbar's other controls are kept visible and the user can always
-/// navigate away without cancelling the search first. `searchFocused` needs
-/// macOS 15 / iOS 18: before that the focus isn't tracked, so a tunnel URL
-/// update can replace an address being typed.
-private struct WebAddressSearchBehavior: ViewModifier {
-  let focused: FocusState<Bool>.Binding
+/// A page's title in the kit's toolbar: the window's title and the kit's rich
+/// title (tile, name, status line, live icon).
+struct PageTitle {
+  var title: String
+  var meta: [String]
+  var systemImage: String
+  var hue: Hue
+  var status: WorkStatus
 
-  func body(content: Content) -> some View {
-    if #available(macOS 15.0, iOS 18.0, *) {
-      content
-        .searchFocused(focused)
-        .searchPresentationToolbarBehavior(.avoidHidingContent)
-    } else if #available(macOS 14.1, iOS 17.1, *) {
-      content.searchPresentationToolbarBehavior(.avoidHidingContent)
-    } else {
-      content
-    }
+  init(_ title: String, meta: [String] = [], systemImage: String, hue: Hue, status: WorkStatus = .idle) {
+    self.title = title
+    self.meta = meta
+    self.systemImage = systemImage
+    self.hue = hue
+    self.status = status
   }
+
+  var view: KitTitle { KitTitle(title, meta: meta, systemImage: systemImage, hue: hue, status: status) }
 }

@@ -10,14 +10,16 @@ import ShellKit
 /// the Running section, a detached window just its own.
 ///
 /// A run that does ask for input (a `sudo` password) still has its terminal:
-/// the toolbar's Terminal button flips the pane to it.
+/// the toolbar's Terminal button (`ActionTerminalToggle`) flips the pane to it.
 struct ActionRunsView: View {
   @Environment(AppModel.self) private var model
   /// The selected run.
   let session: TerminalSession
   /// Every run of the Running section, or only `session`.
   var showsAll = true
-  @State private var showsTerminal = false
+  /// Whether the pane shows the run's terminal instead of its output (the
+  /// toolbar's `ActionTerminalToggle`).
+  @Binding var showsTerminal: Bool
 
   var body: some View {
     Group {
@@ -45,19 +47,6 @@ struct ActionRunsView: View {
       }
     }
     .animation(.kit, value: showsTerminal)
-    .toolbar {
-      KitToolbarItem(placement: .primaryAction) {
-        ToolGroup(iconOnly: true) {
-          Button(
-            showsTerminal ? "Run Output" : "Terminal",
-            systemImage: showsTerminal ? "list.bullet.rectangle" : "terminal"
-          ) {
-            showsTerminal.toggle()
-          }
-          .help(showsTerminal ? "Show the run's output" : "Show the run's terminal, to type into it")
-        }
-      }
-    }
   }
 
   /// The selection of the track is the window's: picking a block selects its run.
@@ -84,5 +73,20 @@ struct ActionRunsView: View {
   private func output(of run: TerminalSession) -> String {
     let snapshot = run.snapshot
     return snapshot.plainText(fromLine: max(0, snapshot.totalLines - 200))
+  }
+}
+
+/// The toolbar's switch between an action run's output and its terminal.
+struct ActionTerminalToggle: View {
+  @Binding var showsTerminal: Bool
+
+  var body: some View {
+    Button(
+      showsTerminal ? "Run Output" : "Terminal",
+      systemImage: showsTerminal ? "list.bullet.rectangle" : "terminal"
+    ) {
+      showsTerminal.toggle()
+    }
+    .help(showsTerminal ? "Show the run's output" : "Show the run's terminal, to type into it")
   }
 }

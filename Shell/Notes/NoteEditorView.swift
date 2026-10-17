@@ -24,26 +24,26 @@ struct NoteEditorView: View {
     // window's undo stack — a later ⌘Z would message the freed editor.
     // (ContentView keys this view by note id, so a note switch lands here too.)
     .onDisappear { UndoHygiene.discardStaleTextUndo() }
-    .toolbar {
-      KitToolbarItem(placement: .primaryAction) {
-        ToolGroup(iconOnly: true) {
-          Button(
-            isEncrypted ? "Decrypt Note" : "Encrypt Note", systemImage: isEncrypted ? "lock.fill" : "lock.open"
-          ) {
-            model.notes.setEncrypted(!isEncrypted, for: noteID)
-          }
-          .help(
-            isEncrypted
-              ? "Keep this note as a plain Markdown file in Markdown's notes folder"
-              : "Keep this note's file encrypted, readable only by the v57 apps")
-        }
-      }
+  }
+}
+
+/// The toolbar's switch between a note kept as a plain Markdown file and an
+/// encrypted one.
+struct NoteEncryptButton: View {
+  @Environment(AppModel.self) private var model
+  let noteID: UUID
+
+  private var isEncrypted: Bool {
+    model.notes.notes.first { $0.id == noteID }?.isEncrypted ?? false
+  }
+
+  var body: some View {
+    Button(isEncrypted ? "Decrypt Note" : "Encrypt Note", systemImage: isEncrypted ? "lock.fill" : "lock.open") {
+      model.notes.setEncrypted(!isEncrypted, for: noteID)
     }
+    .help(
+      isEncrypted
+        ? "Keep this note as a plain Markdown file in Markdown's notes folder"
+        : "Keep this note's file encrypted, readable only by the v57 apps")
   }
-
-  private var summary: NotesStore.NoteSummary? {
-    model.notes.notes.first { $0.id == noteID }
-  }
-
-  private var isEncrypted: Bool { summary?.isEncrypted ?? false }
 }

@@ -1,3 +1,4 @@
+import ComponentKit
 import SwiftUI
 import ShellKit
 #if os(macOS)
@@ -20,6 +21,8 @@ struct DetachDetailView: View {
   /// Whether this detached window stays above other apps. Kept per window, so
   /// one detached session's always-on-top flag never leaks to another.
   @State private var isAlwaysOnTop = false
+  /// Whether a detached action run shows its terminal instead of its output.
+  @State private var actionShowsTerminal = false
   /// The hosting NSWindow, resolved from the SwiftUI view (via a pass-through
   /// background accessor) so the toolbar button can toggle its window level
   /// and collection behavior. macOS only.
@@ -37,13 +40,9 @@ struct DetachDetailView: View {
         }
         #endif
       }
-      .toolbar {
-        #if os(macOS)
-        ToolbarItem(placement: .primaryAction) {
-          alwaysOnTopButton
-        }
-        #endif
-      }
+      // The kit's toolbar, as in the main window: the item's title and tools,
+      // and Always on Top on the Mac.
+      .kitToolbar(title.title, title: { title.view }, tools: { tools })
       .onDisappear {
         // Closing the detached window/scene returns the item to the main
         // window (and deletes it if it was an empty note). Only runs on a
@@ -81,7 +80,7 @@ struct DetachDetailView: View {
             .id(session.id)
           }
         } else if case .action = kind {
-          ActionRunsView(session: session, showsAll: false)
+          ActionRunsView(session: session, showsAll: false, showsTerminal: $actionShowsTerminal)
             .id(session.id)
         } else {
           TerminalView(session: session)
@@ -89,30 +88,57 @@ struct DetachDetailView: View {
             .terminalFileDrop(session)
         }
       }
-      .navigationTitle(model.displayName(for: session))
     } else if let note = model.notes.notes.first(where: { $0.id == itemID }) {
       NoteEditorView(noteID: note.id)
         .id(note.id)
-        .navigationTitle(model.notes.title(for: note.id))
     } else {
-      ContentUnavailableView(
-        "Item Closed",
-        systemImage: "rectangle.dashed",
-        description: Text("This session or note is no longer available.")
-      )
+      EmptyState(
+        systemImage: "rectangle.dashed", title: "Item Closed",
+        message: "This session or note is no longer available.")
     }
+  }
+
+  /// The item's title in the kit's toolbar.
+  private var title: PageTitle {
+    if let session = model.sessions.first(where: { $0.id == itemID }) {
+      let kind = model.kind(of: session)
+      let status: WorkStatus =
+        switch kind {
+        case .action: session.actionRunStatus
+        case .web(let web): model.webSessionRuntime(for: web)?.status ?? .idle
+        default: session.linkStatus
+        }
+      return PageTitle(
+        model.displayName(for: session), meta: kind.titleMeta, systemImage: kind.titleSymbol, hue: kind.titleHue,
+        status: status)
+    } else if let note = model.notes.notes.first(where: { $0.id == itemID }) {
+      return PageTitle(model.notes.title(for: note.id), meta: ["Note"], systemImage: "doc.text", hue: .orange)
+    }
+    return PageTitle("Item Closed", systemImage: "rectangle.dashed", hue: .gray)
+  }
+
+  /// The item's tools: a note's encryption, an action run's terminal switch,
+  /// and Always on Top on the Mac.
+  @ToolbarSlotBuilder
+  private var tools: [ToolbarSlot] {
+    if model.notes.notes.contains(where: { $0.id == itemID }) {
+      ToolGroup(iconOnly: true) { NoteEncryptButton(noteID: itemID) }
+    } else if let session = model.sessions.first(where: { $0.id == itemID }), case .action = model.kind(of: session) {
+      ToolGroup(iconOnly: true) { ActionTerminalToggle(showsTerminal: $actionShowsTerminal) }
+    }
+    #if os(macOS)
+    ToolGroup(iconOnly: true) { alwaysOnTopButton }
+    #endif
   }
 
   #if os(macOS)
   /// The toolbar button that toggles this detached window's always-on-top
-  /// behavior. Reflects the on-state with an accent foreground.
+  /// behavior, drawn on while it is.
   private var alwaysOnTopButton: some View {
-    Button {
+    Button("Always on Top", systemImage: "interface.window.on.rectangle.dashed") {
       toggleAlwaysOnTop()
-    } label: {
-      Label("Always on Top", systemImage: "interface.window.on.rectangle.dashed")
-        .foregroundStyle(isAlwaysOnTop ? Color.accentColor : Color.primary)
     }
+    .kitToolOn(isAlwaysOnTop)
     .help(isAlwaysOnTop ? "Keep window above other apps (on)" : "Keep window above other apps")
   }
 
