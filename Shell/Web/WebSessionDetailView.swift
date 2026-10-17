@@ -35,11 +35,12 @@ struct WebSessionDetailView: View {
     Group {
       if let tunnel {
         if let error = tunnel.errorMessage {
-          WorkState(systemImage: "globe", title: "Couldn't Connect", message: error, status: .failed(error))
+          EmptyState(systemImage: "globe", title: "Couldn't Connect", message: error, status: .failed(error))
         } else if let tunneled = tunnel.tunnelURL {
           webView(for: tunneled)
         } else {
-          WorkState(systemImage: "globe", title: "Connecting", message: "Opening the tunnel to \(displayName)…")
+          EmptyState(
+            systemImage: "globe", title: "Connecting", message: "Opening the tunnel to \(displayName)…", status: .working)
         }
       } else if let url {
         webView(for: url)

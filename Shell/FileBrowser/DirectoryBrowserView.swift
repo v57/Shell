@@ -24,7 +24,7 @@ typealias DroppedFiles = [URL]
 ///
 /// Rendered states, in priority order:
 /// - **Error** — `errorMessage` is non-nil (`ContentUnavailableView` + Retry).
-/// - **Loading** — `isLoading` is true and there are no rows yet (`WorkState`).
+/// - **Loading** — `isLoading` is true and there are no rows yet (a working `EmptyState`).
 /// - **Empty** — no rows and no error (`ContentUnavailableView`).
 /// - **Success** — the `Table` (macOS) or `List` (iOS) of rows.
 ///
@@ -40,7 +40,7 @@ struct DirectoryBrowserView: View {
   @Binding var selection: Set<String>
   /// The active column sort order, driven by the sortable `Table` columns.
   @Binding var sortOrder: [KeyPathComparator<FileRow>]
-  /// Whether a refresh is in flight. Shown as a `WorkState` only while the
+  /// Whether a refresh is in flight. Shown as a working `EmptyState` only while the
   /// initial listing is still pending (rows empty), so a refresh that already
   /// has a table on screen doesn't flash it away.
   let isLoading: Bool
@@ -150,7 +150,7 @@ struct DirectoryBrowserView: View {
     if let errorMessage {
       ErrorStateView(message: errorMessage, onRetry: onRetry)
     } else if isLoading && rows.isEmpty {
-      WorkState(systemImage: "folder", title: "Loading…")
+      EmptyState(systemImage: "folder", title: "Loading…", status: .working)
     } else if rows.isEmpty {
       EmptyStateView()
     } else {

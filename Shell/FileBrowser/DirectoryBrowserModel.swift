@@ -37,7 +37,7 @@ import ShellIntegrations
   /// Selected row names (the `.id` of a `FileRow` is its name).
   var selection: Set<String> = []
 
-  /// Whether a refresh is currently in flight, shown as a `WorkState` only
+  /// Whether a refresh is currently in flight, shown as a working `EmptyState` only
   /// while the initial listing is still pending (rows empty).
   private(set) var busy = false
 

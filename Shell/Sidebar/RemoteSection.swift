@@ -264,7 +264,7 @@ private struct SSHConfigRow: View {
         // this connected host. Visible only while connected, items gated by
         // their feature flag. A web session opens immediately (no sheet).
         if flags.isEnabled(.web) || flags.isEnabled(.database) {
-          MenuToolButton("New Session for This Host", systemImage: "plus") {
+          KitMenuButton("New Session for This Host", systemImage: "plus", style: .button) {
             if flags.isEnabled(.web) {
               Button("Web Session", systemImage: "globe") {
                 model.openNewWebSession(on: config)

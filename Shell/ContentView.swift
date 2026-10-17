@@ -431,13 +431,7 @@ struct ContentView: View {
       ToolbarSlot(priority: 1) {
         ToolGroup { webSSHTunnelPicker(web: web) }
       } menu: {
-        Picker(
-          "SSH Tunnel",
-          selection: Binding(get: { web.sshConfigID }, set: { model.updateWebSessionSSH(web, to: $0) })
-        ) {
-          Text("None (open directly)").tag(UUID?.none)
-          ForEach(model.connections) { Text($0.displayName).tag(UUID?.some($0.id)) }
-        }
+        KitSubmenu("SSH Tunnel", systemImage: "network") { webSSHTunnelOptions(web) }
       }
       #endif
       ToolbarSlot { webAddressField(web) }
@@ -476,7 +470,9 @@ struct ContentView: View {
           filesButton
           #if os(macOS)
           if let directory = model.smartActionDirectory {
-            Menu("Open With") { OpenWithMenu(directory: directory, kinds: model.openWithKinds) }
+            KitSubmenu("Open With", systemImage: "arrow.up.forward.app") {
+              OpenWithMenu(directory: directory, kinds: model.openWithKinds)
+            }
           }
           #endif
         }
@@ -559,12 +555,8 @@ struct ContentView: View {
     if let directory = model.smartActionDirectory, let scheme = selectedSmartActionScheme {
       ToolGroup(iconOnly: true) {
         if model.smartActionSchemes.count > 1 {
-          MenuToolButton(scheme.name, systemImage: "scope") {
-            KitMenuOptions(
-              selection: Binding(get: { scheme.id }, set: { smartActionsSchemeID = $0 }),
-              segments: model.smartActionSchemes.map {
-                KitSegment($0.name, value: $0.id, systemImage: $0.toolchain.symbolName)
-              })
+          KitMenuButton(scheme.name, systemImage: "scope", style: .button) {
+            schemeOptions(scheme)
           }
           .help("Select scheme")
         }
@@ -579,23 +571,28 @@ struct ContentView: View {
     }
   }
 
+  /// The directory's schemes as menu options, the picked one checked.
+  private func schemeOptions(_ scheme: ActionScheme) -> some View {
+    KitMenuOptions(
+      selection: Binding(get: { scheme.id }, set: { smartActionsSchemeID = $0 }),
+      segments: model.smartActionSchemes.map {
+        KitSegment($0.name, value: $0.id, systemImage: $0.toolchain.symbolName)
+      })
+  }
+
   /// The smart actions as rows of the toolbar's "…" menu once they fold.
   @ViewBuilder
   private var smartActionMenu: some View {
     if let directory = model.smartActionDirectory, let scheme = selectedSmartActionScheme {
       if model.smartActionSchemes.count > 1 {
-        Picker(
-          "Scheme", selection: Binding(get: { scheme.id }, set: { smartActionsSchemeID = $0 })
-        ) {
-          ForEach(model.smartActionSchemes) { Text($0.name).tag($0.id) }
-        }
+        KitSubmenu("Scheme", systemImage: "scope") { schemeOptions(scheme) }
       }
       ForEach(SmartActionButton.kinds.filter { scheme.terminalCommand(for: $0) != nil }, id: \.self) { kind in
         SmartActionButton(kind: kind, scheme: scheme, directory: directory)
       }
       let distribution = ActionKind.allCases.filter { $0.isDistribution && scheme.supports($0) }
       if !distribution.isEmpty {
-        Menu("Distribute") {
+        KitSubmenu("Distribute", systemImage: "square.and.arrow.up") {
           ForEach(distribution, id: \.self) { kind in
             Button(kind.title, systemImage: "square.and.arrow.up") {
               model.runSmartAction(kind, scheme: scheme, in: directory)
@@ -770,13 +767,19 @@ struct ContentView: View {
   /// reconnects the open page (see AppModel.updateWebSessionSSH).
   @ViewBuilder
   private func webSSHTunnelPicker(web: WebSession) -> some View {
-    MenuToolButton(currentWebSSHTunnelLabel(for: web), systemImage: "network") {
-      KitMenuOptions(
-        selection: Binding(get: { web.sshConfigID }, set: { model.updateWebSessionSSH(web, to: $0) }),
-        segments: [KitSegment<UUID?>("None (open directly)", value: nil)]
-          + model.connections.map { KitSegment($0.displayName, value: Optional($0.id)) })
+    KitMenuButton(currentWebSSHTunnelLabel(for: web), systemImage: "network", style: .button) {
+      webSSHTunnelOptions(web)
     }
     .help("SSH tunnel")
+  }
+
+  /// The saved SSH hosts a web page can tunnel through, and none, as menu
+  /// options.
+  private func webSSHTunnelOptions(_ web: WebSession) -> some View {
+    KitMenuOptions(
+      selection: Binding(get: { web.sshConfigID }, set: { model.updateWebSessionSSH(web, to: $0) }),
+      segments: [KitSegment<UUID?>("None (open directly)", value: nil)]
+        + model.connections.map { KitSegment($0.displayName, value: Optional($0.id)) })
   }
 
   /// The picker's current value label: the bound SSH host's display name, or
@@ -836,7 +839,7 @@ private struct DistributeMenu: View {
   @Environment(AppModel.self) private var model
 
   var body: some View {
-    MenuToolButton("Distribute", systemImage: "square.and.arrow.up") {
+    KitMenuButton("Distribute", systemImage: "square.and.arrow.up", style: .button) {
       ForEach(kinds, id: \.self) { kind in
         Button(kind.title, systemImage: "square.and.arrow.up") {
           model.runSmartAction(kind, scheme: scheme, in: directory)

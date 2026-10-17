@@ -70,7 +70,7 @@ struct OpenFilePane: View {
   var body: some View {
     Group {
       if !file.isLoaded {
-        WorkState(systemImage: "doc.text", title: "Opening \(file.displayName)")
+        EmptyState(systemImage: "doc.text", title: "Opening \(file.displayName)", status: .working)
       } else if let notice = file.loadNotice {
         // Non-UTF8 / oversized: visible notice, read-only, no write-back.
         readOnlyNotice(notice)

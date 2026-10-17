@@ -255,7 +255,7 @@ struct LocalSectionView: View {
       .transition(.blurReplace)
     }
     if flags.isEnabled(.sessions) || flags.isEnabled(.web) || flags.isEnabled(.database) {
-      MenuToolButton("New", systemImage: "plus") {
+      KitMenuButton("New", systemImage: "plus", style: .button) {
         if flags.isEnabled(.sessions) {
           Button("New Session", systemImage: "terminal") {
             model.addLocalTerminal()
