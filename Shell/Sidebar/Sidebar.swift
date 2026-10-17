@@ -127,7 +127,7 @@ private struct RunningSectionView: View {
       ) {
         ForEach(runs) { session in
           ActionRunRow(session: session, spec: model.actionSpec(for: session))
-            .contextMenu {
+            .kitContextMenu {
               if session.isActionRunning {
                 Button("Cancel (Ctrl+C)") { session.send(Data([0x03])) }
               }
@@ -240,7 +240,7 @@ private struct TextFilesSectionView: View {
                 .transition(.scale.combined(with: .opacity))
             }
           }
-          .contextMenu {
+          .kitContextMenu {
             Button("Close", role: .destructive) {
               model.closeOpenedFile(file.id)
             }

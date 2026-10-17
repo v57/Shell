@@ -25,7 +25,7 @@ struct WebSessionRow: View {
         .accessibilityLabel(isOpen ? "Open" : "Closed")
         .help(isOpen ? "Web session open" : "Web session closed")
     }
-    .contextMenu {
+    .kitContextMenu {
       Button("Open") { model.openOrFocusWebSession(web) }
       Button("Reconnect") { model.reconnectWebSession(web) }
       Divider()

@@ -156,7 +156,7 @@ private struct SSHConfigGroup: View {
         onRename: { model.renameSession(session.id, to: $0) }
       )
       .kitRowIndent(1)
-      .contextMenu {
+      .kitContextMenu {
         Button("Rename…") { state.renamingSessionID = session.id }
         Divider()
         Button("Close Connection", role: .destructive) {
@@ -186,7 +186,7 @@ private struct SSHConfigGroup: View {
     ForEach(databaseConnections) { connection in
       DatabaseConnectionRow(connection: connection)
         .kitRowIndent(1)
-        .contextMenu { DatabaseConnectionActions(connection: connection) { state.beginRenameDatabase($0) } }
+        .kitContextMenu { DatabaseConnectionActions(connection: connection) { state.beginRenameDatabase($0) } }
     }
   }
 
@@ -195,7 +195,7 @@ private struct SSHConfigGroup: View {
   /// directory (~), once confirmed.
   private var hostRow: some View {
     SSHConfigRow(config: config)
-      .contextMenu {
+      .kitContextMenu {
         Button("Connect") { model.connect(to: config) }
         Divider()
         // New-session entries bound to this host: the same preset actions the
@@ -264,7 +264,7 @@ private struct SSHConfigRow: View {
         // this connected host. Visible only while connected, items gated by
         // their feature flag. A web session opens immediately (no sheet).
         if flags.isEnabled(.web) || flags.isEnabled(.database) {
-          Menu {
+          MenuToolButton("New Session for This Host", systemImage: "plus") {
             if flags.isEnabled(.web) {
               Button("Web Session", systemImage: "globe") {
                 model.openNewWebSession(on: config)
@@ -277,12 +277,8 @@ private struct SSHConfigRow: View {
                 model.showingNewDatabaseConnection = true
               }
             }
-          } label: {
-            Label("New Session for This Host", systemImage: "plus")
           }
-          .menuStyle(.button)
           .buttonStyle(.kitIcon)
-          .menuIndicator(.hidden)
           .help("New session for this host")
           .transition(.scale.combined(with: .opacity))
         }

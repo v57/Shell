@@ -121,7 +121,7 @@ struct ActionsOverlayView: View {
             run(action)
           }
           .help(helpText)
-          .contextMenu {
+          .kitContextMenu {
             Button("Edit…") { model.editAction(action) }
             Button("Remove", role: .destructive) { model.actions.remove(action.id) }
           }

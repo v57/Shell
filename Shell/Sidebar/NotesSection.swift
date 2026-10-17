@@ -24,7 +24,7 @@ struct NotesSectionView: View {
       KitSection("Notes", systemImage: "doc.text", hue: .orange, isExpanded: .expanded(collapsed: $notesCollapsed)) {
         ForEach(notes) { note in
           NoteRow(note: note)
-            .contextMenu {
+            .kitContextMenu {
               Button(note.isEncrypted ? "Decrypt Note" : "Encrypt Note") {
                 model.notes.setEncrypted(!note.isEncrypted, for: note.id)
               }

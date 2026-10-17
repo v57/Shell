@@ -104,7 +104,7 @@ struct LocalSectionView: View {
         isRenaming: state.isRenamingSession(session.id),
         onRename: { model.renameSession(session.id, to: $0) }
       )
-      .contextMenu {
+      .kitContextMenu {
         Button("Rename…") { state.renamingSessionID = session.id }
         if flags.isEnabled(.authorizedKeys) {
           Button("Authorized Keys", systemImage: "key.2.on.ring.fill") {
@@ -130,7 +130,7 @@ struct LocalSectionView: View {
           set: { if !$0, renamingScreenName == info.name { renamingScreenName = nil } }),
         onRename: { model.screenMonitor.rename(info, to: $0) }
       )
-      .contextMenu {
+      .kitContextMenu {
         Button("Rename…") { renamingScreenName = info.name }
         Divider()
         if model.attachedSession(toScreen: info) == nil {
@@ -148,7 +148,7 @@ struct LocalSectionView: View {
       // Remote persistent sessions are identified by their SSH origin;
       // renaming runs on the host, which is out of scope here.
       ScreenSessionRow(info: info, isRenaming: .constant(false), onRename: { _ in })
-        .contextMenu {
+        .kitContextMenu {
           if model.attachedSession(toScreen: info) == nil {
             Button("Attach") {
               if let config = model.connections.first(where: { $0.id == info.remoteOrigin?.sshConfigID }) {
@@ -189,7 +189,7 @@ struct LocalSectionView: View {
 
   private func localDatabaseRow(_ connection: DatabaseConnection) -> some View {
     DatabaseConnectionRow(connection: connection)
-      .contextMenu { DatabaseConnectionActions(connection: connection) { state.beginRenameDatabase($0) } }
+      .kitContextMenu { DatabaseConnectionActions(connection: connection) { state.beginRenameDatabase($0) } }
   }
 
   /// The header's line: the live CPU, GPU and power draw while Monitoring is on
@@ -255,7 +255,7 @@ struct LocalSectionView: View {
       .transition(.blurReplace)
     }
     if flags.isEnabled(.sessions) || flags.isEnabled(.web) || flags.isEnabled(.database) {
-      Menu {
+      MenuToolButton("New", systemImage: "plus") {
         if flags.isEnabled(.sessions) {
           Button("New Session", systemImage: "terminal") {
             model.addLocalTerminal()
@@ -272,11 +272,7 @@ struct LocalSectionView: View {
             model.showingNewDatabaseConnection = true
           }
         }
-      } label: {
-        Label("New", systemImage: "plus")
       }
-      .menuStyle(.button)
-      .menuIndicator(.hidden)
       .help("New session")
     }
   }

@@ -475,14 +475,12 @@ struct ContentView: View {
     if let directory = model.smartActionDirectory, let scheme = selectedSmartActionScheme {
       ToolGroup(iconOnly: true) {
         if model.smartActionSchemes.count > 1 {
-          Menu {
-            ForEach(model.smartActionSchemes) { scheme in
-              Button(scheme.name, systemImage: scheme.toolchain.symbolName) {
-                smartActionsSchemeID = scheme.id
-              }
-            }
-          } label: {
-            Label(scheme.name, systemImage: "scope")
+          MenuToolButton(scheme.name, systemImage: "scope") {
+            KitMenuOptions(
+              selection: Binding(get: { scheme.id }, set: { smartActionsSchemeID = $0 }),
+              segments: model.smartActionSchemes.map {
+                KitSegment($0.name, value: $0.id, systemImage: $0.toolchain.symbolName)
+              })
           }
           .help("Select scheme")
         }
@@ -684,32 +682,11 @@ struct ContentView: View {
   /// reconnects the open page (see AppModel.updateWebSessionSSH).
   @ViewBuilder
   private func webSSHTunnelPicker(web: WebSession) -> some View {
-    Menu {
-      Button {
-        model.updateWebSessionSSH(web, to: nil)
-      } label: {
-        if web.sshConfigID == nil {
-          Label("None (open directly)", systemImage: "checkmark")
-        } else {
-          Text("None (open directly)")
-        }
-      }
-      if !model.connections.isEmpty {
-        Divider()
-        ForEach(model.connections) { config in
-          Button {
-            model.updateWebSessionSSH(web, to: config.id)
-          } label: {
-            if web.sshConfigID == config.id {
-              Label(config.displayName, systemImage: "checkmark")
-            } else {
-              Text(config.displayName)
-            }
-          }
-        }
-      }
-    } label: {
-      Label(currentWebSSHTunnelLabel(for: web), systemImage: "network")
+    MenuToolButton(currentWebSSHTunnelLabel(for: web), systemImage: "network") {
+      KitMenuOptions(
+        selection: Binding(get: { web.sshConfigID }, set: { model.updateWebSessionSSH(web, to: $0) }),
+        segments: [KitSegment<UUID?>("None (open directly)", value: nil)]
+          + model.connections.map { KitSegment($0.displayName, value: Optional($0.id)) })
     }
     .help("SSH tunnel")
   }
@@ -771,24 +748,19 @@ private struct DistributeMenu: View {
   @Environment(AppModel.self) private var model
 
   var body: some View {
-    Menu {
+    MenuToolButton("Distribute", systemImage: "square.and.arrow.up") {
       ForEach(kinds, id: \.self) { kind in
-        Button {
+        Button(kind.title, systemImage: "square.and.arrow.up") {
           model.runSmartAction(kind, scheme: scheme, in: directory)
-        } label: {
-          Label(kind.title, systemImage: "square.and.arrow.up")
         }
       }
       if kinds.contains(where: \.needsNotarization) {
         Divider()
-        Button("Notarization Settings…") {
+        Button("Notarization Settings…", systemImage: "checkmark.seal") {
           model.notarizationSetup = NotarizationSetupRequest()
         }
       }
-    } label: {
-      Label("Distribute", systemImage: "square.and.arrow.up")
     }
-    .menuIndicator(.hidden)
   }
 }
 #endif

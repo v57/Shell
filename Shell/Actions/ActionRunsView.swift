@@ -34,7 +34,7 @@ struct ActionRunsView: View {
                 output: output(of: run),
                 stop: run.isActionRunning ? { run.send(Data([0x03])) } : nil
               )
-              .contextMenu {
+              .kitContextMenu {
                 Button("Close", role: .destructive) { model.removeSession(run.id) }
               }
             }
