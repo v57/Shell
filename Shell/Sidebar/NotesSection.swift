@@ -56,9 +56,9 @@ struct NotesSectionView: View {
 
 /// A note row in the sidebar. The title is the first non-empty line of the
 /// note (editing it renames it); the preview is the next non-empty line.
-/// Both are DECRYPTED IN THE VIEW via `decryptedNote(id:)` — the sidebar's
-/// `LazyVStack` materializes visible rows only, so only visible rows decrypt
-/// (results cached by the store).
+/// Both are DECRYPTED IN THE VIEW via `decryptedNote(id:)` — `KitSection`'s
+/// rows are a `KitLazyStack`, which builds the rows near the screen only, so
+/// only those decrypt (results cached by the store).
 private struct NoteRow: View {
   @Environment(AppModel.self) private var model
   let note: NotesStore.NoteSummary
