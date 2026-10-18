@@ -23,8 +23,12 @@ mkdir -p $out
 cd $root
 
 echo "Archiving"
+# LTO, and ld-archive-prelink so Xcode's per-package `ld -r` doesn't keep unused package code.
 xcodebuild archive -project Shell.xcodeproj -scheme Shell -configuration Release \
-  -destination 'generic/platform=macOS' -archivePath $out/Shell.xcarchive > $out/archive.log
+  -destination 'generic/platform=macOS' -archivePath $out/Shell.xcarchive \
+  SWIFT_LTO=YES ALTERNATE_LINKER_PATH=$root/Scripts/ld-archive-prelink \
+  'OTHER_SWIFT_FLAGS=$(inherited) -Xfrontend -internalize-at-link -Xfrontend -conditional-runtime-records' \
+  > $out/archive.log
 
 echo "Exporting with Developer ID"
 xcodebuild -exportArchive -archivePath $out/Shell.xcarchive \
