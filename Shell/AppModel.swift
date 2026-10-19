@@ -2196,13 +2196,14 @@ final class AppModel {
     // No focus: the run stays in Running, the user's selection is unchanged.
   }
 
-  /// Terminates the running smart-action session for a directory (no-op when
-  /// none is running).
+  /// Terminates the running smart-action session for a directory and takes
+  /// it out of Running (no-op when none is running). Closing stops watching
+  /// the process, so its exit never completes the run on its own.
   func stopSmartAction(in directory: URL) {
     guard let running = currentSmartActionByDirectory.removeValue(
       forKey: directory.standardizedFileURL.path
     ) else { return }
-    running.session.close()
+    removeSession(running.session.id)
   }
 
   private func shellQuote(_ path: String) -> String {
