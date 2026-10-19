@@ -66,6 +66,9 @@ struct SidebarView: View {
     // Rows coming, going and reordering slide rather than jump (the kit stills
     // this in an inactive window and under Reduce Motion).
     .animation(.kit, value: rowIdentities)
+    // The kit's own Hide Sidebar button and the detail column's Show Sidebar
+    // (`kitSidebarToggle`) stand in for the system toggle.
+    .toolbar(removing: .sidebarToggle)
     // Everything the sidebar does around its rows — selection routing, the
     // shared sheets/alerts, the stats monitor's lifetime (SidebarChrome.swift).
     .sidebarChrome(state)
