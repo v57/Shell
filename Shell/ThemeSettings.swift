@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The forced color scheme (nil = follow the system). Persisted rawValue in
-/// UserDefaults; drives `.preferredColorScheme` at the ContentView root.
+/// UserDefaults; drives `.kitColorScheme` at the ContentView root.
 enum AppearanceMode: String, CaseIterable, Identifiable {
   case system
   case dark

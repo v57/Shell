@@ -188,7 +188,7 @@ struct ContentView: View {
     }
     .animation(.easeOut(duration: 0.15), value: model.showingActions)
     .animation(.easeOut(duration: 0.15), value: model.showingSettings)
-    .preferredColorScheme(model.appearanceMode.colorScheme)
+    .kitColorScheme(model.appearanceMode.colorScheme)
     .environment(\.terminalBackgroundsDisabled, model.disableTerminalBackgrounds)
     .environment(\.terminalAnimationsEnabled, animates)
     .onAppear {
