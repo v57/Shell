@@ -13,6 +13,8 @@ import IOKit
 ///           SMC user-space protocol (mirrors exelban/stats' SMC reader —
 ///           the SMCKeyData_t layout must include the `padding` field or
 ///           IOConnectCallStructMethod returns bad-argument)
+///  - DC in: AppleSMC `PDTR` key (power drawn from the adapter), read only
+///           on Macs with a battery (an `AppleSmartBattery` service)
 @MainActor
 @Observable
 public final class SystemStatsMonitor {
@@ -23,6 +25,9 @@ public final class SystemStatsMonitor {
   /// Total system power draw in watts (Int so the rounded value doesn't
   /// fire SwiftUI updates when unchanged).
   public private(set) var watts: Int = 0
+  /// Power drawn from the adapter in watts (0 on battery); nil on Macs
+  /// without a battery and before the first tick.
+  public private(set) var dcInWatts: Int?
 
   // MARK: - History (ring buffers for the stats graphs)
 
@@ -93,6 +98,7 @@ public final class SystemStatsMonitor {
         self.cpuPercent = result.cpu
         self.gpuPercent = result.gpu
         self.watts = result.watts
+        self.dcInWatts = result.dcInWatts
         self.record(cpu: Int(result.cpu.rounded()), gpu: Int(result.gpu.rounded()), watts: result.watts)
       }
     }
@@ -118,6 +124,8 @@ nonisolated final class SystemStatsSampler: @unchecked Sendable {
   /// Previous per-core tick counts (nil until first sample).
   private var previousCPU: (info: processor_info_array_t?, count: mach_msg_type_number_t)?
   private let smc = SystemStatsSMC()
+  /// Laptops only: desktops have no battery, so no DC-in reading.
+  private let hasBattery = SystemStatsSampler.readHasBattery()
   /// Logical CPU indices of performance cores, used to exclude E-cores
   /// from the CPU% read. Empty on non-Apple-Silicon (fall back to all).
   let performanceCoreIndices: Set<Int>
@@ -127,13 +135,22 @@ nonisolated final class SystemStatsSampler: @unchecked Sendable {
   }
 
   /// Reads CPU/GPU/wattage in one locked pass.
-  func sample() -> (cpu: Double, gpu: Double, watts: Int) {
+  func sample() -> (cpu: Double, gpu: Double, watts: Int, dcInWatts: Int?) {
     lock.lock()
     defer { lock.unlock() }
     let cpu = Self.readCPUUsage(previous: &previousCPU, coreFilter: performanceCoreIndices)
     let gpu = Self.readGPUUsage()
     let watts = Int((smc.read("PSTR") ?? 0).rounded())
-    return (cpu, gpu, watts)
+    let dcInWatts = hasBattery ? smc.read("PDTR").map { Int(max(0, $0).rounded()) } : nil
+    return (cpu, gpu, watts, dcInWatts)
+  }
+
+  /// Whether this Mac has a battery (an `AppleSmartBattery` service).
+  private static func readHasBattery() -> Bool {
+    let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("AppleSmartBattery"))
+    guard service != 0 else { return false }
+    IOObjectRelease(service)
+    return true
   }
 
   /// Enumerates Apple Silicon performance cores from the AppleARMPE

@@ -32,7 +32,7 @@ struct StatsGraphView: View {
         updatesCount: monitor.updatesCount,
         yRange: 0...100
       )
-      StatTitle(title: "Power", unit: "W", value: monitor.latestWatts)
+      StatTitle(title: "Power", unit: "W", value: monitor.latestWatts, detail: monitor.dcInWatts.map { "DC in \($0)W" })
       StatChart(
         color: .orange,
         samples: monitor.wattHistory,
@@ -46,11 +46,12 @@ struct StatsGraphView: View {
 }
 
 /// One metric's header: title plus the newest sample (absent until
-/// the first tick lands).
+/// the first tick lands), then an optional detail after it.
 private struct StatTitle: View {
   let title: String
   let unit: String
   let value: Int?
+  var detail: String?
 
   var body: some View {
     HStack(spacing: 6) {
@@ -58,6 +59,11 @@ private struct StatTitle: View {
         .font(.headline)
       if let value {
         Text("\(value)\(unit)")
+          .font(.callout.monospacedDigit())
+          .foregroundStyle(.secondary)
+      }
+      if let detail {
+        Text(detail)
           .font(.callout.monospacedDigit())
           .foregroundStyle(.secondary)
       }
