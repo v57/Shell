@@ -64,6 +64,16 @@ final class SSHConfigStore {
     reload()
   }
 
+  /// How a host on one of the user's Hubs is reached: the Vault app keeps these hosts current from the Hub's device
+  /// directory (overlay address, the host key the device signed, already trusted in `KnownHostsStore`). Nil for a
+  /// host the user added.
+  func hubRoute(for id: UUID) -> VaultHost.HubRoute? {
+    vault.hosts.first { $0.id == id.uuidString }?.hub
+  }
+
+  /// The Hub's name for the device a saved connection reaches, nil for a host the user added.
+  func hubDeviceName(for id: UUID) -> String? { hubRoute(for: id)?.deviceName }
+
   /// Re-reads the shared hosts (another app or device changed them).
   func refreshOnActivation() {
     vault.reload()

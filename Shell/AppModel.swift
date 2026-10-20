@@ -303,6 +303,8 @@ final class AppModel {
   /// store so saves/reloads (including iCloud sync refreshes) flow through
   /// Observation automatically.
   var connections: [SSHConfig] { connectionStore.all }
+  /// The device name of a saved connection that is a device on the user's Hub (see `SSHConfigStore.hubRoute`).
+  func hubDeviceName(for config: SSHConfig) -> String? { connectionStore.hubDeviceName(for: config.id) }
 
   /// Persists the sidebar's saved database connections (SwiftData, shared
   /// container, encrypted — mirrors SSHConfigStore). Cheap `@Observable`

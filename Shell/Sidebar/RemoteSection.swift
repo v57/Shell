@@ -255,7 +255,12 @@ private struct SSHConfigRow: View {
 
   var body: some View {
     let isConnected = model.sessionID(for: config) != nil
-    SidebarRow(value: AppModel.Selection.ssh(config.id), config.displayName, systemImage: "network") {
+    // A device on the user's Hub, reached at its Hub Network address.
+    let hub = model.hubDeviceName(for: config)
+    SidebarRow(
+      value: AppModel.Selection.ssh(config.id), config.displayName,
+      systemImage: hub == nil ? "network" : "point.3.connected.trianglepath.dotted"
+    ) {
       if isConnected {
         StatusDot(hue: .green)
           .accessibilityLabel("Connected")
@@ -285,5 +290,6 @@ private struct SSHConfigRow: View {
       }
     }
     .animation(.kit, value: isConnected)
+    .help(hub.map { "\($0) via Hub, at its Hub Network address" } ?? "")
   }
 }
