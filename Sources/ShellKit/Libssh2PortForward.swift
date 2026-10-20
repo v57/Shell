@@ -1,6 +1,6 @@
 import CLibssh2
-import Darwin
 import Foundation
+import SSHTunnel
 
 /// A reusable SSH local port-forward ("direct-tcpip") that bridges one or more
 /// in-app `bindHost:bindPort` listeners to remote `targetHost:targetPort`
@@ -68,7 +68,7 @@ nonisolated final class Libssh2PortForward: @unchecked Sendable {
   /// socket. All fields are only accessed on the session's owner thread.
   private final class Tunnel {
     let channel: OpaquePointer
-    var localFD: Int32
+    var localFD: SocketHandle
     /// Bytes read from the local socket waiting to be written to the channel.
     var pendingChannelWrite = Data()
     /// Bytes read from the channel waiting to be written to the local socket.
@@ -77,7 +77,7 @@ nonisolated final class Libssh2PortForward: @unchecked Sendable {
     var channelEof = false
     var closed = false
 
-    init(channel: OpaquePointer, localFD: Int32) {
+    init(channel: OpaquePointer, localFD: SocketHandle) {
       self.channel = channel
       self.localFD = localFD
     }
@@ -94,10 +94,10 @@ nonisolated final class Libssh2PortForward: @unchecked Sendable {
 
   // ---- Cross-thread state (guarded by `stateLock`) ----
   private let stateLock = NSLock()
-  private var listenerFD: Int32 = -1
+  private var listenerFD: SocketHandle = Sockets.invalid
   private var shouldStop = false
   /// Accepted local FDs handed off by the listener queue, drained by pump().
-  private var pendingFDs: [Int32] = []
+  private var pendingFDs: [SocketHandle] = []
   private var started = false
 
   init(config: Config, onError: @escaping @Sendable (String) -> Void) {
@@ -140,9 +140,9 @@ nonisolated final class Libssh2PortForward: @unchecked Sendable {
     stateLock.lock()
     shouldStop = true
     let fd = listenerFD
-    listenerFD = -1
+    listenerFD = Sockets.invalid
     stateLock.unlock()
-    if fd >= 0 { Darwin.close(fd) }
+    if fd != Sockets.invalid { Sockets.close(fd) }
   }
 
   // MARK: - Owner-thread pump (call ONLY on the session owner thread)
@@ -151,7 +151,7 @@ nonisolated final class Libssh2PortForward: @unchecked Sendable {
   /// accepted connections (opening a `direct-tcpip` channel for each), and
   /// bridges bytes for every live tunnel in both directions, propagating
   /// close/EOF. Must be invoked from the loop that owns the libssh2 session.
-  func pump(session: OpaquePointer, socketFD: Int32, eagain: Int32) {
+  func pump(session: OpaquePointer, socketFD: SocketHandle, eagain: Int32) {
     // 1. Open a channel for each newly accepted local connection.
     drainPendingConnections(session: session, socketFD: socketFD, eagain: eagain)
 
@@ -182,31 +182,15 @@ nonisolated final class Libssh2PortForward: @unchecked Sendable {
 
   // MARK: - Listener queue
 
-  private func runAcceptLoop(fd: Int32) {
+  private func runAcceptLoop(fd: SocketHandle) {
     while true {
       stateLock.lock()
       let stop = shouldStop
       stateLock.unlock()
       if stop { break }
 
-      var addr = sockaddr_storage()
-      var len = socklen_t(MemoryLayout<sockaddr_storage>.size)
-      let client = withUnsafeMutablePointer(to: &addr) { ptr in
-        ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sp in
-          accept(fd, sp, &len)
-        }
-      }
-      if client < 0 {
-        if errno == EINTR { continue }
-        break // listener closed / fatal
-      }
-
-      // Make the accepted socket non-blocking so the owner thread never blocks.
-      let fl = fcntl(client, F_GETFL, 0)
-      if fl >= 0 { _ = fcntl(client, F_SETFL, fl | O_NONBLOCK) }
-      // Disable Nagle on the tunnel socket too.
-      var one: Int32 = 1
-      setsockopt(client, IPPROTO_TCP, TCP_NODELAY, &one, socklen_t(MemoryLayout<Int32>.size))
+      // Non-blocking (the owner thread never blocks) and without Nagle.
+      guard let client = Sockets.accept(fd) else { break }  // listener closed / fatal
 
       stateLock.lock()
       pendingFDs.append(client)
@@ -216,21 +200,21 @@ nonisolated final class Libssh2PortForward: @unchecked Sendable {
 
   /// Opens a `direct-tcpip` channel for each pending accepted FD. Runs on the
   /// owner thread; all libssh2 calls here are safe.
-  private func drainPendingConnections(session: OpaquePointer, socketFD: Int32, eagain: Int32) {
+  private func drainPendingConnections(session: OpaquePointer, socketFD: SocketHandle, eagain: Int32) {
     stateLock.lock()
     let fds = pendingFDs
     pendingFDs.removeAll()
     stateLock.unlock()
 
     for fd in fds {
-      let (originHost, originPort) = Self.originatorAddress(fd: fd)
+      let (originHost, originPort) = Sockets.peerAddress(fd)
       guard let channel = openDirectChannel(
         session: session, socketFD: socketFD, eagain: eagain,
         targetHost: config.targetHost, targetPort: config.targetPort,
         originHost: originHost, originPort: originPort
       ) else {
         onError("SSH tunnel to \(config.targetHost):\(config.targetPort) failed.")
-        Darwin.close(fd)
+        Sockets.close(fd)
         continue
       }
       tunnels.append(Tunnel(channel: channel, localFD: fd))
@@ -239,7 +223,7 @@ nonisolated final class Libssh2PortForward: @unchecked Sendable {
 
   /// Opens a `direct-tcpip` channel with the non-blocking EAGAIN retry loop.
   private func openDirectChannel(
-    session: OpaquePointer, socketFD: Int32, eagain: Int32,
+    session: OpaquePointer, socketFD: SocketHandle, eagain: Int32,
     targetHost: String, targetPort: Int, originHost: String, originPort: Int
   ) -> OpaquePointer? {
     var ch = targetHost.withCString { host in
@@ -252,8 +236,7 @@ nonisolated final class Libssh2PortForward: @unchecked Sendable {
     while ch == nil && libssh2_session_last_errno(session) == eagain
       && attempts < 200 && DispatchTime.now() < deadline {
       let dirs = libssh2_session_block_directions(session)
-      var pfd = pollfd(fd: socketFD, events: Self.polevents(dirs), revents: 0)
-      _ = poll(&pfd, 1, 100)
+      Sockets.wait(socketFD, for: Self.polevents(dirs), milliseconds: 100)
       attempts += 1
       ch = targetHost.withCString { host in
         originHost.withCString { shost in
@@ -282,8 +265,8 @@ nonisolated final class Libssh2PortForward: @unchecked Sendable {
     }
     // Remote sent EOF and we've flushed it to the local socket: shut down the
     // local write side so the local peer sees the remote closed.
-    if tunnel.channelEof && tunnel.localFD >= 0 {
-      _ = Darwin.shutdown(tunnel.localFD, SHUT_WR)
+    if tunnel.channelEof && tunnel.localFD != Sockets.invalid {
+      Sockets.shutdownWrite(tunnel.localFD)
     }
   }
 
@@ -296,7 +279,7 @@ nonisolated final class Libssh2PortForward: @unchecked Sendable {
       let n = libssh2_channel_read_ex(tunnel.channel, 0, &buffer, buffer.count)
       if n > 0 {
         tunnel.pendingLocalWrite.append(Data(buffer.prefix(Int(n))))
-        if tunnel.localFD >= 0 { flushPendingLocalWrite(tunnel) }
+        if tunnel.localFD != Sockets.invalid { flushPendingLocalWrite(tunnel) }
         continue
       }
       if n == 0 {
@@ -311,33 +294,17 @@ nonisolated final class Libssh2PortForward: @unchecked Sendable {
   private func drainLocalToChannel(_ tunnel: Tunnel) {
     guard !tunnel.closed, !tunnel.localEof else { return }
     var buffer = [UInt8](repeating: 0, count: 32768)
-    let capacity = buffer.count
-    while true {
-      // Darwin.recv takes UnsafeMutableRawPointer: &buffer here would pass a
-      // pointer to the Array STRUCT, not its elements (which silently corrupts
-      // the bytes). Use withUnsafeMutableBytes to hand a real element pointer,
-      // copying the result out so there is no exclusivity conflict with the
-      // subsequent buffer.prefix read.
-      let n = buffer.withUnsafeMutableBytes { raw in
-        Darwin.recv(tunnel.localFD, raw.baseAddress, capacity, 0)
-      }
-      if n > 0 {
-        tunnel.pendingChannelWrite.append(Data(buffer.prefix(Int(n))))
-        break
-      }
-      if n == 0 {
-        // Local peer closed its write side — propagate EOF to the remote.
-        tunnel.localEof = true
-        _ = libssh2_channel_send_eof(tunnel.channel)
-        break
-      }
-      if errno == EAGAIN || errno == EWOULDBLOCK {
-        break // no more data right now
-      }
-      // Real error reading the local socket.
+    // withUnsafeMutableBytes hands the elements' memory (not the Array struct's), copying the result out so there
+    // is no exclusivity conflict with the buffer.prefix read.
+    switch buffer.withUnsafeMutableBytes({ Sockets.receive(tunnel.localFD, into: $0) }) {
+    case .bytes(let n):
+      tunnel.pendingChannelWrite.append(Data(buffer.prefix(n)))
+    case .wouldBlock:
+      break  // no more data right now
+    case .closed, .failed:
+      // Local peer closed its write side (or the socket failed): propagate EOF to the remote.
       tunnel.localEof = true
       _ = libssh2_channel_send_eof(tunnel.channel)
-      break
     }
   }
 
@@ -370,23 +337,21 @@ nonisolated final class Libssh2PortForward: @unchecked Sendable {
   }
 
   private func flushPendingLocalWrite(_ tunnel: Tunnel) {
-    guard !tunnel.closed, tunnel.localFD >= 0 else { return }
+    guard !tunnel.closed, tunnel.localFD != Sockets.invalid else { return }
     let data = tunnel.pendingLocalWrite
     tunnel.pendingLocalWrite = Data()
     if data.isEmpty { return }
 
     var offset = 0
     while offset < data.count {
-      let written = data.withUnsafeBytes { (buf: UnsafeRawBufferPointer) -> Int in
-        guard let base = buf.baseAddress else { return 0 }
-        let ptr = base.assumingMemoryBound(to: UInt8.self).advanced(by: offset)
-        return Darwin.write(tunnel.localFD, ptr, data.count - offset)
+      let result = data.withUnsafeBytes { buf in
+        Sockets.send(tunnel.localFD, UnsafeRawBufferPointer(rebasing: buf[offset...]))
       }
-      if written > 0 {
+      if case .bytes(let written) = result, written > 0 {
         offset += written
         continue
       }
-      if written < 0 && (errno == EAGAIN || errno == EWOULDBLOCK) {
+      if result == .wouldBlock {
         // Local receiver is slow — keep the remainder buffered for next tick.
         tunnel.pendingLocalWrite = data.subdata(in: offset..<data.count) + tunnel.pendingLocalWrite
         break
@@ -408,98 +373,34 @@ nonisolated final class Libssh2PortForward: @unchecked Sendable {
     _ = libssh2_channel_send_eof(tunnel.channel)
     _ = libssh2_channel_close(tunnel.channel)
     _ = libssh2_channel_free(tunnel.channel)
-    if tunnel.localFD >= 0 {
-      Darwin.close(tunnel.localFD)
-      tunnel.localFD = -1
+    if tunnel.localFD != Sockets.invalid {
+      Sockets.close(tunnel.localFD)
+      tunnel.localFD = Sockets.invalid
     }
   }
 
   // MARK: - Helpers
 
-  /// Binds a blocking TCP listener to `host:port` and returns the FD plus the
-  /// actually-bound port (ephemeral when `port == 0`).
-  private static func openListener(host: String, port: Int) throws -> (Int32, Int) {
-    var hints = addrinfo()
-    hints.ai_flags = 0
-    hints.ai_family = AF_UNSPEC
-    hints.ai_socktype = SOCK_STREAM
-    hints.ai_protocol = 0
-
-    var ai: UnsafeMutablePointer<addrinfo>?
-    let rc = host.withCString { h in
-      getaddrinfo(h, String(port), &hints, &ai)
-    }
-    guard rc == 0, let addrInfo = ai else {
-      throw ForwardError.bindFailed("getaddrinfo failed: \(String(cString: gai_strerror(rc)))")
-    }
-    defer { freeaddrinfo(addrInfo) }
-
-    var lastError: Error = ForwardError.bindFailed("no usable address")
-    var current: UnsafeMutablePointer<addrinfo>? = addrInfo
-    while let cand = current {
-      let info = cand.pointee
-      let s = socket(info.ai_family, info.ai_socktype, info.ai_protocol)
-      if s >= 0 {
-        var one: Int32 = 1
-        setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &one, socklen_t(MemoryLayout<Int32>.size))
-
-        let bindRc = info.ai_addr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sp in
-          Darwin.bind(s, sp, info.ai_addrlen)
-        }
-        if bindRc == 0, listen(s, 16) == 0 {
-          // Read back the real bound port (ephemeral when requested 0).
-          var bound = sockaddr_in()
-          var boundLen = socklen_t(MemoryLayout<sockaddr_in>.size)
-          let gc = withUnsafeMutablePointer(to: &bound) { bp in
-            bp.withMemoryRebound(to: sockaddr.self, capacity: 1) { sp in
-              getsockname(s, sp, &boundLen)
-            }
-          }
-          var boundPort: UInt16 = 0
-          if gc == 0 {
-            let p = withUnsafePointer(to: &bound) { $0.pointee.sin_port }
-            boundPort = p.bigEndian
-          }
-          // Leave the listener socket blocking; accept() runs on its own queue.
-          return (s, Int(boundPort))
-        }
-        lastError = ForwardError.bindFailed(String(cString: strerror(errno)))
-        Darwin.close(s)
-      }
-      current = cand.pointee.ai_next
-    }
-    throw lastError
-  }
-
-  /// The originator address to report to the SSH server: the accepted peer's
-  /// host/port, or a loopback fallback.
-  private static func originatorAddress(fd: Int32) -> (String, Int) {
-    var addr = sockaddr_storage()
-    var len = socklen_t(MemoryLayout<sockaddr_storage>.size)
-    let rc = withUnsafeMutablePointer(to: &addr) { ptr in
-      ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sp in
-        getpeername(fd, sp, &len)
+  /// Binds a blocking TCP listener to `host:port` and returns the socket plus the
+  /// actually-bound port (ephemeral when `port == 0`). accept() runs on its own queue.
+  private static func openListener(host: String, port: Int) throws -> (SocketHandle, Int) {
+    do {
+      let listener = try Sockets.listen(host: host, port: port)
+      return (listener.socket, listener.port)
+    } catch {
+      switch error {
+      case .hostNotFound(let message): throw ForwardError.bindFailed("getaddrinfo failed: \(message)")
+      case .timedOut: throw ForwardError.bindFailed("timed out")
+      case .failed(_, let message): throw ForwardError.bindFailed(message)
       }
     }
-    if rc == 0 {
-      let sa = withUnsafePointer(to: &addr) { $0.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee } }
-      let host = ipv4String(from: sa.sin_addr)
-      return (host, Int(sa.sin_port.bigEndian))
-    }
-    return ("127.0.0.1", 0)
-  }
-
-  private static func ipv4String(from addr: in_addr) -> String {
-    var a = addr
-    let bytes = withUnsafeBytes(of: &a) { Array($0) }
-    return "\(bytes[0]).\(bytes[1]).\(bytes[2]).\(bytes[3])"
   }
 
   /// Maps libssh2's block-directions bitmask to a poll() event mask.
   private static func polevents(_ blockDirs: Int32) -> Int16 {
     var events: Int16 = 0
-    if blockDirs & LIBSSH2_SESSION_BLOCK_INBOUND != 0 { events |= Int16(POLLIN) }
-    if blockDirs & LIBSSH2_SESSION_BLOCK_OUTBOUND != 0 { events |= Int16(POLLOUT) }
-    return events == 0 ? Int16(POLLIN) : events
+    if blockDirs & LIBSSH2_SESSION_BLOCK_INBOUND != 0 { events |= Sockets.readable }
+    if blockDirs & LIBSSH2_SESSION_BLOCK_OUTBOUND != 0 { events |= Sockets.writable }
+    return events == 0 ? Sockets.readable : events
   }
 }

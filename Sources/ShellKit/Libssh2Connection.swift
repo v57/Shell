@@ -171,7 +171,7 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
   private let channelStreams: SSHChannelStreams
 
   // All of the following are only accessed on `queue` (the owning thread).
-  private var socketFD: Int32 = -1
+  private var socketFD: SocketHandle = Sockets.invalid
   private var session: OpaquePointer?
   private var channel: OpaquePointer?
 
@@ -429,102 +429,44 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
 
   /// Opens a non-blocking TCP socket to `host:port`, honoring TCP_NODELAY and a
   /// 20s connect timeout (the same timeout the NIO engine used).
-  private func openSocket(host: String, port: Int, timeout: Int) throws -> Int32 {
-    var hints = addrinfo()
-    hints.ai_flags = 0
-    hints.ai_family = AF_UNSPEC
-    hints.ai_socktype = SOCK_STREAM
-    hints.ai_protocol = 0
-
-    var ai: UnsafeMutablePointer<addrinfo>?
-    let rc = host.withCString { h in
-      getaddrinfo(h, String(port), &hints, &ai)
-    }
-    guard rc == 0, let addrInfo = ai else {
-      throw EngineError.hostNotFound(String(cString: gai_strerror(rc)))
-    }
-    defer { freeaddrinfo(addrInfo) }
-
-    var lastError: EngineError = .connectTimedOut
-    var current: UnsafeMutablePointer<addrinfo>? = addrInfo
-    while let cand = current {
-      let info = cand.pointee
-      let s = socket(info.ai_family, info.ai_socktype, info.ai_protocol)
-      if s >= 0 {
-        // TCP_NODELAY: disable Nagle so keystrokes flush immediately.
-        var one: Int32 = 1
-        setsockopt(s, IPPROTO_TCP, TCP_NODELAY, &one, socklen_t(MemoryLayout<Int32>.size))
-        // TCP keepalive: probe an idle link every 5s after 10s of quiet and
-        // give up after 3 unanswered probes, so a peer that vanished without
-        // closing (power loss, VM reset) turns into a socket error in ~25s
-        // instead of the kernel's multi-minute retransmit timeout. Covers
-        // every connection kind, including forwarding-only ones that carry
-        // no SSH keepalives.
-        setsockopt(s, SOL_SOCKET, SO_KEEPALIVE, &one, socklen_t(MemoryLayout<Int32>.size))
-        var idle: Int32 = 10
-        var interval: Int32 = 5
-        var count: Int32 = 3
-        setsockopt(s, IPPROTO_TCP, TCP_KEEPALIVE, &idle, socklen_t(MemoryLayout<Int32>.size))
-        setsockopt(s, IPPROTO_TCP, TCP_KEEPINTVL, &interval, socklen_t(MemoryLayout<Int32>.size))
-        setsockopt(s, IPPROTO_TCP, TCP_KEEPCNT, &count, socklen_t(MemoryLayout<Int32>.size))
-        // Non-blocking so the 20s connect timeout is enforced by poll().
-        let fl = fcntl(s, F_GETFL, 0)
-        if fl >= 0 { _ = fcntl(s, F_SETFL, fl | O_NONBLOCK) }
-
-        let connRc = info.ai_addr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sp in
-          connect(s, sp, info.ai_addrlen)
-        }
-        if connRc == 0 {
-          return s
-        }
-        if errno == EINPROGRESS || errno == EALREADY {
-          // Wait for writability with the 20s timeout, then confirm the error.
-          if waitForSocket(s, events: Int16(POLLOUT), timeoutMs: timeout * 1000) {
-            var err: Int32 = 0
-            var len = socklen_t(MemoryLayout<Int32>.size)
-            getsockopt(s, SOL_SOCKET, SO_ERROR, &err, &len)
-            if err == 0 {
-              return s
-            }
-            lastError = .socket(err, "Could not connect: \(String(cString: strerror(err)))")
-          } else {
-            lastError = .connectTimedOut
-          }
-        } else {
-          lastError = .socket(errno, "Could not connect: \(String(cString: strerror(errno)))")
-        }
-        Darwin.close(s)
+  ///
+  /// TCP keepalive: probe an idle link every 5s after 10s of quiet and give up
+  /// after 3 unanswered probes, so a peer that vanished without closing (power
+  /// loss, VM reset) turns into a socket error in ~25s instead of the kernel's
+  /// multi-minute retransmit timeout. Covers every connection kind, including
+  /// forwarding-only ones that carry no SSH keepalives.
+  private func openSocket(host: String, port: Int, timeout: Int) throws -> SocketHandle {
+    do {
+      return try Sockets.connect(
+        host: host, port: port, timeout: TimeInterval(timeout),
+        keepAlive: Sockets.KeepAlive(idle: 10, interval: 5, count: 3))
+    } catch {
+      switch error {
+      case .hostNotFound(let message): throw EngineError.hostNotFound(message)
+      case .timedOut: throw EngineError.connectTimedOut
+      case .failed(let code, let message): throw EngineError.socket(code, "Could not connect: \(message)")
       }
-      current = cand.pointee.ai_next
     }
-    throw lastError
-  }
-
-  /// Polls `fd` for `events`, returning true when ready, false on timeout/error.
-  private func waitForSocket(_ fd: Int32, events: Int16, timeoutMs: Int) -> Bool {
-    var pfd = pollfd(fd: fd, events: events, revents: 0)
-    return poll(&pfd, 1, Int32(timeoutMs)) > 0
   }
 
   /// Maps libssh2's block-directions bitmask to a poll() event mask.
   private func polevents(_ blockDirs: Int32) -> Int16 {
     var events: Int16 = 0
-    if blockDirs & LIBSSH2_SESSION_BLOCK_INBOUND != 0 { events |= Int16(POLLIN) }
-    if blockDirs & LIBSSH2_SESSION_BLOCK_OUTBOUND != 0 { events |= Int16(POLLOUT) }
-    return events == 0 ? Int16(POLLIN) : events
+    if blockDirs & LIBSSH2_SESSION_BLOCK_INBOUND != 0 { events |= Sockets.readable }
+    if blockDirs & LIBSSH2_SESSION_BLOCK_OUTBOUND != 0 { events |= Sockets.writable }
+    return events == 0 ? Sockets.readable : events
   }
 
   // MARK: Handshake
 
-  private func handshake(_ sess: OpaquePointer, fd: Int32) throws {
+  private func handshake(_ sess: OpaquePointer, fd: SocketHandle) throws {
     libssh2_session_set_blocking(sess, 0)
     let deadline = DispatchTime.now() + .seconds(20)
     var rc = libssh2_session_handshake(sess, fd)
     while rc == Self.EAGAIN {
       if DispatchTime.now() > deadline { throw EngineError.connectTimedOut }
       let dirs = libssh2_session_block_directions(sess)
-      var pfd = pollfd(fd: fd, events: polevents(dirs), revents: 0)
-      _ = poll(&pfd, 1, 250)
+      Sockets.wait(fd, for: polevents(dirs), milliseconds: 250)
       rc = libssh2_session_handshake(sess, fd)
     }
     guard rc == 0 else { throw EngineError.libssh2(rc, lastErrorText(sess)) }
@@ -661,8 +603,7 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
     var attempts = 0
     while rc == Self.EAGAIN && DispatchTime.now() < deadline && attempts < 200 {
       let dirs = libssh2_session_block_directions(sess)
-      var pfd = pollfd(fd: socketFD, events: polevents(dirs), revents: 0)
-      _ = poll(&pfd, 1, 100)
+      Sockets.wait(socketFD, for: polevents(dirs), milliseconds: 100)
       attempts += 1
       rc = username.withCString { uName in
         pubBlob.withUnsafeBytes { blob in
@@ -728,8 +669,7 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
     var attempts = 0
     while ch == nil && libssh2_session_last_errno(sess) == Self.EAGAIN && attempts < 200 && DispatchTime.now() < deadline {
       let dirs = libssh2_session_block_directions(sess)
-      var pfd = pollfd(fd: socketFD, events: polevents(dirs), revents: 0)
-      _ = poll(&pfd, 1, 100)
+      Sockets.wait(socketFD, for: polevents(dirs), milliseconds: 100)
       attempts += 1
       ch = libssh2_channel_open_ex(sess, "session", UInt32("session".utf8.count), 2*1024*1024, 32768, nil, 0)
     }
@@ -744,8 +684,7 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
     var attempts = 0
     while rc == Self.EAGAIN && attempts < 200 && DispatchTime.now() < deadline {
       let dirs = libssh2_session_block_directions(session!)
-      var pfd = pollfd(fd: socketFD, events: polevents(dirs), revents: 0)
-      _ = poll(&pfd, 1, 100)
+      Sockets.wait(socketFD, for: polevents(dirs), milliseconds: 100)
       attempts += 1
       rc = op()
     }
@@ -767,11 +706,9 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
   private func watchSocket() {
     guard running else { return }
     pumpTunnels()
-    let ready = waitForSocketOrStreams(events: Int16(POLLIN | POLLHUP), timeoutMs: 100)
+    let ready = waitForSocketOrStreams(events: Sockets.readable, timeoutMs: 100)
     if ready {
-      var pfd = pollfd(fd: socketFD, events: Int16(POLLIN | POLLHUP), revents: 0)
-      _ = poll(&pfd, 1, 0)
-      if pfd.revents & Int16(POLLHUP | POLLERR | POLLNVAL) != 0 {
+      if Sockets.wait(socketFD, for: Sockets.readable, milliseconds: 0) & Sockets.hangUp != 0 {
         running = false
         finishOnMain(Self.describe(socketError()), lost: true)
         return
@@ -801,12 +738,12 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
   /// thread. Returns whether the socket is ready.
   private func waitForSocketOrStreams(events: Int16, timeoutMs: Int) -> Bool {
     var socketEvents = events
-    if channelStreams.wantsSocketOut { socketEvents |= Int16(POLLOUT) }
-    var fds = [pollfd(fd: socketFD, events: socketEvents, revents: 0)]
-    if waker.fd >= 0 { fds.append(pollfd(fd: waker.fd, events: Int16(POLLIN), revents: 0)) }
-    let ready = poll(&fds, nfds_t(fds.count), Int32(timeoutMs)) > 0
+    if channelStreams.wantsSocketOut { socketEvents |= Sockets.writable }
+    var fds = [Sockets.descriptor(socketFD, events: socketEvents)]
+    if waker.isValid { fds.append(Sockets.descriptor(waker.fd, events: Sockets.readable)) }
+    let ready = Sockets.poll(&fds, milliseconds: Int32(timeoutMs)) > 0
     waker.drain()
-    return ready && fds[0].revents & (events | Int16(POLLHUP | POLLERR | POLLNVAL)) != 0
+    return ready && fds[0].revents & (events | Sockets.hangUp) != 0
   }
 
   /// The non-blocking read/write pump. Runs on `queue`. Waits on the socket for
@@ -833,7 +770,7 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
     // tunnel I/O is serviced even when the shell channel stays quiet.
     pumpTunnels()
 
-    let socketReady = waitForSocketOrStreams(events: Int16(POLLIN | POLLHUP), timeoutMs: 100)
+    let socketReady = waitForSocketOrStreams(events: Sockets.readable, timeoutMs: 100)
     let channelReady = libssh2_poll_channel_read(ch, 0) == 1
 
     if channelReady || socketReady {
@@ -843,9 +780,7 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
 
     if socketReady {
       // POLLHUP/POLLERR means the TCP socket went away.
-      var pfd = pollfd(fd: socketFD, events: Int16(POLLIN | POLLHUP), revents: 0)
-      _ = poll(&pfd, 1, 0)
-      if pfd.revents & Int16(POLLHUP | POLLERR | POLLNVAL) != 0, !channelGone {
+      if Sockets.wait(socketFD, for: Sockets.readable, milliseconds: 0) & Sockets.hangUp != 0, !channelGone {
         running = false
         finishOnMain(Self.describe(socketError()), lost: true)
         return
@@ -1053,8 +988,7 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
       }
       if n == Self.EAGAIN {
         let dirs = libssh2_session_block_directions(sess)
-        var pfd = pollfd(fd: socketFD, events: polevents(dirs), revents: 0)
-        _ = poll(&pfd, 1, 50)
+        Sockets.wait(socketFD, for: polevents(dirs), milliseconds: 50)
         continue
       }
       if n == 0 { break }  // EOF
@@ -1091,8 +1025,7 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
     let deadline = DispatchTime.now() + .seconds(20)
     while sftp == nil && libssh2_session_last_errno(sess) == Self.EAGAIN && DispatchTime.now() < deadline {
       let dirs = libssh2_session_block_directions(sess)
-      var pfd = pollfd(fd: socketFD, events: polevents(dirs), revents: 0)
-      _ = poll(&pfd, 1, 50)
+      Sockets.wait(socketFD, for: polevents(dirs), milliseconds: 50)
       sftp = libssh2_sftp_init(sess)
     }
     return sftp
@@ -1114,15 +1047,14 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
     let mode: Int = forWrite ? 0o644 : 0
     func call() -> OpaquePointer? {
       path.withCString { cstr in
-        libssh2_sftp_open_ex(sftp, cstr, UInt32(path.utf8.count), flags, mode, 0)
+        libssh2_sftp_open_ex(sftp, cstr, UInt32(path.utf8.count), .init(flags), .init(mode), 0)
       }
     }
     var handle = call()
     let deadline = DispatchTime.now() + .seconds(20)
     while handle == nil && libssh2_session_last_errno(sess) == Self.EAGAIN && DispatchTime.now() < deadline {
       let dirs = libssh2_session_block_directions(sess)
-      var pfd = pollfd(fd: socketFD, events: polevents(dirs), revents: 0)
-      _ = poll(&pfd, 1, 50)
+      Sockets.wait(socketFD, for: polevents(dirs), milliseconds: 50)
       handle = call()
     }
     return handle
@@ -1171,8 +1103,7 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
         // needs a poll before the read can make progress, exactly like the
         // one-shot exec loop above.
         let dirs = libssh2_session_block_directions(sess)
-        var pfd = pollfd(fd: socketFD, events: polevents(dirs), revents: 0)
-        _ = poll(&pfd, 1, 50)
+        Sockets.wait(socketFD, for: polevents(dirs), milliseconds: 50)
         continue
       }
       // A negative ssize_t that isn't EAGAIN is a real libssh2 error.
@@ -1240,8 +1171,7 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
       }
       if written == Self.EAGAIN {
         let dirs = libssh2_session_block_directions(sess)
-        var pfd = pollfd(fd: socketFD, events: polevents(dirs), revents: 0)
-        _ = poll(&pfd, 1, 50)
+        Sockets.wait(socketFD, for: polevents(dirs), milliseconds: 50)
         continue
       }
       if written < 0 {
@@ -1287,9 +1217,9 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
     libssh2_session_disconnect_ex(sess, SSH_DISCONNECT_BY_APPLICATION, "Application closing", "")
     libssh2_session_free(sess)
     session = nil
-    if socketFD >= 0 {
-      Darwin.close(socketFD)
-      socketFD = -1
+    if socketFD != Sockets.invalid {
+      Sockets.close(socketFD)
+      socketFD = Sockets.invalid
     }
     running = false
   }
@@ -1316,12 +1246,11 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
   /// a keepalive timeout reads "Operation timed out", a reset "Connection
   /// reset by peer", a plain close falls back to the generic message.
   private func socketError() -> EngineError {
-    var err: Int32 = 0
-    var len = socklen_t(MemoryLayout<Int32>.size)
-    if socketFD >= 0, getsockopt(socketFD, SOL_SOCKET, SO_ERROR, &err, &len) == 0, err != 0 {
-      return .socket(err, String(cString: strerror(err)))
+    if socketFD != Sockets.invalid {
+      let error = Sockets.pendingError(socketFD)
+      if error != 0 { return .socket(error, Sockets.describe(error)) }
     }
-    return .socket(ECONNRESET, "Connection closed by the host.")
+    return .socket(Sockets.connectionReset, "Connection closed by the host.")
   }
 
   /// A readable reason for a failed read/write: libssh2's own text for a
@@ -1339,7 +1268,7 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
     var msgLen: Int32 = 0
     _ = libssh2_session_last_error(sess, &msg, &msgLen, 0)
     if let msg { return String(cString: msg) }
-    return String(cString: strerror(errno))
+    return Sockets.describe(Sockets.lastError)
   }
 
   private static func describe(_ error: Error) -> String {
