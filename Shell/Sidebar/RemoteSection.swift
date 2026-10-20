@@ -215,7 +215,7 @@ private struct SSHConfigGroup: View {
             model.showingNewDatabaseConnection = true
           }
         }
-        #if os(macOS)
+        #if os(macOS) || os(Windows)
         if flags.isEnabled(.screen) {
           Button("Persistent Session", systemImage: "shield.fill") {
             model.createRemoteScreenSession(on: config)

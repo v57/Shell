@@ -1,6 +1,10 @@
 import CryptoKit
 import Foundation
+#if canImport(Security)
 import Security
+#else
+import VaultKit
+#endif
 
 /// Device-bound encrypted file storage shared by notes and terminal history.
 ///
@@ -139,6 +143,7 @@ nonisolated enum SecureFileStore {
       return (privateKey, peerPublicKey)
     }
 
+    #if canImport(Security)
     var accessError: Unmanaged<CFError>?
     guard let accessControl = SecAccessControlCreateWithFlags(
       kCFAllocatorDefault,
@@ -153,6 +158,10 @@ nonisolated enum SecureFileStore {
       compactRepresentable: false,
       accessControl: accessControl
     )
+    #else
+    // Sealed to this device's user (the CryptoKit stand-in's Secure Enclave).
+    let privateKey = try SecureEnclave.P256.KeyAgreement.PrivateKey()
+    #endif
     let peerPrivateKey = P256.KeyAgreement.PrivateKey(compactRepresentable: false)
     let envelope = KeyEnvelope(
       privateKeyRepresentation: privateKey.dataRepresentation,
@@ -162,6 +171,7 @@ nonisolated enum SecureFileStore {
     return (privateKey, peerPrivateKey.publicKey)
   }
 
+#if canImport(Security)
   private static func saveKeyEnvelope(_ data: Data) throws {
     let query: [String: Any] = [
       kSecClass as String: kSecClassGenericPassword,
@@ -194,4 +204,26 @@ nonisolated enum SecureFileStore {
     guard let data = result as? Data else { throw StoreError.invalidKeyEnvelope }
     return data
   }
+#else
+  // Where Security is missing (Windows), VaultKit's keychain keeps the envelope: the Credential Manager.
+  private static var keychain: VaultKeychain { VaultKeychain(service: service, accessGroup: nil) }
+
+  private static func saveKeyEnvelope(_ data: Data) throws {
+    do {
+      try keychain.write(
+        data, account: account,
+        options: VaultKeychain.Options(synchronizable: false, label: "Shell encrypted files (Secure Enclave P-256)"))
+    } catch VaultKeychain.KeychainError.status(let status) {
+      throw StoreError.keychainAddFailed(status)
+    }
+  }
+
+  private static func loadKeyEnvelope() throws -> Data? {
+    do {
+      return try keychain.read(account, options: .thisDevice)
+    } catch VaultKeychain.KeychainError.status(let status) {
+      throw StoreError.keychainReadFailed(status)
+    }
+  }
+#endif
 }

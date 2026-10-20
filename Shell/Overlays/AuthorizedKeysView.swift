@@ -23,7 +23,7 @@ struct AuthorizedKeysView: View {
   private var targetTitle: String {
     switch target {
     case .local:
-      return "This Mac"
+      return thisComputerName
     case .ssh(let config):
       return config.displayName
     }
@@ -257,8 +257,10 @@ struct AuthorizedKeysView: View {
   private static var deviceName: String {
     #if os(macOS)
     Host.current().localizedName ?? "Mac"
-    #else
+    #elseif os(iOS)
     UIDevice.current.name
+    #else
+    ProcessInfo.processInfo.hostName
     #endif
   }
 }

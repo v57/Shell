@@ -1,7 +1,9 @@
 import ComponentKit
 import SwiftUI
+#if canImport(WebKit)
 import WebKit
 import _WebKit_SwiftUI
+#endif
 
 /// The detail pane for an opened `.web` session: renders the session's URL in
 /// the system SwiftUI `WebView`.
@@ -71,6 +73,10 @@ struct WebSessionDetailView: View {
 
   @ViewBuilder
   private func webView(for url: URL) -> some View {
+    #if !canImport(WebKit)
+    // No web view where WebKit is missing (Windows): the page opens in the browser.
+    BrowserPageView(url: url)
+    #else
     if #available(macOS 26.0, iOS 26.0, *) {
       SystemWebView(web: web, url: url)
     } else {
@@ -79,8 +85,25 @@ struct WebSessionDetailView: View {
       // contract. Not a hand-rolled browser: a 1:1 WKWebView wrapper.
       WebViewRepresentableFallback(url: url)
     }
+    #endif
   }
 }
+
+#if !canImport(WebKit)
+/// The page's address and a button that opens it in the system browser.
+private struct BrowserPageView: View {
+  let url: URL
+  @Environment(\.openURL) private var openURL
+
+  var body: some View {
+    EmptyState(systemImage: "globe", title: url.host() ?? "Web Session", message: url.absoluteString) {
+      Button("Open in Browser", systemImage: "safari") { openURL(url) }
+        .buttonStyle(.kit)
+    }
+  }
+}
+#else
+
 
 /// The system SwiftUI web view, plus the page-title observer that names the
 /// session. Owns the `WebPage` so the loaded document's `<title>` is readable
@@ -148,4 +171,5 @@ private struct WebViewRepresentableFallback: UIViewRepresentable {
     }
   }
 }
+#endif
 #endif

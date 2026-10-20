@@ -19,7 +19,7 @@ struct ThemesView: View {
       KitSegmented(selection: $model.appearanceMode, options: AppearanceMode.allCases.map { ($0.label, $0) })
 
       Toggle("Disable Background Colors", isOn: $model.disableTerminalBackgrounds)
-#if os(macOS)
+#if os(macOS) || os(Windows)
         .toggleStyle(.checkbox)
 #else
         .toggleStyle(.switch)

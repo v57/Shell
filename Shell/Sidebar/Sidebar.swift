@@ -40,7 +40,7 @@ struct SidebarView: View {
     ) {
       RunningSectionView(state: state)
 
-      #if os(macOS)
+      #if os(macOS) || os(Windows)
       // This Mac's terminals, persistent screen/tmux sessions, history, saved
       // web pages and untunneled database connections.
       LocalSectionView(state: state)
@@ -54,7 +54,7 @@ struct SidebarView: View {
       TextFilesSectionView(state: state)
       #endif
     } bottomBar: {
-      #if os(macOS)
+      #if os(macOS) || os(Windows)
       if FeatureFlagsStore.shared.isEnabled(.sessions) {
         Button("New Terminal", systemImage: "terminal") { model.addLocalTerminal() }
           .help("New terminal")
@@ -85,9 +85,11 @@ struct SidebarView: View {
     hasher.combine(model.databaseConnections.map(\.id))
     hasher.combine(model.history.sessions.map(\.id))
     hasher.combine(model.historyMode)
-    #if os(macOS)
+    #if os(macOS) || os(Windows)
     hasher.combine(model.screenMonitor.sessions.map(\.name))
     hasher.combine(model.remoteScreenSessions.map(\.name))
+    #endif
+    #if os(macOS)
     hasher.combine(model.openedFiles.map(\.id))
     #endif
     return hasher.finalize()

@@ -9,7 +9,7 @@ struct ScreenActionError: Identifiable, Equatable {
   let message: String
 }
 
-#if os(macOS)
+#if os(macOS) || os(Windows)
 /// Lists the local multiplexers (`tmux ls`, `screen -ls`, `session list`) and
 /// publishes the merged list of persistent sessions. When tmux is installed,
 /// tmux is the preferred backend for creating/renaming; screen sessions
@@ -33,13 +33,13 @@ final class ScreenSessionsMonitor {
   
   /// Resolves the tmux executable, checking common install locations and
   /// then PATH. Returns nil when tmux is not installed.
-  static func tmuxInstalled() -> Bool {
+  nonisolated static func tmuxInstalled() -> Bool {
     tmuxPath() != nil
   }
   
   /// Resolves the tmux executable (delegates to the Terminal library's
   /// preset resolver: common install locations, then PATH).
-  static func tmuxPath() -> String? {
+  nonisolated static func tmuxPath() -> String? {
     LocalPTYTransport.tmuxExecutablePath()
   }
 
@@ -47,7 +47,7 @@ final class ScreenSessionsMonitor {
   /// to the Terminal library's resolver: common install locations, then PATH.
   /// Returns nil when it isn't installed or isn't executable, in which case
   /// the local scanner simply contributes no `session` rows.
-  static func sessionPath() -> String? {
+  nonisolated static func sessionPath() -> String? {
     LocalPTYTransport.sessionExecutablePath()
   }
   
@@ -107,7 +107,7 @@ final class ScreenSessionsMonitor {
   
   /// Lists sessions from every available multiplexer and merges them.
   /// With neither tmux nor screen installed, reports the reason.
-  private static func runList() -> ([ScreenSessionInfo], String?) {
+  private nonisolated static func runList() -> ([ScreenSessionInfo], String?) {
     var sessions: [ScreenSessionInfo] = []
     var messages: [String] = []
     if let tmux = tmuxPath() {
@@ -236,7 +236,7 @@ final class ScreenSessionsMonitor {
   
   // MARK: - screen -dmS
   
-  private static func runCreate(name: String) -> String? {
+  private nonisolated static func runCreate(name: String) -> String? {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/screen")
     // screen starts the window in ITS cwd, and the app's cwd is "/"
@@ -326,7 +326,7 @@ final class ScreenSessionsMonitor {
   /// Creates a detached tmux session running an interactive zsh. The
   /// session starts in its own cwd; the shell is exec'd so the tmux
   /// process tree holds one shell per window.
-  private static func runTmuxCreate(tmux: String, name: String) -> String? {
+  private nonisolated static func runTmuxCreate(tmux: String, name: String) -> String? {
     let home = FileManager.default.homeDirectoryForCurrentUser.path
     let process = Process()
     process.executableURL = URL(fileURLWithPath: tmux)
@@ -346,7 +346,7 @@ final class ScreenSessionsMonitor {
     return message
   }
   
-  private static func runTmuxRename(tmux: String, oldName: String, newName: String) -> String? {
+  private nonisolated static func runTmuxRename(tmux: String, oldName: String, newName: String) -> String? {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: tmux)
     process.arguments = ["rename-session", "-t", oldName, newName]
@@ -365,7 +365,7 @@ final class ScreenSessionsMonitor {
     return message
   }
   
-  private static func runTmuxQuit(tmux: String, name: String) -> String? {
+  private nonisolated static func runTmuxQuit(tmux: String, name: String) -> String? {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: tmux)
     process.arguments = ["kill-session", "-t", name]
@@ -391,7 +391,7 @@ final class ScreenSessionsMonitor {
   /// caller-supplied name. Exits 0 on success (the daemon acks via an
   /// informational Error{"killed <name>"} frame, which is success; see the
   /// CLI's kill-all handling), 1 on failure.
-  private static func runSessionKill(session: String, name: String) -> String? {
+  private nonisolated static func runSessionKill(session: String, name: String) -> String? {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: session)
     process.arguments = ["kill", name]
@@ -416,7 +416,7 @@ final class ScreenSessionsMonitor {
   /// source is unknown, the target name is taken, or the session has attached
   /// clients — its reason is printed on stderr and exit is 1. Exit 0 means the
   /// session now lives under the new name (the list refresh picks it up).
-  private static func runSessionRename(session: String, oldName: String, newName: String) -> String? {
+  private nonisolated static func runSessionRename(session: String, oldName: String, newName: String) -> String? {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: session)
     process.arguments = ["rename", oldName, newName]
@@ -441,7 +441,7 @@ final class ScreenSessionsMonitor {
   /// `tmux ls -F '#{session_name} #{session_attached}'` — one line per
   /// session: name, then 0 (detached) or 1 (attached). The command exits
   /// 1 with "no server running" when no sessions exist.
-  private static func runTmuxList(tmux: String) -> ([ScreenSessionInfo], String?) {
+  private nonisolated static func runTmuxList(tmux: String) -> ([ScreenSessionInfo], String?) {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: tmux)
     process.arguments = ["ls", "-F", "#{session_name} #{session_attached}"]
@@ -470,13 +470,13 @@ final class ScreenSessionsMonitor {
     return (ScreenSessionsParser.parseTmuxOutput(text), nil)
   }
 
-  static func isTmuxEmptyState(_ message: String) -> Bool {
+  nonisolated static func isTmuxEmptyState(_ message: String) -> Bool {
     let normalized = message.lowercased()
     return normalized.contains("no server running")
       || normalized.contains("no sessions")
   }
 
-  static func isTmuxMissingTarget(_ message: String) -> Bool {
+  nonisolated static func isTmuxMissingTarget(_ message: String) -> Bool {
     let normalized = message.lowercased()
     return isTmuxEmptyState(normalized)
       || normalized.contains("can't find session")
@@ -486,7 +486,7 @@ final class ScreenSessionsMonitor {
   
   // MARK: - screen -X sessionname
   
-  private static func runRename(oldName: String, newName: String) -> String? {
+  private nonisolated static func runRename(oldName: String, newName: String) -> String? {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/screen")
     process.arguments = ["-S", oldName, "-X", "sessionname", newName]
@@ -507,7 +507,7 @@ final class ScreenSessionsMonitor {
   
   // MARK: - screen -S <name> -X quit
 
-  private static func runQuit(name: String) -> String? {
+  private nonisolated static func runQuit(name: String) -> String? {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/screen")
     process.arguments = ["-S", name, "-X", "quit"]
@@ -528,7 +528,7 @@ final class ScreenSessionsMonitor {
 
   // MARK: - screen -ls
   
-  private static func runScreenList() -> ([ScreenSessionInfo], String?) {
+  private nonisolated static func runScreenList() -> ([ScreenSessionInfo], String?) {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/screen")
     process.arguments = ["-ls"]
@@ -563,7 +563,7 @@ final class ScreenSessionsMonitor {
   /// live; both resolve to "no sessions" so a non-running daemon never blanks
   /// the whole Local section. Only stdout is consumed; stderr details are
   /// dropped because a down daemon isn't an error worth surfacing here.
-  private static func runSessionList(session: String) -> ([ScreenSessionInfo], String?) {
+  private nonisolated static func runSessionList(session: String) -> ([ScreenSessionInfo], String?) {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: session)
     process.arguments = ["list"]

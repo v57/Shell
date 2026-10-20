@@ -10,6 +10,15 @@ struct ActionSpec: Hashable {
   var config: SSHConfig?
 }
 
+/// What the app calls the computer it runs on: "This Mac", "This PC" on Windows.
+let thisComputerName: String = {
+  #if os(Windows)
+  "This PC"
+  #else
+  "This Mac"
+  #endif
+}()
+
 /// The kind of terminal a session runs.
 enum ConnectionKind: Hashable {
   case local

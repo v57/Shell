@@ -1,6 +1,10 @@
 import CryptoKit
 import Foundation
+#if canImport(Security)
 import Security
+#else
+import VaultKit
+#endif
 
 /// The AES-256 key that encrypts iCloud-synced data (notes, SSH configs).
 ///
@@ -58,6 +62,7 @@ enum ICloudSyncKey {
     return key
   }
 
+#if canImport(Security)
   private static func save(_ data: Data, account: String, label: String) throws {
     // Syncable items must NOT be ThisDeviceOnly and must live in the
     // data-protection keychain (kSecUseDataProtectionKeychain, already
@@ -98,4 +103,25 @@ enum ICloudSyncKey {
     guard status == errSecSuccess else { throw KeyError.keychainReadFailed(status) }
     return result as? Data
   }
+#else
+  // Where Security is missing (Windows), VaultKit's keychain keeps the key (synced items stay apart there; the
+  // Credential Manager doesn't sync them).
+  private static var keychain: VaultKeychain { VaultKeychain(service: service, accessGroup: nil) }
+
+  private static func save(_ data: Data, account: String, label: String) throws {
+    do {
+      try keychain.addNew(data, account: account, options: VaultKeychain.Options(synchronizable: true, label: label))
+    } catch VaultKeychain.KeychainError.status(let status) {
+      throw KeyError.keychainAddFailed(status)
+    }
+  }
+
+  private static func load(account: String) throws -> Data? {
+    do {
+      return try keychain.read(account, options: .synced)
+    } catch VaultKeychain.KeychainError.status(let status) {
+      throw KeyError.keychainReadFailed(status)
+    }
+  }
+#endif
 }

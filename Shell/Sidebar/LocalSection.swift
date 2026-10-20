@@ -5,7 +5,7 @@ import ShellKit
 import ShellIntegrations
 import ShellMonitoring
 
-#if os(macOS)
+#if os(macOS) || os(Windows)
 /// The Local section ("This Mac"): this Mac's terminals, its persistent
 /// screen/tmux sessions (local AND the ones scanned from connected SSH hosts),
 /// local history while history mode is on, saved web pages not bound to a
@@ -67,7 +67,7 @@ struct LocalSectionView: View {
   private var sectionContent: some View {
     if flags.isEnabled(.sessions) || flags.isEnabled(.screen) || flags.isEnabled(.history) || flags.isEnabled(.web) || flags.isEnabled(.database) {
       KitSection(
-        model.historyMode ? "Local History" : "This Mac", systemImage: model.historyMode ? "clock" : "laptopcomputer",
+        model.historyMode ? "Local History" : thisComputerName, systemImage: model.historyMode ? "clock" : "laptopcomputer",
         hue: model.historyMode ? .orange : .green, isExpanded: .expanded(collapsed: $localCollapsed)
       ) {
         if model.historyMode {
@@ -117,11 +117,13 @@ struct LocalSectionView: View {
         }
       }
     }
+    #if os(macOS)
     // Files from Finder or the Files panel: ask whether to copy them in, type
     // their paths or go to their folder (FileDropActions.swift).
     .alsoAccepts(FileDrop.contentTypes) { session, _ in
       FileDrop.perform { model.requestFileDrop($0, on: .session(session.id)) }
     }
+    #endif
     ForEach(flags.isEnabled(.screen) ? model.screenMonitor.sessions.filter { state.matches($0.shortName) } : []) { info in
       ScreenSessionRow(
         info: info,

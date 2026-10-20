@@ -1,10 +1,14 @@
+#if os(macOS) || os(Windows)
 #if os(macOS)
 import AppKit
-#else
+#endif
+#elseif os(iOS)
 import UIKit
 #endif
 import ComponentKit
+#if canImport(CoreData)
 import CoreData
+#endif
 import CryptoKit
 import Foundation
 import Observation
@@ -92,7 +96,7 @@ final class AppModel {
   var databasePresetSSHConfigID: UUID?
   var publicKeyError: String?
   
-  #if os(macOS)
+  #if os(macOS) || os(Windows)
   /// Polls `screen -ls` for the sidebar's Screen section.
   var screenMonitor = ScreenSessionsMonitor()
   /// Scans GNU screen/tmux sessions on the currently-connected SSH hosts and
@@ -202,7 +206,7 @@ final class AppModel {
   /// re-arms on every observed flag change).
   private var notesFeatureEnabled = false
 
-  #if os(macOS)
+  #if os(macOS) || os(Windows)
   /// Project detection over the active directory with Code's CodeActions,
   /// driving the toolbar's smart-action Run/Stop controls. Per-directory
   /// results are encrypted-cached.
@@ -342,7 +346,7 @@ final class AppModel {
     if features.isEnabled(.authorizedKeys), !ScreenshotDemo.isOn {
       deviceKeys.publishThisDevice()
     }
-    #if os(macOS)
+    #if os(macOS) || os(Windows)
     smartActionsEnabled = features.isEnabled(.smartActions)
     // Start (or leave stopped) the Screen feature's pollers to match the flag.
     configureGatedBackgroundWork()
@@ -354,12 +358,14 @@ final class AppModel {
     if features.isEnabled(.sessions) {
       _ = addLocalTerminal()
     }
+    #if os(macOS)
     // Files linked by a drop on Notes stay in the Text Files section.
     if !ScreenshotDemo.isOn { reopenLinkedFiles() }
     #endif
+    #endif
   }
 
-  #if os(macOS)
+  #if os(macOS) || os(Windows)
   /// Starts or stops the Screen feature's background pollers to match the
   /// current feature flag. Idempotent; safe to call at any time.
   private func configureGatedBackgroundWork() {
@@ -473,7 +479,7 @@ final class AppModel {
         openOrFocusDatabaseConnection(connection)
       }
     case .screen(let tagID):
-      #if os(macOS)
+      #if os(macOS) || os(Windows)
       if let info = screenMonitor.sessions.first(where: { $0.tagID == tagID }) {
         attachOrFocus(info)
       } else if let info = remoteScreenSessions.first(where: { $0.tagID == tagID }),
@@ -504,7 +510,7 @@ final class AppModel {
     return .database(connection.id)
   }
 
-  #if os(macOS)
+  #if os(macOS) || os(Windows)
   /// The selection a persistent (screen/tmux) session's sidebar row tags
   /// with: the attached terminal's session when one is open (so the row
   /// highlights while its terminal is up), else the row's stable `tagID` —
@@ -515,7 +521,7 @@ final class AppModel {
   }
   #endif
 
-  #if os(macOS)
+  #if os(macOS) || os(Windows)
   /// Focuses the open terminal attached to `info`, or attaches a new one.
   /// Focusing (rather than multi-attaching) keeps the persistent session's
   /// state honest — a second client would leave it "Attached" after either
@@ -690,7 +696,7 @@ final class AppModel {
 
   // MARK: - Sessions
   
-  #if os(macOS)
+  #if os(macOS) || os(Windows)
   @discardableResult
   func addLocalTerminal(in directory: String? = nil) -> TerminalSession {
     if historyMode {
@@ -708,7 +714,7 @@ final class AppModel {
   }
   #endif
 
-  #if os(macOS)
+  #if os(macOS) || os(Windows)
   /// ⌘T: opens a new local terminal whose shell starts in the SAME
   /// directory as the selected session's current working directory.
   /// Falls back to a plain local terminal (home dir) when the selected
@@ -740,7 +746,7 @@ final class AppModel {
     registerCapture(for: session, archiveLocally: false)
     sessions.append(session)
     selection = .session(session.id)
-    #if os(macOS)
+    #if os(macOS) || os(Windows)
     // Kick a remote scan on connect. The just-created session isn't
     // `.connected` yet, so it's skipped this pass; every already-connected
     // host is scanned, and the next refresh (or the connected-state refresh
@@ -881,7 +887,7 @@ final class AppModel {
     webSessions.remove(web.id)
   }
 
-  #if os(macOS)
+  #if os(macOS) || os(Windows)
   /// The SSH sessions that are currently open (kind `.ssh` AND
   /// `connectionState == .connected`). This is the ONLY set the remote
   /// persistent-session scanner iterates — it never dials a connection from a
@@ -913,7 +919,7 @@ final class AppModel {
     remoteScreenScanner.scan(using: self)
   }
   #endif
-  #if os(macOS)
+  #if os(macOS) || os(Windows)
   /// Opens a local terminal attached to an existing persistent session
   /// (`screen -x` for screen, `tmux attach` for tmux).
   @discardableResult
@@ -1175,7 +1181,7 @@ final class AppModel {
     case .local:
       return sessions.filter { kind(of: $0) == .local }
     case .screen:
-      #if os(macOS)
+      #if os(macOS) || os(Windows)
       // Local persistent attachments plus remote (SSH) persistent
       // attachments, in sidebar order — Cmd+W/Cmd+N navigate all of them.
       let local = screenMonitor.sessions.compactMap { attachedSession(toScreen: $0) }
@@ -1203,7 +1209,7 @@ final class AppModel {
   /// Creates a new session in the same section as `session`: a local
   /// terminal for local, a duplicate connection for SSH, a brand-new
   /// persistent session for screen.
-  #if os(macOS)
+  #if os(macOS) || os(Windows)
   @discardableResult
   func newSession(inSameSectionAs session: TerminalSession) -> TerminalSession {
     switch kind(of: session) {
@@ -1244,7 +1250,7 @@ final class AppModel {
 
   /// ⌘N: new session in the same section as the current selection
   /// (new local terminal when nothing is selected).
-  #if os(macOS)
+  #if os(macOS) || os(Windows)
   @discardableResult
   func newSessionInSameSection() -> TerminalSession {
     if let session = selectedSession {
@@ -1423,7 +1429,7 @@ final class AppModel {
     let wasOnly = section.count == 1
     
     if case .screen(let info) = kind(of: session) {
-      #if os(macOS)
+      #if os(macOS) || os(Windows)
       if info.isRemote {
         // Remote sessions live on the SSH host; closing the attached terminal
         // detaches our client (and closes the session on the host via SSH).
@@ -1474,7 +1480,7 @@ final class AppModel {
     }
   }
   
-  #if os(macOS)
+  #if os(macOS) || os(Windows)
   /// Creates a new persistent session (tmux when installed, else screen)
   /// and immediately opens a terminal attached to it, so the new session
   /// is usable at once.
@@ -1695,8 +1701,10 @@ final class AppModel {
       let key = try SSHKeychain.loadOrCreateDefaultKey()
       #if os(macOS)
       let host = Host.current().localizedName ?? "Mac"
-      #else
+      #elseif os(iOS)
       let host = UIDevice.current.name
+      #else
+      let host = ProcessInfo.processInfo.hostName
       #endif
       let comment = "Shell (\(NSUserName())@\(host))"
       let line = SSHKeychain.publicKeyOpenSSHLine(for: key, comment: comment)
@@ -1766,7 +1774,7 @@ final class AppModel {
 
   func replayHistorySession(_ record: HistorySession) {
     if historyMode { toggleHistoryMode() }
-    #if os(macOS)
+    #if os(macOS) || os(Windows)
     let session = addLocalTerminal()
     DispatchQueue.main.async {
       for command in record.commands {
@@ -1939,7 +1947,7 @@ final class AppModel {
         return .local
       }
     } else {
-      #if os(macOS)
+      #if os(macOS) || os(Windows)
       // Nothing selected (fresh start / nothing open): run locally.
       return .local
       #else
@@ -1961,11 +1969,11 @@ final class AppModel {
       transport = SSHSession(config: config, execCommand: spec.action.commands)
       startupMessage = "Connecting to \(config.host)…"
     } else {
-      #if os(macOS)
+      #if os(macOS) || os(Windows)
       // -lic (login + interactive + command) sources ~/.zshrc so the
       // user's environment (e.g. bun's PATH in ~/.zshrc) is present when
       // the action runs. Plain -lc is non-interactive and skips .zshrc.
-      transport = LocalPTYTransport(executable: "/bin/zsh", argv: ["zsh", "-lic", spec.action.commands])
+      transport = LocalPTYTransport.command(spec.action.commands)
       startupMessage = nil
       #else
       // Local actions need a local pty, which iOS doesn't have. This
@@ -2072,7 +2080,7 @@ final class AppModel {
 
   // MARK: - Smart actions
 
-  #if os(macOS)
+  #if os(macOS) || os(Windows)
   /// Recomputes the smart actions for the active local directory. Returns
   /// immediately; the blocking scan (directory listing + CodeActions scan +
   /// cache save) runs off the main thread so a large directory never stalls
@@ -2179,7 +2187,7 @@ final class AppModel {
     )
     // -lic sources ~/.zshrc (same reasoning as runAction): a bun or other
     // tool added to PATH in .zshrc must be visible for the smart action.
-    let transport = LocalPTYTransport(executable: "/bin/zsh", argv: ["zsh", "-lic", command])
+    let transport = LocalPTYTransport.command(command)
     let newSession = TerminalSession(transport: transport)
     sessionKinds[newSession.id] = .action(spec)
     registerActionCapture(for: newSession, seedCommand: command)

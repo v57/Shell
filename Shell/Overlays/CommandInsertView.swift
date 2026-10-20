@@ -56,7 +56,7 @@ struct CommandInsertView: View {
 
       if isMultiline {
         Toggle("Send as separate commands", isOn: $sendAsSeparateCommands)
-#if os(macOS)
+#if os(macOS) || os(Windows)
           .toggleStyle(.checkbox)
 #else
           .toggleStyle(.switch)

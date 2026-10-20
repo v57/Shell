@@ -13,7 +13,7 @@ struct ContentView: View {
   /// Local Esc monitor while the actions overlay is open (the overlay is
   /// non-modal and never gets keyboard focus, so onExitCommand won't fire).
   /// macOS only — iOS dismisses the overlay by tapping the backdrop.
-  #if os(macOS)
+  #if os(macOS) || os(Windows)
   @State private var escMonitor: Any?
   #endif
   /// The launch-time `.active` scene change fires while the SwiftData store
@@ -116,7 +116,7 @@ struct ContentView: View {
       .sheet(isPresented: $model.showingThemes) {
         ThemesView()
       }
-#if os(macOS)
+#if os(macOS) || os(Windows)
       .sheet(item: $model.notarizationSetup) { request in
         NotarizationSetupView(request: request)
       }
@@ -427,7 +427,7 @@ struct ContentView: View {
   private func sessionTools(_ session: TerminalSession) -> [ToolbarSlot] {
     let kind = model.kind(of: session)
     if case .web(let web) = kind {
-      #if os(macOS)
+      #if os(macOS) || os(Windows)
       ToolbarSlot(priority: 1) {
         ToolGroup { webSSHTunnelPicker(web: web) }
       } menu: {
@@ -450,7 +450,7 @@ struct ContentView: View {
             .help("Reconnect now")
         }
       }
-      #if os(macOS)
+      #if os(macOS) || os(Windows)
       if model.smartActionDirectory != nil, selectedSmartActionScheme != nil {
         ToolbarSlot(priority: 1) { smartActionTools } menu: { smartActionMenu }
       }
@@ -538,14 +538,14 @@ struct ContentView: View {
 
   /// Whether the Open With apps show for the active local directory.
   private var hasOpenWith: Bool {
-    #if os(macOS)
+    #if os(macOS) || os(Windows)
     model.smartActionDirectory != nil && !model.openWithKinds.isEmpty
     #else
     false
     #endif
   }
 
-  #if os(macOS)
+  #if os(macOS) || os(Windows)
   /// Smart actions for the active local directory (Code's CodeActions
   /// schemes), in one card: a scheme picker when the directory has several, a
   /// Run/Stop button per action of the selected scheme, and its distribute
@@ -710,7 +710,7 @@ struct ContentView: View {
       localDirectoryText = ""
       if activeDirectoryURL != nil {
         activeDirectoryURL = nil
-        #if os(macOS)
+        #if os(macOS) || os(Windows)
           model.refreshSmartActions(for: nil)
         #endif
       }
@@ -731,7 +731,7 @@ struct ContentView: View {
       if activeDirectoryURL != url {
         activeDirectoryURL = url
         smartActionsSchemeID = nil   // don't carry a stale scheme across projects
-        #if os(macOS)
+        #if os(macOS) || os(Windows)
           model.refreshSmartActions(for: url)
         #endif
       }
@@ -753,7 +753,7 @@ struct ContentView: View {
     }
   }
 
-  #if os(macOS)
+  #if os(macOS) || os(Windows)
   /// The scheme whose smart actions the toolbar shows: the picked one, else
   /// the directory's first.
   private var selectedSmartActionScheme: ActionScheme? {
@@ -794,7 +794,7 @@ struct ContentView: View {
 #endif
 }
 
-#if os(macOS)
+#if os(macOS) || os(Windows)
 /// A smart action of a scheme: Build = hammer, Run = play, Test =
 /// play.diamond, Lint = checkmark.seal. While it runs the icon flips to
 /// `stop.fill` and the button stops it instead, so there's no separate Stop.
@@ -872,7 +872,7 @@ extension ConnectionKind {
   /// The detail title's status line: where a session of this kind lives.
   var titleMeta: [String] {
     switch self {
-    case .local: ["This Mac"]
+    case .local: [thisComputerName]
     case .screen(let info): [info.kind == .tmux ? "tmux" : "screen"]
     case .ssh(let config): ["\(config.user)@\(config.host)"]
     case .action(let spec): [spec.config?.displayName ?? "Local"]

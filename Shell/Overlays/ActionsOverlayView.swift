@@ -56,7 +56,7 @@ struct ActionsOverlayView: View {
     ) {
       scope
     } content: {
-      #if os(macOS)
+      #if os(macOS) || os(Windows)
       smartActions
       #endif
       yourActions
@@ -145,7 +145,7 @@ struct ActionsOverlayView: View {
   /// has no local pty so the run would be a silent no-op — keep disabled.
   private var canRun: Bool {
     if model.selectedSession != nil { return true }
-    #if os(macOS)
+    #if os(macOS) || os(Windows)
     return true
     #else
     return false
@@ -154,7 +154,7 @@ struct ActionsOverlayView: View {
 
   private var helpText: String {
     guard let session = model.selectedSession else {
-      #if os(macOS)
+      #if os(macOS) || os(Windows)
       return "Run locally (no terminal selected)"
       #else
       return "Select a terminal first"
@@ -187,7 +187,7 @@ struct ActionsOverlayView: View {
     #endif
   }
 
-  #if os(macOS)
+  #if os(macOS) || os(Windows)
   // MARK: Smart actions
 
   /// A group per scheme of the active local directory: its run, build, test,
@@ -239,7 +239,9 @@ struct ActionsOverlayView: View {
     }
     .help(running ? "Stop" : "\(kind.title) \(scheme.name)")
   }
+  #endif
 
+  #if os(macOS)
   // MARK: Open with
 
   /// The apps that open the active local directory, as their real icons.
@@ -295,7 +297,7 @@ struct ActionsOverlayView: View {
   #endif
 }
 
-#if os(macOS)
+#if os(macOS) || os(Windows)
 /// A smart action's tile: Run green play, Build orange hammer, Test purple
 /// diamond, Lint teal seal, Clean gray trash, distribution blue.
 private struct SmartActionStyle {

@@ -17,7 +17,7 @@ struct DatabaseBrowserView: View {
       statusBar
       Divider()
       if session.isConnected {
-#if os(macOS)
+#if os(macOS) || os(Windows)
         HSplitView {
           collectionsPane
             .frame(minWidth: 180, idealWidth: 220, maxWidth: 360)

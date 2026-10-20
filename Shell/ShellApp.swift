@@ -4,7 +4,7 @@ import ShellKit
 import ShellIntegrations
 import VaultKit
 import DevScreenshots
-#if os(macOS)
+#if os(macOS) || os(Windows)
 import UpdateKit
 #endif
 
@@ -12,7 +12,9 @@ import UpdateKit
 struct ShellApp: App {
   #if os(macOS)
   @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+  #endif
 
+  #if os(macOS) || os(Windows)
   /// Updates for the Mac app from GitHub Releases (Shell.zip, built by
   /// Scripts/release.sh): checked daily once the user turns on
   /// automatic checks (never before), installed in place with a relaunch.
@@ -22,7 +24,7 @@ struct ShellApp: App {
   #endif
 
   init() {
-    #if os(macOS)
+    #if os(macOS) || os(Windows)
     updater.start()
     #endif
     // SSH hosts, database connections and device keys sync with the other v57 apps and devices through the
@@ -50,7 +52,7 @@ struct ShellApp: App {
         // ComponentKit's design, in the system accent Shell has always used.
         .componentKit(accent: .accentColor)
     }
-    #if os(macOS)
+    #if os(macOS) || os(Windows)
     .commands {
       ShellCommands()
       UpdaterCommands(updater: updater)
@@ -175,6 +177,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 }
 
+#endif
+
+#if os(macOS) || os(Windows)
 /// Application menu commands for creating terminals and managing the SSH key.
 struct ShellCommands: Commands {
   @Environment(\.openWindow) private var openWindow
@@ -373,4 +378,4 @@ struct ShellCommands: Commands {
     }
   }
 }
-#endif // os(macOS)
+#endif // os(macOS) || os(Windows)

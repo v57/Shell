@@ -26,7 +26,7 @@ public actor LocalProcessCommandRunner: FileCommandExecutor {
   }
 
   public func run(inDirectory dir: String, _ command: String) async throws -> CommandResult {
-    #if os(macOS)
+    #if os(macOS) || os(Windows)
       let process = Process()
       process.executableURL = URL(fileURLWithPath: "/bin/zsh")
       // -lic sources ~/.zshrc so the user's interactive PATH (e.g. bun) is
@@ -63,7 +63,7 @@ public actor LocalProcessCommandRunner: FileCommandExecutor {
     #endif
   }
 
-  #if os(macOS)
+  #if os(macOS) || os(Windows)
     /// Reads a pipe to EOF. Marked `nonisolated` so the two pipe drains run on the
     /// cooperative pool instead of serializing on this actor's executor.
     private nonisolated func drain(_ handle: FileHandle) -> Data {
@@ -103,7 +103,7 @@ public actor LocalProcessCommandRunner: FileCommandExecutor {
   #endif
 }
 
-#if !os(macOS)
+#if !os(macOS) && !os(Windows)
 /// Shown when a local command run is requested on a platform that has no local
 /// shell (iOS). iOS is SSH + notes only, so this path is never taken at runtime.
 enum LocalProcessCommandRunnerError: Error {

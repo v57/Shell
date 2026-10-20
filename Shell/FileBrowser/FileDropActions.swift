@@ -1,5 +1,7 @@
 #if os(macOS)
+#if os(macOS)
 import AppKit
+#endif
 import Foundation
 import ShellKit
 
