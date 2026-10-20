@@ -1,6 +1,6 @@
 #if os(macOS)
 import AppKit
-#else
+#elseif os(iOS)
 import UIKit
 #endif
 import SwiftUI
@@ -143,8 +143,10 @@ public struct TerminalScreenView: View {
   private static func monoFont(ofSize size: CGFloat) -> TerminalFont {
     #if os(macOS)
     NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
-    #else
+    #elseif os(iOS)
     UIFont.monospacedSystemFont(ofSize: size, weight: .regular)
+    #else
+    TerminalFont.monospacedSystemFont(ofSize: size, weight: .regular)
     #endif
   }
 
@@ -462,9 +464,13 @@ public struct TerminalScreenView: View {
   /// only non-"W" clusters are ever measured.
   private static var clusterMetrics: [String: (base: CGFloat, scaled: (size: CGFloat, advance: CGFloat)?)] = [:]
   private static func measure(_ cluster: String, at size: CGFloat) -> CGFloat {
+    #if os(macOS) || os(iOS)
     (cluster as NSString).size(
       withAttributes: [.font: monoFont(ofSize: size)]
     ).width
+    #else
+    monoFont(ofSize: size).width(of: cluster)
+    #endif
   }
   private static func metrics(for cluster: String) -> (base: CGFloat, scaled: (size: CGFloat, advance: CGFloat)?) {
     if let cached = clusterMetrics[cluster] { return cached }
@@ -779,8 +785,12 @@ public struct TerminalScreenView: View {
   /// Font metrics shared by every renderer so cell grids match exactly
   /// (cellWidth/lineHeight/baseline/kern all derive from the same font).
   public static func fontMetrics(for font: TerminalFont) -> TerminalFontMetrics {
+    #if os(macOS) || os(iOS)
     let sample = NSString(string: "W")
     let size = sample.size(withAttributes: [.font: font])
+    #else
+    let size = CGSize(width: font.width(of: "W"), height: font.ascender - font.descender)
+    #endif
     let cellWidth = max(1, ceil(size.width))
     let lineHeight = max(1, ceil(font.ascender - font.descender + font.leading + 4))
     // NSAttributedString.draw(at:) treats the point as the top of the line
@@ -969,7 +979,7 @@ extension TerminalScreenView {
       // (set from onAppear/onDisappear/tap), so iOS must not participate in
       // SwiftUI focus at all.
       content
-        #if os(macOS)
+        #if !os(iOS)
         .focusable()
         .focused(focused)
         .focusEffectDisabled()
@@ -977,7 +987,7 @@ extension TerminalScreenView {
         .onKeyPress { press in
           handleKeyPress(press)
         }
-        #if os(macOS)
+        #if !os(iOS)
         .onPasteCommand(of: [UTType.plainText, UTType.utf8PlainText]) { _ in
           pasteFromPasteboard()
         }
@@ -1074,8 +1084,12 @@ extension TerminalScreenView {
       if let string = NSPasteboard.general.string(forType: .string) {
         session.paste(string)
       }
-      #else
+      #elseif os(iOS)
       if let string = UIPasteboard.general.string {
+        session.paste(string)
+      }
+      #else
+      if let string = Pasteboard.general.string() {
         session.paste(string)
       }
       #endif
@@ -1245,7 +1259,7 @@ extension TerminalScreenView {
       guard autoScrollDirection != direction else { return }
       stopAutoScroll()
       autoScrollDirection = direction
-      let timer = Timer(timeInterval: 0.05, repeats: true) { _ in
+      let timer = Timer(fire: Date(timeIntervalSinceNow: 0.05), interval: 0.05, repeats: true) { _ in
         self.autoScrollTick()
       }
       RunLoop.main.add(timer, forMode: .common)

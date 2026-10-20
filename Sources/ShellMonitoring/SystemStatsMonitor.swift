@@ -1,6 +1,10 @@
 import Foundation
 #if os(macOS)
 import IOKit
+#elseif os(Windows)
+import WinSDK
+#endif
+#if os(macOS) || os(Windows)
 
 /// Live system stats for the sidebar's Local section header: CPU usage %,
 /// GPU usage %, and total system wattage. All reads run on a background
@@ -69,7 +73,7 @@ public final class SystemStatsMonitor {
   /// Starts the 1-second polling loop (idempotent).
   public func start() {
     guard timer == nil else { return }
-    let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+    let timer = Timer(fire: Date(timeIntervalSinceNow: 1), interval: 1, repeats: true) { [weak self] _ in
       Task { @MainActor [weak self] in
         self?.tick()
       }
@@ -116,6 +120,28 @@ public final class SystemStatsMonitor {
   }
 }
 
+#if os(Windows)
+/// CPU usage from `GetSystemTimes` deltas (all cores). Windows has no user-space GPU or power reading as the Mac's
+/// IOAccelerator and SMC keys are: those stay 0, and there is no DC-in reading.
+nonisolated final class SystemStatsSampler: @unchecked Sendable {
+  private let lock = NSLock()
+  private var previous: (idle: UInt64, total: UInt64)?
+
+  func sample() -> (cpu: Double, gpu: Double, watts: Int, dcInWatts: Int?) {
+    lock.lock()
+    defer { lock.unlock() }
+    var idle = FILETIME(), kernel = FILETIME(), user = FILETIME()
+    guard GetSystemTimes(&idle, &kernel, &user) else { return (0, 0, 0, nil) }
+    func ticks(_ time: FILETIME) -> UInt64 { UInt64(time.dwHighDateTime) << 32 | UInt64(time.dwLowDateTime) }
+    // Kernel time includes idle time.
+    let current = (idle: ticks(idle), total: ticks(kernel) + ticks(user))
+    defer { previous = current }
+    guard let previous, current.total > previous.total else { return (0, 0, 0, nil) }
+    let busy = Double((current.total - previous.total) - (current.idle - previous.idle))
+    return (min(100, max(0, busy / Double(current.total - previous.total) * 100)), 0, 0, nil)
+  }
+}
+#else
 /// Performs the IOKit/SMC reads off the main thread. Owns the previous-CPU
 /// tick buffer and the SMC connection, guarded by a lock; `@unchecked
 /// Sendable` so it can cross into a detached task.
@@ -352,3 +378,4 @@ private struct SMCVersion_t { var major: UInt8 = 0; var minor: UInt8 = 0; var bu
 private struct SMCPLimitData_t { var version: UInt16 = 0; var length: UInt16 = 0; var cpuPLimit: UInt32 = 0; var gpuPLimit: UInt32 = 0; var memPLimit: UInt32 = 0 }
 private struct SMCKeyInfo_t { var dataSize: UInt32 = 0; var dataType: UInt32 = 0; var dataAttributes: UInt8 = 0 }
 #endif // os(macOS)
+#endif // os(macOS) || os(Windows)

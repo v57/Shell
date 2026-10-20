@@ -1,8 +1,10 @@
 #if os(macOS)
 import AppKit
 import Darwin
-#else
+#elseif os(iOS)
 import UIKit
+#else
+import SwiftUI
 #endif
 import Foundation
 import Observation
@@ -533,8 +535,10 @@ public final class TerminalSession: Identifiable {
     let pasteboard = NSPasteboard.general
     pasteboard.clearContents()
     pasteboard.setString(text, forType: .string)
-    #else
+    #elseif os(iOS)
     UIPasteboard.general.string = text
+    #else
+    Pasteboard.general.setString(text)
     #endif
   }
 
@@ -546,8 +550,10 @@ public final class TerminalSession: Identifiable {
     let pasteboard = NSPasteboard.general
     pasteboard.clearContents()
     pasteboard.setString(text, forType: .string)
-    #else
+    #elseif os(iOS)
     UIPasteboard.general.string = text
+    #else
+    Pasteboard.general.setString(text)
     #endif
   }
 
@@ -557,8 +563,12 @@ public final class TerminalSession: Identifiable {
     if let string = pasteboard.string(forType: .string) {
       paste(string)
     }
-    #else
+    #elseif os(iOS)
     if let string = UIPasteboard.general.string {
+      paste(string)
+    }
+    #else
+    if let string = Pasteboard.general.string() {
       paste(string)
     }
     #endif
@@ -643,7 +653,7 @@ public final class TerminalSession: Identifiable {
     guard !pendingPublish else { return }
     pendingPublish = true
     if publishTimer == nil {
-      let timer = Timer(timeInterval: Self.publishInterval, repeats: true) { [weak self] _ in
+      let timer = Timer(fire: Date(timeIntervalSinceNow: Self.publishInterval), interval: Self.publishInterval, repeats: true) { [weak self] _ in
         self?.publishNow()
       }
       RunLoop.main.add(timer, forMode: .common)
@@ -841,7 +851,8 @@ public final class TerminalSession: Identifiable {
     showReconnecting()
     reconnectTimer?.invalidate()
     let delay = reconnectDelay(reconnectAttempt)
-    let timer = Timer(timeInterval: delay, repeats: false) { [weak self] _ in
+    // `Timer(fire:…)`: swift-corelibs-foundation's `Timer(timeInterval:…)` fires at once instead of after the delay.
+    let timer = Timer(fire: Date(timeIntervalSinceNow: delay), interval: 0, repeats: false) { [weak self] _ in
       DispatchQueue.main.async { self?.dial() }
     }
     RunLoop.main.add(timer, forMode: .common)
@@ -989,14 +1000,14 @@ public final class TerminalSession: Identifiable {
 
 // MARK: - Local pty preset init
 
-#if os(macOS)
+#if os(macOS) || os(Windows)
 public extension TerminalSession {
   /// Short form for local terminals: `TerminalSession(session: .zsh)` for
   /// an interactive login shell, `.screen(name)` to attach to a GNU screen
   /// session. tmux needs unwrapping (`LocalPTYTransport.tmux(name)` is nil
   /// when tmux isn't installed). Equivalent to
-  /// `TerminalSession(transport: LocalPTYTransport(...))`. macOS only —
-  /// local ptys (forkpty) don't exist on iOS.
+  /// `TerminalSession(transport: LocalPTYTransport(...))`. macOS and Windows
+  /// (ConPTY) — local ptys don't exist on iOS.
   convenience init(session transport: LocalPTYTransport, startupMessage: String? = nil) {
     self.init(transport: transport, startupMessage: startupMessage)
   }

@@ -2,11 +2,40 @@ import SwiftUI
 
 #if os(macOS)
 import AppKit
-/// The platform monospaced font type (AppKit on macOS, UIKit on iOS).
+/// The platform monospaced font type (AppKit on macOS, UIKit on iOS, a measured SwiftUI font elsewhere).
 public typealias TerminalFont = NSFont
-#else
+#elseif os(iOS)
 import UIKit
 public typealias TerminalFont = UIFont
+#else
+/// The terminal's monospaced font where neither AppKit nor UIKit is around (Windows): a size, measured by the
+/// platform's text layout (`TextMeasurer`), with NSFont's metrics names.
+public struct TerminalFont {
+  public let pointSize: CGFloat
+  public let weight: Font.Weight
+
+  public static func monospacedSystemFont(ofSize size: CGFloat, weight: Font.Weight) -> TerminalFont {
+    TerminalFont(pointSize: size, weight: weight)
+  }
+
+  public var font: Font { .system(size: pointSize, weight: weight, design: .monospaced) }
+
+  /// The width of `string` on one line.
+  @MainActor public func width(of string: String) -> CGFloat {
+    TextMeasurer.measure(Text(string).font(font))?.width ?? CGFloat(string.count) * pointSize * 0.6
+  }
+
+  @MainActor private var line: TextMeasurer.Measurement {
+    TextMeasurer.measure(Text("W").font(font))
+      ?? TextMeasurer.Measurement(width: pointSize * 0.6, height: pointSize * 1.3, baseline: pointSize)
+  }
+
+  /// Top of the line to the baseline.
+  @MainActor public var ascender: CGFloat { line.baseline }
+  /// Baseline to the bottom of the line (negative, as NSFont's).
+  @MainActor public var descender: CGFloat { line.baseline - line.height }
+  public var leading: CGFloat { 0 }
+}
 #endif
 
 // Terminal model types: snapshot, cells, colors.
@@ -34,11 +63,19 @@ public enum TerminalPalette {
   public static let selectionBackground = Color(nsColor: .selectedTextBackgroundColor)
   public static let selectionForeground = Color(nsColor: .selectedTextColor)
   public static let secondaryText = Color(nsColor: .secondaryLabelColor)
-  #else
+  #elseif os(iOS)
   public static let windowBackground = Color(uiColor: .systemBackground)
   public static let selectionBackground = Color(uiColor: .tintColor)
   public static let selectionForeground = Color(uiColor: .white)
   public static let secondaryText = Color(uiColor: .secondaryLabel)
+  #else
+  // AppKit's colors, light and dark.
+  public static let windowBackground = Color(
+    light: Color(red: 0.925, green: 0.925, blue: 0.925), dark: Color(red: 0.196, green: 0.196, blue: 0.196))
+  public static let selectionBackground = Color(
+    light: Color(red: 0.702, green: 0.843, blue: 1), dark: Color(red: 0.247, green: 0.396, blue: 0.584))
+  public static let selectionForeground = Color.primary
+  public static let secondaryText = Color.secondary
   #endif
 }
 

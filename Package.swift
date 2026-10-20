@@ -98,3 +98,50 @@ let package = Package(
         )
     ]
 )
+
+#if os(Windows) || os(Linux)
+// Off Apple platforms CryptoKit and os are v57/SwiftUI's stand-ins, Database's Libssh2 is libssh2 built from source
+// (module CLibssh2, as on Apple platforms), and Foundation's extras come from SwiftUIPortability.
+package.dependencies += [v57("SwiftUI")]
+for target in package.targets where target.type == .regular || target.type == .test {
+  target.dependencies += [
+    .product(name: "CryptoKit", package: "SwiftUI"), .product(name: "os", package: "SwiftUI"),
+    .product(name: "SwiftUIPortability", package: "SwiftUI"),
+  ]
+  if target.name == "ShellKit" { target.dependencies.append(.product(name: "SwiftUI", package: "SwiftUI")) }
+  // URLSession lives in FoundationNetworking, @Observable in Observation and Apple's Foundation extras in
+  // SwiftUIPortability: imported everywhere, as Foundation brings them on Apple platforms.
+  target.swiftSettings = (target.swiftSettings ?? []) + [
+    .unsafeFlags(
+      ["FoundationNetworking", "Observation", "SwiftUIPortability"].flatMap { ["-Xfrontend", "-import-module", "-Xfrontend", $0] })
+  ]
+}
+#if os(Windows)
+// The app: a DLL the SwiftUI WinUI host loads (SwiftUI's Windows/scripts/build-app.ps1 -PackagePath <this package>
+// -Product ShellWinUI), built from the Xcode project's sources with its settings.
+package.dependencies += [v57("Component"), v57("UpdateKit"), v57("Markdown"), v57("Dev")]
+package.targets.append(
+  .target(
+    name: "ShellApp",
+    dependencies: [
+      "ShellKit", "ShellIntegrations", "ShellMonitoring", "ShellDatabaseEngines",
+      .product(name: "SwiftUI", package: "SwiftUI"), .product(name: "SwiftData", package: "SwiftUI"),
+      .product(name: "Charts", package: "SwiftUI"), .product(name: "SQLite3", package: "SwiftUI"),
+      .product(name: "CryptoKit", package: "SwiftUI"), .product(name: "ComponentKit", package: "Component"),
+      .product(name: "UpdateKit", package: "UpdateKit"), .product(name: "VaultKit", package: "Vault"),
+      .product(name: "MarkdownKit", package: "Markdown"), .product(name: "DevScreenshots", package: "Dev"),
+      .product(name: "SSHTunnel", package: "Database"), .product(name: "WireKit", package: "Database"),
+    ],
+    path: "Shell",
+    exclude: ["Assets.xcassets", "Shell.entitlements", "Shell-iOS.entitlements", "PrivacyInfo.xcprivacy"],
+    swiftSettings: [
+      .swiftLanguageMode(.v5), .defaultIsolation(MainActor.self), .enableUpcomingFeature("ApproachableConcurrency"),
+      .enableUpcomingFeature("MemberImportVisibility"),
+      // On Apple platforms `import Foundation` brings Combine (ObservableObject, @Published), Observation
+      // (@Observable), URLSession and the file APIs SwiftUIPortability adds along: every file gets them here too.
+      .unsafeFlags(
+        ["Combine", "Observation", "FoundationNetworking", "SwiftUIPortability"].flatMap { ["-Xfrontend", "-import-module", "-Xfrontend", $0] }),
+    ]))
+package.products.append(.library(name: "ShellWinUI", type: .dynamic, targets: ["ShellApp"]))
+#endif
+#endif

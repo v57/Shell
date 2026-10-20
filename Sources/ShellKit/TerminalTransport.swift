@@ -1,4 +1,6 @@
+#if canImport(Darwin)
 import Darwin
+#endif
 import Foundation
 
 // MARK: - Auth prompts
@@ -436,6 +438,11 @@ public extension LocalPTYTransport {
   /// `.zsh` starts in the home directory.
   static func zsh(in directory: String) -> LocalPTYTransport {
     LocalPTYTransport(executable: "/bin/zsh", argv: ["zsh", "-l", "-i"], workingDirectory: directory)
+  }
+
+  /// Runs `commands` in a zsh login shell and exits with their status (actions).
+  static func command(_ commands: String, in directory: String? = nil) -> LocalPTYTransport {
+    LocalPTYTransport(executable: "/bin/zsh", argv: ["zsh", "-lic", commands], workingDirectory: directory)
   }
 
   /// Attach to a named GNU screen session (`screen -x`, multi-attaches).

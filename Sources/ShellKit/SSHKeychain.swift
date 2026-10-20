@@ -1,6 +1,8 @@
 import CryptoKit
 import Foundation
+#if canImport(Security)
 import Security
+#endif
 import VaultKit
 
 /// Generates and stores the app's SSH identities in the Secure Enclave.
@@ -178,6 +180,7 @@ public nonisolated enum SSHKeychain {
     return out
   }
   
+#if canImport(Security)
   private static func save(_ data: Data, account: String, label: String) throws {
     delete(account: account)
     let query: [String: Any] = [
@@ -221,4 +224,28 @@ public nonisolated enum SSHKeychain {
     ]
     SecItemDelete(query as CFDictionary)
   }
+#else
+  // Where Security is missing (Windows), VaultKit's keychain keeps this device's items: the Credential Manager.
+  private static var keychain: VaultKeychain { VaultKeychain(service: service, accessGroup: nil) }
+
+  private static func save(_ data: Data, account: String, label: String) throws {
+    do {
+      try keychain.write(data, account: account, options: VaultKeychain.Options(synchronizable: false, label: label))
+    } catch VaultKeychain.KeychainError.status(let status) {
+      throw KeychainError.keychainAddFailed(status)
+    }
+  }
+
+  private static func load(account: String) throws -> Data? {
+    do {
+      return try keychain.read(account, options: .thisDevice)
+    } catch VaultKeychain.KeychainError.status(let status) {
+      throw KeychainError.keychainReadFailed(status)
+    }
+  }
+
+  private static func delete(account: String) {
+    try? keychain.delete(account, options: .thisDevice)
+  }
+#endif
 }
