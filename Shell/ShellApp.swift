@@ -65,6 +65,12 @@ struct ShellApp: App {
       UpdaterCommands(updater: updater)
     }
     #endif
+    #if os(macOS)
+    // A folder or file opened with Shell goes to AppDelegate's
+    // application(_:open:) and shows in this window; without this SwiftUI
+    // also opens a new main window for every open.
+    .handlesExternalEvents(matching: [])
+    #endif
 
     // Settings is an in-window overlay (not a separate window/scene), so it
     // opens over the main window like the Actions overlay. On macOS it is
@@ -82,6 +88,9 @@ struct ShellApp: App {
         .environment(AppModel.shared)
         .componentKit(accent: .accentColor)
     }
+    #if os(macOS)
+    .handlesExternalEvents(matching: [])
+    #endif
   }
 }
 
@@ -115,10 +124,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   /// is dispatched to the main actor because `AppModel.shared` is a `@MainActor`
   /// singleton; `newTerminal(in:)` selects the new session (once it attaches) and
   /// `openFile(_:)` already selects the opened-file pane.
-  func application(_ sender: NSApplication, openFiles filenames: [String]) {
+  ///
+  /// `application(_:open:)`, not `openFiles`: SwiftUI's own app delegate
+  /// takes the open event through this method and only forwards this one.
+  func application(_ application: NSApplication, open urls: [URL]) {
     Task { @MainActor in
-      for filename in filenames {
-        let url = URL(fileURLWithPath: filename)
+      for url in urls where url.isFileURL {
         switch OpenPathResolver.target(for: url) {
         case .terminal(folder: let folder):
           AppModel.shared.newTerminal(in: folder.path)
@@ -129,7 +140,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
       }
     }
-    sender.reply(toOpenOrPrint: .success)
   }
 
   /// The system File menu provides a ⌘W "Close" that closes the whole window,
