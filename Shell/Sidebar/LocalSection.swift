@@ -259,7 +259,7 @@ struct LocalSectionView: View {
       KitMenuButton("New", systemImage: "plus", style: .button) {
         if flags.isEnabled(.sessions) {
           Button("New Session", systemImage: "terminal") {
-            model.addLocalTerminal()
+            model.newTerminal()
           }
         }
         if flags.isEnabled(.web) {

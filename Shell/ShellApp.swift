@@ -113,7 +113,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   /// AppKit delivers this open event both when the app is cold-launched by the
   /// open and when it is already running, so one handler covers both. The work
   /// is dispatched to the main actor because `AppModel.shared` is a `@MainActor`
-  /// singleton; `addLocalTerminal(in:)` already selects the new session and
+  /// singleton; `newTerminal(in:)` selects the new session (once it attaches) and
   /// `openFile(_:)` already selects the opened-file pane.
   func application(_ sender: NSApplication, openFiles filenames: [String]) {
     Task { @MainActor in
@@ -121,7 +121,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let url = URL(fileURLWithPath: filename)
         switch OpenPathResolver.target(for: url) {
         case .terminal(folder: let folder):
-          AppModel.shared.addLocalTerminal(in: folder.path)
+          AppModel.shared.newTerminal(in: folder.path)
         case .textFile(url: let fileURL):
           AppModel.shared.openFile(fileURL)
         case .ignored:

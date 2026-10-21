@@ -57,6 +57,10 @@ final class ScreenSessionsMonitor {
   var actionError: ScreenActionError?
   
   private let queue = DispatchQueue(label: "ScreenSessionsMonitor.list")
+  /// Names `createSession` handed out that no listing has shown yet (a
+  /// `session` session only appears once its terminal attaches). Touched only
+  /// on `queue`.
+  @ObservationIgnored private nonisolated(unsafe) var claimedNames: Set<String> = []
   /// The feature-flag source of truth. Injected so tests can gate on a
   /// hermetic store; production uses the shared store.
   private let features: FeatureFlagsStore
@@ -136,32 +140,41 @@ final class ScreenSessionsMonitor {
     return (sessions, nil)
   }
   
-  /// Creates a new detached persistent session running an interactive zsh.
+  /// Creates a new detached persistent session running an interactive zsh,
+  /// started in `directory` (nil = the home directory).
   /// Uses tmux when installed (`tmux new-session -d`), else screen
   /// (`screen -dmS <name>`). Updates the list and calls `onCreated` with
   /// the new session's info so the caller can immediately open a terminal
-  /// attached to it.
-  func createSession(onCreated: ((ScreenSessionInfo) -> Void)? = nil) {
+  /// attached to it. The name comes from a fresh listing plus the names this
+  /// run handed out, so two quick creates never share one.
+  func createSession(in directory: String? = nil, onCreated: ((ScreenSessionInfo) -> Void)? = nil) {
     guard featureEnabled else { return }
     let kind = Self.preferredKind
-    let name = ScreenSessionsParser.nextSessionName(existing: Set(sessions.map(\.shortName)))
-    // session-tool has no detached create: `session <name>` is create-or-
-    // attach, and the daemon auto-starts + creates the session when a
-    // terminal attaches via `.session(name)`. So instead of running a
-    // detached create then re-listing (as tmux/screen need), hand the fresh
-    // name straight back — the caller's attach(toScreen:) opens the
-    // create-or-attach terminal, which makes the session appear in
-    // `session list`.
-    if kind == .session, Self.sessionPath() != nil {
-      onCreated?(ScreenSessionInfo(name: name, pid: 0, state: "detached", kind: .session))
-      return
-    }
     queue.async { [weak self] in
+      guard let self else { return }
+      let (current, _) = Self.runList()
+      let live = Set(current.map(\.shortName))
+      self.claimedNames.subtract(live)
+      let name = ScreenSessionsParser.nextSessionName(existing: live.union(self.claimedNames))
+      self.claimedNames.insert(name)
+      // session-tool has no detached create: `session <name>` is create-or-
+      // attach, and the daemon auto-starts + creates the session when a
+      // terminal attaches via `.session(name, in:)`. So instead of running a
+      // detached create then re-listing (as tmux/screen need), hand the fresh
+      // name straight back — the caller's attach(toScreen:) opens the
+      // create-or-attach terminal, which makes the session appear in
+      // `session list`.
+      if kind == .session, Self.sessionPath() != nil {
+        DispatchQueue.main.async {
+          onCreated?(ScreenSessionInfo(name: name, pid: 0, state: "detached", kind: .session))
+        }
+        return
+      }
       let message: String?
       if kind == .tmux, let tmux = Self.tmuxPath() {
-        message = Self.runTmuxCreate(tmux: tmux, name: name)
+        message = Self.runTmuxCreate(tmux: tmux, name: name, directory: directory)
       } else {
-        message = Self.runCreate(name: name)
+        message = Self.runCreate(name: name, directory: directory)
       }
       // Re-list right away so the new session's state is known.
       // `screen -dm` (and tmux new-session) can return a hair before the
@@ -180,7 +193,7 @@ final class ScreenSessionsMonitor {
           Thread.sleep(forTimeInterval: 0.1)
         }
       }
-      DispatchQueue.main.async {
+      DispatchQueue.main.async { [weak self] in
         guard let self else { return }
         if let message {
           self.actionError = ScreenActionError(
@@ -236,13 +249,14 @@ final class ScreenSessionsMonitor {
   
   // MARK: - screen -dmS
   
-  private nonisolated static func runCreate(name: String) -> String? {
+  private nonisolated static func runCreate(name: String, directory: String?) -> String? {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/screen")
     // screen starts the window in ITS cwd, and the app's cwd is "/"
-    // when launched via Finder — cd home explicitly inside the shell.
-    let home = FileManager.default.homeDirectoryForCurrentUser.path
-    process.arguments = ["-dmS", name, "/bin/sh", "-c", "cd '\(home)' && exec /bin/zsh -l -i"]
+    // when launched via Finder — cd explicitly inside the shell (the
+    // directory is sh's $1, so it needs no quoting).
+    let directory = directory ?? FileManager.default.homeDirectoryForCurrentUser.path
+    process.arguments = ["-dmS", name, "/bin/sh", "-c", "cd \"$1\"; exec /bin/zsh -l -i", "sh", directory]
     let err = Pipe()
     process.standardOutput = Pipe()
     process.standardError = err
@@ -326,11 +340,11 @@ final class ScreenSessionsMonitor {
   /// Creates a detached tmux session running an interactive zsh. The
   /// session starts in its own cwd; the shell is exec'd so the tmux
   /// process tree holds one shell per window.
-  private nonisolated static func runTmuxCreate(tmux: String, name: String) -> String? {
-    let home = FileManager.default.homeDirectoryForCurrentUser.path
+  private nonisolated static func runTmuxCreate(tmux: String, name: String, directory: String?) -> String? {
+    let directory = directory ?? FileManager.default.homeDirectoryForCurrentUser.path
     let process = Process()
     process.executableURL = URL(fileURLWithPath: tmux)
-    process.arguments = ["new-session", "-d", "-s", name, "-c", home, "exec /bin/zsh -l -i"]
+    process.arguments = ["new-session", "-d", "-s", name, "-c", directory, "exec /bin/zsh -l -i"]
     let err = Pipe()
     process.standardOutput = Pipe()
     process.standardError = err

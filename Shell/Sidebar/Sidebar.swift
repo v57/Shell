@@ -57,7 +57,7 @@ struct SidebarView: View {
     } bottomBar: {
       #if os(macOS) || os(Windows)
       if FeatureFlagsStore.shared.isEnabled(.sessions) {
-        Button("New Terminal", systemImage: "terminal") { model.addLocalTerminal() }
+        Button("New Terminal", systemImage: "terminal") { model.newTerminal() }
           .help("New terminal")
       }
       #else

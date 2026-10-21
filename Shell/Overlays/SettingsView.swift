@@ -4,7 +4,8 @@ import SwiftUI
 /// a separate window or a `.sheet`, so it appears/closes instantly over the
 /// main window.
 ///
-/// Hosts two cards:
+/// Hosts these cards:
+/// - **Sessions** (macOS) — how new terminals start (`SettingsSessionsCard`).
 /// - **Features** — the feature-flags panel (`FeatureSelectionView`).
 /// - **Actions** — the shell actions surfaced here so they're reachable on iOS
 ///   (macOS reaches the same actions through the Shell menu).
@@ -33,6 +34,11 @@ struct SettingsView: View {
 
       ScrollView {
         VStack(alignment: .leading, spacing: 20) {
+          #if os(macOS) || os(Windows)
+          SettingsCard(title: "Sessions", systemImage: "terminal") {
+            SettingsSessionsCard()
+          }
+          #endif
           SettingsCard(title: "Features", systemImage: "square.grid.2x2") {
             FeatureSelectionView()
           }
@@ -83,6 +89,37 @@ private struct SettingsCard<Content: View>: View {
     }
   }
 }
+
+#if os(macOS) || os(Windows)
+/// The "Sessions" card: whether new terminals start as persistent sessions.
+/// Persistent sessions are the Screen feature's, so the toggle is off and
+/// disabled while that feature is.
+private struct SettingsSessionsCard: View {
+  @Environment(AppModel.self) private var model
+  private var flags: FeatureFlagsStore { .shared }
+
+  var body: some View {
+    let available = flags.isEnabled(.sessions) && flags.isEnabled(.screen)
+    Toggle(isOn: Binding(
+      get: { available && model.alwaysPersistentSessions },
+      set: { model.alwaysPersistentSessions = $0 }
+    )) {
+      VStack(alignment: .leading, spacing: 2) {
+        Text("Always Start Persistent Sessions")
+        Text(available
+             ? "New terminals keep running after you close them; reopen them from the sidebar"
+             : "Turn on Sessions and Screen sessions under Features to use this")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    .toggleStyle(.switch)
+    .disabled(!available)
+    .padding(.vertical, 6)
+  }
+}
+#endif
 
 /// The "Actions" card: every shell action reachable on macOS through the Shell
 /// menu but with no dedicated control on iOS. Each row invokes the same

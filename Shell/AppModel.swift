@@ -167,6 +167,7 @@ final class AppModel {
   /// UserDefaults keys for the theme settings (non-sensitive UI prefs).
   private static let appearanceModeKey = "appearanceMode"
   private static let disableTerminalBackgroundsKey = "disableTerminalBackgrounds"
+  private static let alwaysPersistentSessionsKey = "alwaysPersistentSessions"
 
   /// Forced color scheme for the whole window (see `appearanceMode.colorScheme`).
   var appearanceMode: AppearanceMode {
@@ -177,6 +178,14 @@ final class AppModel {
   /// low-contrast foreground colors with the default text color.
   var disableTerminalBackgrounds: Bool {
     didSet { UserDefaults.standard.set(disableTerminalBackgrounds, forKey: Self.disableTerminalBackgroundsKey) }
+  }
+
+  /// When true, new local terminals (⌘N, ⌘T, New Terminal, the launch
+  /// terminal) open as persistent sessions (`session`, else tmux, else
+  /// screen) that keep running after their terminal closes. Needs the Screen
+  /// feature; without it terminals stay plain.
+  var alwaysPersistentSessions: Bool {
+    didSet { UserDefaults.standard.set(alwaysPersistentSessions, forKey: Self.alwaysPersistentSessionsKey) }
   }
 
   /// The Themes sheet (Shell menu: Themes… ⌘⇧H).
@@ -335,6 +344,7 @@ final class AppModel {
   private init() {
     appearanceMode = AppearanceMode(rawValue: UserDefaults.standard.string(forKey: Self.appearanceModeKey) ?? "") ?? .system
     disableTerminalBackgrounds = UserDefaults.standard.bool(forKey: Self.disableTerminalBackgroundsKey)
+    alwaysPersistentSessions = UserDefaults.standard.bool(forKey: Self.alwaysPersistentSessionsKey)
     // SSH hosts, database connections and device keys are the ones the v57 apps share through the vault
     // (../Vault), synced through iCloud and live across apps.
     connectionStore = SSHConfigStore()
@@ -374,7 +384,7 @@ final class AppModel {
     // Sessions is off (no shell may be spawned then). iOS has no local
     // terminals — it starts with just the sidebar (SSH + notes).
     if features.isEnabled(.sessions) {
-      _ = addLocalTerminal()
+      newTerminal()
     }
     #if os(macOS)
     // Files linked by a drop on Notes stay in the Text Files section.
@@ -733,6 +743,17 @@ final class AppModel {
   // MARK: - Sessions
   
   #if os(macOS) || os(Windows)
+  /// A new terminal the user asked for: a persistent session when
+  /// `alwaysPersistentSessions` is on (and the Screen feature is), else a
+  /// plain local terminal. `directory` starts its shell there.
+  func newTerminal(in directory: String? = nil) {
+    if alwaysPersistentSessions && features.isEnabled(.screen) {
+      createScreenSession(in: directory)
+    } else {
+      addLocalTerminal(in: directory)
+    }
+  }
+
   @discardableResult
   func addLocalTerminal(in directory: String? = nil) -> TerminalSession {
     if historyMode {
@@ -751,19 +772,12 @@ final class AppModel {
   #endif
 
   #if os(macOS) || os(Windows)
-  /// ⌘T: opens a new local terminal whose shell starts in the SAME
+  /// ⌘T: opens a new terminal (`newTerminal`) whose shell starts in the SAME
   /// directory as the selected session's current working directory.
-  /// Falls back to a plain local terminal (home dir) when the selected
-  /// session has no local cwd (SSH/action/screen, or still starting).
-  @discardableResult
-  func openTerminalInSameDirectoryAsSelected() -> TerminalSession {
-    guard
-      let session = selectedSession,
-      let directory = session.currentDirectory?.path
-    else {
-      return addLocalTerminal()
-    }
-    return addLocalTerminal(in: directory)
+  /// Falls back to the home directory when the selected session has no
+  /// local cwd (SSH/action/screen, or still starting).
+  func openTerminalInSameDirectoryAsSelected() {
+    newTerminal(in: selectedSession?.currentDirectory?.path)
   }
   #endif
 
@@ -958,12 +972,13 @@ final class AppModel {
   #if os(macOS) || os(Windows)
   /// Opens a local terminal attached to an existing persistent session
   /// (`screen -x` for screen, `tmux attach` for tmux).
+  /// `directory` starts a `session` session that doesn't exist yet there.
   @discardableResult
-  func attach(toScreen info: ScreenSessionInfo) -> TerminalSession {
+  func attach(toScreen info: ScreenSessionInfo, startingIn directory: String? = nil) -> TerminalSession {
     // tmux attach when tmux is installed; otherwise screen -x (screen
     // ships with macOS). LocalPTYTransport.tmux is nil without tmux.
     let session: TerminalSession
-    if info.kind == .session, let transport = LocalPTYTransport.session(info.name) {
+    if info.kind == .session, let transport = LocalPTYTransport.session(info.name, in: directory) {
       // session-tool: `session <name>` is create-or-attach, so attaching
       // here both (re)attaches to a live session and creates a missing one.
       session = TerminalSession(session: transport)
@@ -1247,21 +1262,20 @@ final class AppModel {
   }
   
   /// Creates a new session in the same section as `session`: a local
-  /// terminal for local, a duplicate connection for SSH, a brand-new
-  /// persistent session for screen.
+  /// terminal for local (`newTerminal`), a duplicate connection for SSH, a
+  /// brand-new persistent session for screen.
   #if os(macOS) || os(Windows)
   @discardableResult
   func newSession(inSameSectionAs session: TerminalSession) -> TerminalSession {
     switch kind(of: session) {
-    case .local:
-      return addLocalTerminal()
+    case .local, .action:
+      newTerminal()
+      return sessions.last ?? session
     case .screen:
       createScreenSession()
       return sessions.last ?? session
     case .ssh(let config):
       return connect(to: config)
-    case .action:
-      return addLocalTerminal()
     case .web(let web):
       return openWebSession(web)
     case .database(let connection):
@@ -1291,12 +1305,12 @@ final class AppModel {
   /// ⌘N: new session in the same section as the current selection
   /// (new local terminal when nothing is selected).
   #if os(macOS) || os(Windows)
-  @discardableResult
-  func newSessionInSameSection() -> TerminalSession {
+  func newSessionInSameSection() {
     if let session = selectedSession {
-      return newSession(inSameSectionAs: session)
+      newSession(inSameSectionAs: session)
+    } else {
+      newTerminal()
     }
-    return addLocalTerminal()
   }
   #else
   @discardableResult
@@ -1521,12 +1535,12 @@ final class AppModel {
   }
   
   #if os(macOS) || os(Windows)
-  /// Creates a new persistent session (tmux when installed, else screen)
-  /// and immediately opens a terminal attached to it, so the new session
-  /// is usable at once.
-  func createScreenSession() {
-    screenMonitor.createSession { [weak self] info in
-      self?.attach(toScreen: info)
+  /// Creates a new persistent session (`session`, else tmux, else screen)
+  /// whose shell starts in `directory` (nil = home) and immediately opens a
+  /// terminal attached to it, so the new session is usable at once.
+  func createScreenSession(in directory: String? = nil) {
+    screenMonitor.createSession(in: directory) { [weak self] info in
+      self?.attach(toScreen: info, startingIn: directory)
     }
   }
 

@@ -420,7 +420,21 @@ public final class LocalPTYTransport: TerminalTransport {
     env.removeValue(forKey: "TERMINFO")
     env.removeValue(forKey: "TERMINFO_DIRS")
     env.removeValue(forKey: "TERMCAP")
+    env["PATH"] = Self.path(env["PATH"], adding: Self.sessionExecutablePath())
     return env
+  }
+
+  /// `path` with the folder of the `session` tool in front, so `session` runs in
+  /// every local terminal (and in the sessions its daemon starts) even when the
+  /// user's shell profile doesn't put that folder (usually ~/.local/bin) on PATH.
+  /// GUI launches inherit a minimal PATH; zsh's login profile keeps entries it
+  /// doesn't know (path_helper appends them after the system folders).
+  static func path(_ path: String?, adding executable: String?) -> String? {
+    guard let executable else { return path }
+    let folder = (executable as NSString).deletingLastPathComponent
+    guard let path, !path.isEmpty else { return "\(folder):/usr/bin:/bin:/usr/sbin:/sbin" }
+    if path.split(separator: ":").contains(Substring(folder)) { return path }
+    return "\(folder):\(path)"
   }
 }
 
@@ -491,9 +505,25 @@ public extension LocalPTYTransport {
   /// persistent-session backends. Use via `TerminalSession(session:
   /// .session(name))`. Spawned from PATH; managed-path resolution
   /// (SessionBinaryManager) is a separate card.
-  static func session(_ name: String) -> LocalPTYTransport? {
+  /// `directory` starts a NEW session's shell there (the daemon starts it in
+  /// its own directory otherwise); attaching to a live session ignores it.
+  static func session(_ name: String, in directory: String? = nil) -> LocalPTYTransport? {
     guard let executable = sessionExecutablePath() else { return nil }
-    return LocalPTYTransport(executable: executable, argv: ["session", name])
+    let command = directory.map(sessionShellCommand(in:)) ?? []
+    return LocalPTYTransport(executable: executable, argv: ["session", name] + command)
+  }
+
+  /// The command for `session <name> <cmd...>` that runs a login zsh in
+  /// `directory`. The daemon splits the command on whitespace, so it has none:
+  /// `${IFS}` separates the words and the directory goes through printf's
+  /// octal escapes. A directory that no longer exists leaves the shell in the
+  /// daemon's directory.
+  static func sessionShellCommand(in directory: String) -> [String] {
+    let plain = Set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/._-".utf8)
+    let escaped = directory.utf8.map { byte in
+      plain.contains(byte) ? String(UnicodeScalar(byte)) : String(format: "\\0%03o", byte)
+    }.joined()
+    return ["/bin/sh", "-c", "cd${IFS}\"$(printf${IFS}%b${IFS}'\(escaped)')\";exec${IFS}/bin/zsh${IFS}-l${IFS}-i"]
   }
 
   /// Resolves the `session` tool executable: common install locations first,
