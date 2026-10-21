@@ -16,7 +16,7 @@ import VaultKit
 @MainActor
 @Observable
 final class DatabaseConnectionStore {
-  /// Connections in sidebar order (engines Shell has; DuckDB stays in Database).
+  /// Connections in sidebar order.
   private(set) var all: [DatabaseConnection] = []
   /// The most recent persistence failure.
   var storageError: String?
@@ -127,7 +127,7 @@ final class DatabaseConnectionStore {
     let host = record.tunnelHost(in: hosts)
     var connection = DatabaseConnection(
       id: UUID(uuidString: record.id) ?? stableUUID(record.id), engine: engine, name: record.name,
-      host: engine == .sqlite ? record.filePath : record.host, port: UInt16(clamping: max(record.port, 0)),
+      host: engine.isFileBased ? record.filePath : record.host, port: UInt16(clamping: max(record.port, 0)),
       database: record.database.isEmpty ? nil : record.database, username: record.user.isEmpty ? nil : record.user,
       authSource: record.options["authSource"], directConnection: record.options["directConnection"] == "true",
       sshConfigID: host.map { UUID(uuidString: $0.id) ?? stableUUID($0.id) })
@@ -140,7 +140,7 @@ final class DatabaseConnectionStore {
   static func copy(_ connection: DatabaseConnection, into record: inout VaultDatabase, automaticHost: UUID?) {
     record.name = connection.name
     record.engine = connection.engine.rawValue
-    if connection.engine == .sqlite {
+    if connection.engine.isFileBased {
       record.filePath = connection.host
       record.host = ""
     } else {

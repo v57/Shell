@@ -184,9 +184,7 @@ private struct SSHConfigGroup: View {
     // grouped per host the same way web sessions are. Hidden when the database
     // feature is disabled; orphaned refs (a removed host) simply don't render.
     ForEach(databaseConnections) { connection in
-      DatabaseConnectionRow(connection: connection)
-        .kitRowIndent(1)
-        .kitContextMenu { DatabaseConnectionActions(connection: connection) { state.beginRenameDatabase($0) } }
+      DatabaseConnectionRow(connection: connection, state: state, level: 1)
     }
   }
 
@@ -210,9 +208,7 @@ private struct SSHConfigGroup: View {
         }
         if flags.isEnabled(.database) {
           Button("Database", systemImage: "cylinder.split.1x2") {
-            model.databasePresetSSHConfigID = config.id
-            model.editingDatabaseConnection = nil
-            model.showingNewDatabaseConnection = true
+            model.newDatabaseConnection(through: config)
           }
         }
         #if os(macOS) || os(Windows)
@@ -277,9 +273,7 @@ private struct SSHConfigRow: View {
             }
             if flags.isEnabled(.database) {
               Button("Database", systemImage: "cylinder.split.1x2") {
-                model.databasePresetSSHConfigID = config.id
-                model.editingDatabaseConnection = nil
-                model.showingNewDatabaseConnection = true
+                model.newDatabaseConnection(through: config)
               }
             }
           }

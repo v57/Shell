@@ -39,6 +39,8 @@ final class SidebarState {
   /// SHARED: database rows render in both the Local and the Remote section.
   var renamingDatabaseConnection: DatabaseConnection?
   var databaseRenameText = ""
+  /// The database connection whose Delete… awaits confirmation.
+  var deletingDatabaseConnection: DatabaseConnection?
 
   #if os(macOS) || os(Windows)
   /// Live CPU/GPU/wattage for the Local section header (macOS only — the reads
@@ -135,6 +137,16 @@ struct SidebarChrome: ViewModifier {
           onCancel: { state.renamingDatabaseConnection = nil }
         )
         .environment(model)
+      }
+      .kitConfirmation(
+        "Delete “\(state.deletingDatabaseConnection?.displayName ?? "")”?",
+        isPresented: Binding(
+          get: { state.deletingDatabaseConnection != nil }, set: { if !$0 { state.deletingDatabaseConnection = nil } }),
+        message: "This removes the saved connection, its password and its saved queries from every v57 app. The database itself isn't touched.",
+        systemImage: "trash", confirm: "Delete Connection"
+      ) {
+        if let connection = state.deletingDatabaseConnection { model.deleteDatabaseConnection(connection) }
+        state.deletingDatabaseConnection = nil
       }
       .alert("Authorized Keys", isPresented: Binding(
         get: { model.authorizedKeysError != nil },

@@ -15,9 +15,9 @@ let package = Package(
     platforms: [.macOS(.v14), .iOS(.v17)],
     products: [.library(name: "ShellKit", targets: ["ShellKit"]), .library(name: "ShellIntegrations", targets: ["ShellIntegrations"]), .library(name: "ShellMonitoring", targets: ["ShellMonitoring"]), .library(name: "ShellDatabaseEngines", targets: ["ShellDatabaseEngines"])],
     dependencies: [
-        // Database's pure-Swift engines (every engine but DuckDB is offered)
-        // and its libssh2 + mbedTLS build, which Shell links instead of its own
-        // (one copy per app: two would clash). Binary/SSH-libssh2/build-ssh.sh
+        // Database's interface and pure-Swift engines, and its libssh2 +
+        // mbedTLS build, which Shell links instead of its own (one copy per
+        // app: two would clash). Binary/SSH-libssh2/build-ssh.sh
         // still builds the libssh2 that Database's Scripts/build-libssh2.sh
         // repackages.
         v57("Database"),
@@ -62,14 +62,17 @@ let package = Package(
                 .swiftLanguageMode(.v5),
             ]
         ),
-        // The database engines for the sidebar's connections: Database's
-        // engine-neutral DatabaseKit (PostgreSQL, MySQL, MariaDB, SQL Server,
-        // SQLite, MongoDB, Redis, Cassandra, ScyllaDB), all pure Swift on macOS
-        // and iOS.
+        // The sidebar's database connections: Database's interface
+        // (DatabaseUI: the tree, browsers, query tabs, pipelines, inspector and
+        // connection sheets) on its engine-neutral DatabaseKit (PostgreSQL,
+        // MySQL, MariaDB, SQL Server, SQLite, DuckDB, MongoDB, Redis,
+        // Cassandra, ScyllaDB), all pure Swift on macOS and iOS but DuckDB
+        // (an optional download on the Mac).
         .target(
             name: "ShellDatabaseEngines",
             dependencies: [
                 .product(name: "DatabaseKit", package: "Database"),
+                .product(name: "DatabaseUI", package: "Database"),
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v5),

@@ -1,6 +1,7 @@
 import ComponentKit
 import Foundation
 import SwiftUI
+import ShellDatabaseEngines
 import ShellKit
 import ShellIntegrations
 import ShellMonitoring
@@ -63,6 +64,8 @@ struct SidebarView: View {
       Button("Settings", systemImage: "gearshape") { model.showingSettings = true }
       #endif
     }
+    // The rows of a database's tree select as the sidebar's own items.
+    .environment(\.databaseSidebarTag) { AnyHashable(AppModel.Selection.databaseItem($0)) }
     // Rows coming, going and reordering slide rather than jump (the kit stills
     // this in an inactive window and under Reduce Motion).
     .animation(.kit, value: rowIdentities)
@@ -345,55 +348,83 @@ struct SessionRow: View {
 }
 
 /// A sidebar row for a saved database connection: engine icon, display name,
-/// and host:port (or file path) subtitle, plus an "open" dot when the browser
-/// is live. Clicking the row opens/focuses the database browser.
+/// and host:port (or file path) subtitle, plus an "open" dot when it is open.
+/// Clicking the row opens it (its overview in the detail pane); its chevron
+/// connects and shows Database's tree under it: databases, schemas, tables,
+/// collections and key spaces, then the saved queries and open query tabs.
 struct DatabaseConnectionRow: View {
   @Environment(AppModel.self) private var model
   let connection: DatabaseConnection
+  /// The sidebar's shared state, for the menu's Rename… and Delete….
+  let state: SidebarState
+  /// The row's indent: 1 under a Remote host.
+  var level = 0
+
+  private var live: LiveConnection? { model.databases.live[connection.id] }
+
+  private var isExpanded: Binding<Bool> {
+    Binding(
+      get: { live?.expanded.contains(LiveConnection.rootID) ?? false },
+      set: { open in
+        withKitAnimation {
+          if open {
+            model.openOrFocusDatabaseConnection(connection, selects: false)
+          } else {
+            live?.expanded.remove(LiveConnection.rootID)
+          }
+        }
+      })
+  }
 
   var body: some View {
     let isOpen = model.liveDatabaseSession(for: connection) != nil
-    SidebarRow(
-      value: model.rowSelection(for: connection), connection.displayName, subtitle: connection.subtitle,
-      systemImage: connection.engine.systemImage
-    ) {
-      if isOpen {
-        StatusDot(hue: .green)
-          .help("Open")
-          .transition(.scale.combined(with: .opacity))
+    // One view with its tree, so the row's menu, its drag and its indent stay the row's.
+    VStack(alignment: .leading, spacing: 2) {
+      SidebarRow(
+        value: model.rowSelection(for: connection), connection.displayName, subtitle: connection.subtitle,
+        systemImage: connection.engine.systemImage, status: status, isExpanded: isExpanded
+      ) {
+        if isOpen {
+          StatusDot(hue: .green)
+            .help("Open")
+            .transition(.scale.combined(with: .opacity))
+        }
+      }
+      .kitRowIndent(level)
+      .kitContextMenu { DatabaseConnectionActions(connection: connection, state: state) }
+      .animation(.kit, value: isOpen)
+      if isExpanded.wrappedValue, let live {
+        ConnectionContents(connection: live, window: model.databaseWindow, level: level + 1)
       }
     }
-    .animation(.kit, value: isOpen)
+  }
+
+  /// The arc while it connects, red once it failed.
+  private var status: WorkStatus {
+    switch live?.status {
+    case .connecting: .working
+    case .failed(let message): .failed(message)
+    case .idle, .connected, nil: .idle
+    }
   }
 }
 
 /// The context menu for a database connection row, shared by the Local and
-/// Remote (per-host) sections so both offer the same actions. Connect and
-/// Disconnect flip on whether the engine is live; Rename opens the rename
-/// sheet; Duplicate clones the row and its Keychain credential (fresh id);
-/// Edit opens the prefilled sheet; Delete closes the browser, drops the
-/// credential, then the record.
+/// Remote (per-host) sections: Database's own (New Query, Refresh,
+/// Connect/Disconnect, Edit, Duplicate, Copy Link, Delete) with Shell's
+/// Rename.
 struct DatabaseConnectionActions: View {
   @Environment(AppModel.self) private var model
   let connection: DatabaseConnection
-  /// Called when the user picks Rename… so the parent view can open the
-  /// rename sheet pre-filled with this connection's display name.
-  let onRename: (DatabaseConnection) -> Void
+  let state: SidebarState
 
   var body: some View {
-    if model.liveDatabaseSession(for: connection) != nil {
-      Button("Disconnect") { model.closeDatabaseSession(connection) }
-    } else {
-      Button("Connect") { model.openOrFocusDatabaseConnection(connection) }
+    ConnectionMenu(
+      connection: model.databases.connection(for: connection.id), window: model.databaseWindow,
+      onDelete: { state.deletingDatabaseConnection = connection }
+    ) {
+      Button("Rename…", systemImage: "character.cursor.ibeam") { state.beginRenameDatabase(connection) }
     }
-    Button("Rename…") { onRename(connection) }
-    Button("Duplicate") { model.duplicateDatabaseConnection(connection) }
-    Button("Edit…") {
-      model.editingDatabaseConnection = connection
-      model.showingNewDatabaseConnection = true
-    }
-    Divider()
-    Button("Delete", role: .destructive) { model.deleteDatabaseConnection(connection) }
   }
 }
 

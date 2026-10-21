@@ -1,5 +1,6 @@
 import ComponentKit
 import SwiftUI
+import ShellDatabaseEngines
 import ShellKit
 import ShellIntegrations
 import VaultKit
@@ -55,6 +56,12 @@ struct ShellApp: App {
     #if os(macOS) || os(Windows)
     .commands {
       ShellCommands()
+      // Database's Data menu (Run, Query Editor, Review Changes, Inspector,
+      // Undo Last Save), for the database the window shows; Shell keeps ⌘N,
+      // ⌘T and ⌘R.
+      if FeatureFlagsStore.shared.isEnabled(.database) {
+        DatabaseCommands(includesFileItems: false)
+      }
       UpdaterCommands(updater: updater)
     }
     #endif

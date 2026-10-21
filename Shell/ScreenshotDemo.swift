@@ -1,4 +1,5 @@
 import Foundation
+import ShellDatabaseEngines
 import ShellKit
 
 /// Debug builds: `--screenshot-demo` runs Shell on made-up hosts, databases and notes for the screenshots
@@ -13,6 +14,11 @@ import ShellKit
 ///   --actions / --settings    opens that overlay
 ///   --new-database            opens the New Database Connection sheet
 ///   --run-action <name>       runs that demo action and shows its run
+///   --database-link <link>    adds a database connection from a link (`sqlite:///path/shop.db`, a server's URL)
+///
+/// Database's own arguments then open its pages, as in the Database app (DatabaseUI's `DebugDriver`): `--select
+/// "Name/main/orders"` (a path of tree titles), `--new-query "SELECT 1" [--run]`, `--view cards|json`, `--filter`,
+/// `--mode aggregate`, `--select-row N`, `--no-inspector`, `--edit-connection "Name"` and the rest.
 ///
 /// A capture takes every scene in one launch: the next scene's arguments arrive through `Screenshots` and `open`
 /// shows them in place, after undoing what the scene before left open.
@@ -89,6 +95,12 @@ enum ScreenshotDemo {
     for (name, text) in [("Deploy checklist", deployChecklist), ("Release 2.0", releaseNotes)] {
       noteIDs[name] = model.notes.addNote(named: name, text: text, encrypted: false).id
     }
+
+    if let link = value("--database-link"), let parsed = ConnectionLink.parse(link) {
+      var profile = parsed.profile
+      if profile.name.isEmpty { profile.name = profile.displayName }
+      model.databases.save(profile, password: parsed.password, sshPassword: nil)
+    }
   }
 
   /// A scene, from its arguments: the first one's at launch, the later ones' in place. Closes what the scene before
@@ -106,8 +118,8 @@ enum ScreenshotDemo {
     model.showingThemes = false
     model.showingCommandInsert = false
     model.showingNewConnection = false
-    model.showingNewDatabaseConnection = false
-    model.editingDatabaseConnection = nil
+    model.databaseWindow.showsNewConnection = false
+    model.databaseWindow.editingProfileID = nil
     let terminal = model.sessions.first
     if ranCommand, let terminal {
       terminal.clearStdout()
@@ -128,13 +140,18 @@ enum ScreenshotDemo {
     }
     if flag("--actions", in: arguments) { model.showingActions = true }
     if flag("--settings", in: arguments) { model.showingSettings = true }
-    if flag("--new-database", in: arguments) { model.showingNewDatabaseConnection = true }
+    if flag("--new-database", in: arguments) { model.newDatabaseConnection() }
     if let name = value("--run-action", in: arguments), let action = model.actions.all.first(where: { $0.name == name }) {
       model.runAction(action)
       // The run's session, once it has started and printed something.
       try? await Task.sleep(for: .seconds(3))
       if let run = model.actionSessions.last { model.selection = .session(run.id) }
     }
+    #if DEBUG
+      // Database's pages, from its own arguments.
+      LaunchOptions.arguments = arguments
+      await DebugDriver.run(model.databaseWindow)
+    #endif
   }
 
   /// Until the terminal shows a prompt on its last line (and `condition` holds for its text), with no new output for

@@ -1,5 +1,6 @@
 import ComponentKit
 import SwiftUI
+import ShellDatabaseEngines
 import ShellKit
 #if os(macOS)
 import AppKit
@@ -41,8 +42,8 @@ struct DetachDetailView: View {
         #endif
       }
       // The kit's toolbar, as in the main window: the item's title and tools,
-      // and Always on Top on the Mac.
-      .kitToolbar(title.title, title: { title.view }, tools: { tools })
+      // and Always on Top on the Mac. Database's pages have their own.
+      .modifier(DetachToolbar(isOn: !isDatabase, title: title, tools: tools))
       .onDisappear {
         // Closing the detached window/scene returns the item to the main
         // window (and deletes it if it was an empty note). Only runs on a
@@ -66,19 +67,10 @@ struct DetachDetailView: View {
           WebSessionDetailView(web: web, tunnel: model.webSessionRuntime(for: web))
             .id(session.id)
         } else if case .database(let connection) = kind {
-          // A database session renders the per-engine documents/tables browser.
-          // The live engine lifecycle is owned by AppModel.
-          if let dbSession = model.databaseSession(for: connection) {
-            DatabaseBrowserView(session: dbSession)
-              .id(session.id)
-          } else {
-            ContentUnavailableView(
-              "Database Not Open",
-              systemImage: "server.rack",
-              description: Text("The database connection is not open.")
-            )
+          // A database session shows its connection in Database's interface,
+          // with its tree in the window's own sidebar.
+          DetachedDatabaseView(connection: connection)
             .id(session.id)
-          }
         } else if case .action = kind {
           ActionRunsView(session: session, showsAll: false, showsTerminal: $actionShowsTerminal)
             .id(session.id)
@@ -96,6 +88,13 @@ struct DetachDetailView: View {
         systemImage: "rectangle.dashed", title: "Item Closed",
         message: "This session or note is no longer available.")
     }
+  }
+
+  /// Whether the window shows a database (its pages bring their own toolbar).
+  private var isDatabase: Bool {
+    guard let session = model.sessions.first(where: { $0.id == itemID }) else { return false }
+    if case .database = model.kind(of: session) { return true }
+    return false
   }
 
   /// The item's title in the kit's toolbar.
@@ -193,3 +192,72 @@ private struct DetachWindowAccessor: NSViewRepresentable {
   }
 }
 #endif
+
+/// The window's kit toolbar while `isOn`.
+private struct DetachToolbar: ViewModifier {
+  let isOn: Bool
+  let title: PageTitle
+  let tools: [ToolbarSlot]
+
+  func body(content: Content) -> some View {
+    if isOn {
+      content.kitToolbar(title.title, title: { title.view }, tools: { tools })
+    } else {
+      content
+    }
+  }
+}
+
+/// A detached database: its tree in the window's own sidebar, beside Database's page for the row picked in it, with
+/// a navigation of its own.
+private struct DetachedDatabaseView: View {
+  @Environment(AppModel.self) private var model
+  let connection: DatabaseConnection
+  @State private var window: WindowModel?
+
+  var body: some View {
+    Group {
+      if let window {
+        DetachedDatabaseSplit(connection: connection, window: window)
+      } else {
+        Color.clear
+      }
+    }
+    .onAppear {
+      guard window == nil else { return }
+      let navigation = WindowModel(app: model.databases)
+      navigation.selection = .connection(connection.id)
+      window = navigation
+    }
+  }
+}
+
+private struct DetachedDatabaseSplit: View {
+  @Environment(AppModel.self) private var model
+  let connection: DatabaseConnection
+  @Bindable var window: WindowModel
+  @State private var columnVisibility = NavigationSplitViewVisibility.all
+
+  var body: some View {
+    let live = model.databases.connection(for: connection.id)
+    NavigationSplitView(columnVisibility: $columnVisibility) {
+      KitSidebar(selection: $window.selection) {
+        KitSection(connection.displayName, meta: [connection.subtitle], systemImage: connection.engine.systemImage) {
+          SidebarRow(value: SidebarItem.connection(connection.id), "Overview", systemImage: "info.circle")
+            .disclosureSlot()
+          ConnectionContents(connection: live, window: window, level: 0)
+        } accessory: {
+          EmptyView()
+        }
+      }
+      .toolbar(removing: .sidebarToggle)
+      .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 360)
+    } detail: {
+      DetailView(window: window)
+        .kitSidebarToggle(columnVisibility: $columnVisibility)
+    }
+    .focusedSceneValue(\.databaseWindow, window)
+    .databaseSheets(window)
+    .environment(model.databases)
+  }
+}

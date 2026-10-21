@@ -14,8 +14,10 @@ import Foundation
 import Observation
 import SwiftData
 import SwiftUI
+import ShellDatabaseEngines
 import ShellKit
 import ShellIntegrations
+import VaultKit
 
 /// Application-wide state: the list of terminal sessions, the sidebar
 /// selection, and the persisted SSH connection store.
@@ -56,6 +58,10 @@ final class AppModel {
     /// A saved database connection row: activating it opens the browser, or
     /// focuses the already-open one.
     case database(UUID)
+    /// A row of an open database connection's tree (a table, a collection, a
+    /// saved query, a query tab): the detail pane shows it in Database's
+    /// interface (`databaseWindow`).
+    case databaseItem(SidebarItem)
     /// A note in the main window's editor.
     case note(UUID)
     /// An archived history session in the history viewer.
@@ -71,6 +77,8 @@ final class AppModel {
       case .session(let id), .ssh(let id), .screen(let id), .web(let id),
            .database(let id), .note(let id), .history(let id), .openedFile(let id):
         return id
+      case .databaseItem(let item):
+        return item.connectionID
       }
     }
   }
@@ -87,13 +95,6 @@ final class AppModel {
   var showingNewConnection = false
   /// The web session being edited in the sheet (nil = creating a new one).
   var editingWebSession: WebSession?
-  /// The New Database Connection sheet (Database section header "+").
-  var showingNewDatabaseConnection = false
-  /// The database connection being edited in the sheet (nil = creating).
-  var editingDatabaseConnection: DatabaseConnection?
-  /// The SSH tunnel to preset in the New Database Connection sheet when it is
-  /// opened from a connected Remote host's per-config + menu (nil = no tunnel).
-  var databasePresetSSHConfigID: UUID?
   var publicKeyError: String?
   
   #if os(macOS) || os(Windows)
@@ -311,9 +312,15 @@ final class AppModel {
   /// accessor so SidebarView re-renders on save/reload.
   private let databaseStore: DatabaseConnectionStore
   var databaseConnections: [DatabaseConnection] { databaseStore.all }
-  /// Live engine sessions keyed by database-connection id. Created on open,
-  /// torn down on close/delete. Backs the DatabaseBrowserView.
-  private(set) var databaseSessions: [UUID: DatabaseSession] = [:]
+  /// Database's interface for those connections (DatabaseUI): the live
+  /// connections and their trees, browsers and query tabs, saved queries and
+  /// the connection sheets. Their SSH tunnels go through Shell's own logins
+  /// (`DatabaseTunnels`).
+  let databases: DatabaseModel
+  /// The main window's database navigation: the connection, table or query
+  /// its detail pane shows (`Selection.databaseItem`), its sheets and its
+  /// inspector.
+  let databaseWindow: WindowModel
 
   /// The iCloud registry of every device's public key (this device
   /// publishes on launch; other devices' keys power the authorized-keys
@@ -333,6 +340,14 @@ final class AppModel {
     connectionStore = SSHConfigStore()
     deviceKeys = DeviceKeyStore()
     databaseStore = DatabaseConnectionStore()
+    // Saved queries and the optional DuckDB library live with Shell's data.
+    databases = DatabaseModel(
+      folder: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent(Bundle.main.bundleIdentifier ?? "Shell", isDirectory: true)
+        .appendingPathComponent("Database", isDirectory: true),
+      vault: .shared)
+    databaseWindow = WindowModel(app: databases)
+    DatabaseUI.accent = .accentColor
     // Notes gating must not read `self` here (stored properties are still
     // being initialized); read the flag first, wire `notes`, then publish it.
     // Notes are the ones the v57 apps share (Markdown keeps them as files).
@@ -342,6 +357,7 @@ final class AppModel {
     // Hosts and connections saved by builds before the vault move into it once (never into the
     // screenshot demo's store).
     if !ScreenshotDemo.isOn { LegacyImport.run(configs: connectionStore, databases: databaseStore) }
+    configureDatabases()
     // Publish this device's identity key to iCloud (no-op when the Secure
     // Enclave key is unreachable, e.g. locked screen — retried when the
     // authorized-keys panel opens). Part of the Authorized Keys feature.
@@ -446,8 +462,19 @@ final class AppModel {
   /// navigation and the action runner. Answers from the selection's case
   /// instead of scanning every collection for the id.
   var selectedSession: TerminalSession? {
-    guard case .session(let id) = selection else { return nil }
-    return session(id)
+    switch selection {
+    case .session(let id):
+      return session(id)
+    case .databaseItem(let item):
+      // A table or query of an open database is part of its session (⌘W
+      // closes the connection, ⌘N opens it).
+      return sessions.first { session in
+        if case .database(let open) = kind(of: session) { return open.id == item.connectionID }
+        return false
+      }
+    default:
+      return nil
+    }
   }
 
   /// The note currently focused in the main view, if any.
@@ -466,7 +493,14 @@ final class AppModel {
   /// screen lists in turn to discover which kind of row had been clicked.)
   func activate(_ selection: Selection) {
     switch selection {
-    case .session, .note, .history, .openedFile:
+    case .session(let id):
+      // An open database shows its connection's overview.
+      if let session = session(id), case .database(let connection) = kind(of: session) {
+        showDatabaseItem(.connection(connection.id))
+      }
+    case .databaseItem(let item):
+      showDatabaseItem(item)
+    case .note, .history, .openedFile:
       break
     case .ssh(let id):
       if let config = connections.first(where: { $0.id == id }) {
@@ -1149,15 +1183,19 @@ final class AppModel {
       webSessionRuntimes.removeValue(forKey: web.id)?.stop()
     }
     // Tear down a database session's engine lifecycle on close.
+    var databaseID: UUID?
     if let session = sessions.first(where: { $0.id == id }),
        case .database(let connection) = kind(of: session) {
+      databaseID = connection.id
       disconnectDatabaseSession(connection)
     }
     sessions.first(where: { $0.id == id })?.close()
     sessions.removeAll { $0.id == id }
     sessionKinds.removeValue(forKey: id)
     sessionCommands.removeValue(forKey: id)
-    if selection == .session(id) {
+    let showsClosedDatabase: Bool =
+      if case .databaseItem(let item) = selection { item.connectionID == databaseID } else { false }
+    if selection == .session(id) || showsClosedDatabase {
       selection = sessions.last.map { .session($0.id) }
     }
   }
@@ -1562,79 +1600,124 @@ final class AppModel {
 
   // MARK: - Database connections
 
-  /// Persists a database connection (creating or updating the record) and,
-  /// when a non-nil `password` is passed, writes the credential to the
-  /// Keychain. Does not open a session.
-  func saveDatabaseConnection(_ connection: DatabaseConnection, password: String? = nil) {
-    databaseStore.save(connection, password: password)
+  /// Hooks Database's interface up to Shell: tunnels through Shell's own SSH
+  /// logins, the tree's selection into the sidebar's, and a connection
+  /// closed from its menu into its session.
+  private func configureDatabases() {
+    databases.opener = { [unowned self] profile, credentials, tunnelClosed in
+      try await DatabaseTunnels.open(
+        profile, credentials: credentials, configs: connections, hosts: databases.vault.hosts,
+        tunnelClosed: tunnelClosed)
+    }
+    databaseWindow.onSelect = { [weak self] item in
+      if let item { self?.databaseWindowSelected(item) }
+    }
+    databases.onDisconnect = { [weak self] id in
+      guard let self else { return }
+      if let session = sessions.first(where: { session in
+        if case .database(let open) = self.kind(of: session) { return open.id == id }
+        return false
+      }) {
+        removeSession(session.id)
+      }
+      // A connection opened again starts from its overview.
+      if databaseWindow.selection?.connectionID == id { databaseWindow.selection = nil }
+    }
   }
 
-  /// Deletes a saved database connection: closes any open browser session,
-  /// removes the Keychain credential, then removes the record.
+  /// Shows a tree row (or a connection's overview) in the detail pane.
+  private func showDatabaseItem(_ item: SidebarItem) {
+    if case .connection = item {} else if let connection = findDatabaseConnection(item.connectionID) {
+      openOrFocusDatabaseConnection(connection, selects: false)
+    }
+    if databaseWindow.selection != item { databaseWindow.selection = item }
+  }
+
+  /// Follows a selection made inside Database's interface (a new query tab, a
+  /// foreign key's table, Connect in a connection's menu) in the sidebar.
+  private func databaseWindowSelected(_ item: SidebarItem) {
+    let target: Selection
+    if case .connection(let id) = item {
+      guard let connection = findDatabaseConnection(id) else { return }
+      target = .session(openOrFocusDatabaseConnection(connection, selects: false).id)
+    } else {
+      if let connection = findDatabaseConnection(item.connectionID) {
+        openOrFocusDatabaseConnection(connection, selects: false)
+      }
+      target = .databaseItem(item)
+    }
+    if selection != target { selection = target }
+  }
+
+  /// The saved connection with `id`.
+  func databaseConnection(_ id: UUID) -> DatabaseConnection? {
+    databaseConnections.first { $0.id == id }
+  }
+
+  /// The saved connection with `id`, re-reading the shared records once for
+  /// one the sheet has just added (the vault's change notice is still on its
+  /// way). Not for views: the re-read changes the list.
+  private func findDatabaseConnection(_ id: UUID) -> DatabaseConnection? {
+    if let connection = databaseConnection(id) { return connection }
+    databaseStore.refreshOnActivation()
+    return databaseConnection(id)
+  }
+
+  /// The New Connection sheet of Database's interface, going through `config`
+  /// when given (a host's Database item).
+  func newDatabaseConnection(through config: SSHConfig? = nil) {
+    let host = config.flatMap { config in
+      databases.vault.hosts.first { (UUID(uuidString: $0.id) ?? stableUUID($0.id)) == config.id }
+    }
+    databaseWindow.newConnection(through: host)
+  }
+
+  /// The Edit Connection sheet for a saved connection.
+  func editDatabaseConnection(_ connection: DatabaseConnection) {
+    databaseWindow.editingProfileID = connection.id
+  }
+
+  /// Deletes a saved database connection: closes it, then removes the record,
+  /// its password and its saved queries.
   func deleteDatabaseConnection(_ connection: DatabaseConnection) {
-    disconnectDatabaseSession(connection)
     if let session = liveDatabaseSession(for: connection) {
       removeSession(session.id)
     }
-    databaseStore.remove(connection.id)
-  }
-
-  /// Persists a database connection edit in place (same id) and, when a
-  /// browser is currently open for it, reconnects so the live view reflects
-  /// the new settings.
-  func updateDatabaseConnection(_ connection: DatabaseConnection, password: String? = nil) {
-    databaseStore.save(connection, password: password)
-    if let dbSession = databaseSessions[connection.id] {
-      // The old connection reference is stale; swap it and reconnect.
-      databaseSessions.removeValue(forKey: connection.id)
-      Task { @MainActor in
-        await dbSession.disconnect()
-        let fresh = DatabaseSession(connection: connection, sshConfigStore: connectionStore)
-        databaseSessions[connection.id] = fresh
-        await fresh.connect(password: databaseStore.password(for: connection))
-      }
-    }
+    databases.delete(connection.id)
   }
 
   /// Renames a saved database connection in place (same id, so the sidebar row
-  /// and any open browser session keep referring to the same connection), then
-  /// persists via `databaseStore.save`. Empty/whitespace-only input resets the
-  /// name to the engine display name, matching the displayName fallback.
+  /// and an open connection keep referring to it). Empty or whitespace-only
+  /// input resets the name to the engine display name, matching the
+  /// displayName fallback.
   func renameDatabaseConnection(_ connection: DatabaseConnection, to name: String) {
-    var updated = connection
     let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-    updated.name = trimmed.isEmpty ? updated.engine.displayName : trimmed
-    databaseStore.save(updated)
+    databases.rename(connection.id, to: trimmed.isEmpty ? connection.engine.displayName : trimmed)
   }
 
-  /// Opens a saved database connection (or focuses its already-open browser).
-  /// Mirrors `openOrFocusWebSession`: create a live session backed by the
-  /// inert transport, then connect the engine.
+  /// Opens a saved database connection (or focuses the open one): a live
+  /// session backed by the inert transport stands for it in the sidebar, and
+  /// Database's interface connects. `selects: false` opens it without
+  /// leaving the current page (expanding its row, picking one of its tables).
   @discardableResult
-  func openOrFocusDatabaseConnection(_ connection: DatabaseConnection, password: String? = nil)
-    -> TerminalSession
-  {
+  func openOrFocusDatabaseConnection(_ connection: DatabaseConnection, selects: Bool = true) -> TerminalSession {
     if let live = liveDatabaseSession(for: connection) {
-      selection = .session(live.id)
+      if selects { selection = .session(live.id) }
       return live
     }
-    // Load the persisted credential when the caller didn't supply one.
-    let password = password ?? databaseStore.password(for: connection)
-    let dbSession = DatabaseSession(connection: connection, sshConfigStore: connectionStore)
     let session = TerminalSession(transport: DatabaseTransport())
     sessionKinds[session.id] = .database(connection)
     sessions.append(session)
-    selection = .session(session.id)
-    databaseSessions[connection.id] = dbSession
-    Task { @MainActor in
-      await dbSession.connect(password: password)
-    }
+    if selects { selection = .session(session.id) }
+    let live = databases.connection(for: connection.id)
+    live.expanded.insert(LiveConnection.rootID)
+    Task { @MainActor in await live.connect() }
     return session
   }
 
-  /// The live terminal session currently rendering `connection`, if any —
+  /// The live terminal session standing for `connection`, if it is open —
   /// lets the sidebar row show an open dot and makes Open focus the existing
-  /// browser instead of launching a duplicate (same convention as web rows).
+  /// connection instead of launching a duplicate (same convention as web rows).
   func liveDatabaseSession(for connection: DatabaseConnection) -> TerminalSession? {
     sessions.first { session in
       if case .database(let open) = kind(of: session) { return open.id == connection.id }
@@ -1642,37 +1725,26 @@ final class AppModel {
     }
   }
 
-  /// The engine session backing `connection`, if it is open.
-  func databaseSession(for connection: DatabaseConnection) -> DatabaseSession? {
-    databaseSessions[connection.id]
-  }
-
-  /// The saved Keychain password for a connection (nil when unset), for
-  /// pre-filling the edit form.
-  func passwordForDatabase(_ connection: DatabaseConnection) -> String? {
-    databaseStore.password(for: connection)
-  }
-
-  /// Disconnects the engine lifecycle for `connection` (if open), keeping the
-  /// saved row and any terminal session so the browser shows a disconnected
-  /// state rather than vanishing.
-  func disconnectDatabase(_ connection: DatabaseConnection) {
-    disconnectDatabaseSession(connection)
+  /// Whether the open connection `id` lives in its own detached window.
+  func isDatabaseDetached(_ id: UUID) -> Bool {
+    guard let connection = databaseConnection(id), let session = liveDatabaseSession(for: connection) else {
+      return false
+    }
+    return isDetached(session.id)
   }
 
   /// Closes + removes a database session (used by delete and by the sidebar
   /// close affordance). Keeps the saved row intact.
   func closeDatabaseSession(_ connection: DatabaseConnection) {
-    disconnectDatabaseSession(connection)
     if let session = liveDatabaseSession(for: connection) {
       removeSession(session.id)
     }
   }
 
-  /// Tears down the engine connection and its runtime entry.
+  /// Closes the engine connection: its tree, browsers and query tabs go with it.
   private func disconnectDatabaseSession(_ connection: DatabaseConnection) {
-    guard let session = databaseSessions.removeValue(forKey: connection.id) else { return }
-    Task { @MainActor in await session.disconnect() }
+    if databaseWindow.selection?.connectionID == connection.id { databaseWindow.selection = nil }
+    Task { @MainActor in await databases.disconnect(connection.id) }
   }
 
   /// Reorders the sidebar's database section (drag-to-reorder).
@@ -1682,16 +1754,15 @@ final class AppModel {
     databaseStore.reorder(reordered)
   }
 
-  /// Duplicates a database connection: a brand-new record (fresh id) copying
-  /// every field plus the Keychain credential from the source, so the copy is
-  /// independently usable. The displayed name gets a " copy" suffix (only when
-  /// a name was set) so the two rows are distinguishable in the sidebar.
+  /// Duplicates a database connection: a new record copying every field and
+  /// the saved passwords, named "<name> Copy".
   func duplicateDatabaseConnection(_ source: DatabaseConnection) {
-    var copy = source
-    copy.id = UUID()
-    if !source.name.isEmpty { copy.name = "\(source.name) copy" }
-    let password = databaseStore.password(for: source)
-    databaseStore.save(copy, password: password)
+    databases.duplicate(source.id)
+  }
+
+  /// Saves a database connection without opening it (the screenshot demo's).
+  func saveDatabaseConnection(_ connection: DatabaseConnection, password: String? = nil) {
+    databaseStore.save(connection, password: password)
   }
 
   // MARK: - Public keys

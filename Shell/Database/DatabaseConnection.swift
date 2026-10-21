@@ -2,8 +2,8 @@ import Foundation
 import ShellDatabaseEngines
 import ShellKit
 
-/// Which database engine a connection talks to: every engine Database's libraries have but DuckDB
-/// (DatabaseKit, through ShellDatabaseEngines). Raw values are the shared records' engine names
+/// Which database engine a connection talks to: every engine Database's libraries have (DatabaseKit, through
+/// ShellDatabaseEngines). Raw values are the shared records' engine names
 /// (`VaultDatabase.Engine`), so Database read the same connections.
 enum DatabaseEngine: String, Codable, CaseIterable, Identifiable {
   case postgres
@@ -11,6 +11,7 @@ enum DatabaseEngine: String, Codable, CaseIterable, Identifiable {
   case mariadb
   case sqlserver
   case sqlite
+  case duckdb
   case mongodb
   case redis
   case cassandra
@@ -36,12 +37,13 @@ enum DatabaseEngine: String, Codable, CaseIterable, Identifiable {
     case .sqlserver: return "server.rack"
     case .redis: return "bolt.horizontal.fill"
     case .sqlite: return "internaldrive"
+    case .duckdb: return "cube"
     case .cassandra, .scylla: return "circle.hexagongrid"
     }
   }
 
-  /// Every engine is pure Swift and runs on macOS and iOS.
-  var isAvailable: Bool { true }
+  /// Whether the database is a file (SQLite, DuckDB): its path is the connection's `host`, and it has no server.
+  var isFileBased: Bool { kind.isFileBased }
 }
 
 /// A saved database connection. Pure value type: `Codable` (persistable,
@@ -57,9 +59,9 @@ struct DatabaseConnection: Identifiable, Codable, Hashable {
   var id: UUID
   var engine: DatabaseEngine
   var name: String
-  /// Server host, or the SQLite file path (file databases have no server).
+  /// Server host, or the SQLite or DuckDB file path (file databases have no server).
   var host: String
-  /// TCP port (0 for SQLite).
+  /// TCP port (0 for file databases).
   var port: UInt16
   /// Database preselected after connect. For Redis this is the logical
   /// database index as a string ("0"…"15").
@@ -74,10 +76,10 @@ struct DatabaseConnection: Identifiable, Codable, Hashable {
   /// Encrypted connection (TLS), for hosted databases.
   var useTLS: Bool = false
   /// Optional SSH config id when the connection is reached through an SSH
-  /// tunnel. When set (and the engine is not a file-based SQLite DB) the
-  /// engine connects to `127.0.0.1:<tunneledLocalPort>`, bridging to the
-  /// remote host's `localhost:<port>` over an SSH local port-forward.
-  /// Local connections (no sshConfigID) connect directly to `host:port`.
+  /// tunnel. When set (and the engine isn't a file database) the engine's
+  /// connections are channels of Shell's SSH login to that host, to the
+  /// database as the host reaches it (`tunnelTarget(through:)`). Local
+  /// connections (no sshConfigID) connect directly to `host:port`.
   var sshConfigID: UUID?
 
   init(
@@ -110,35 +112,35 @@ struct DatabaseConnection: Identifiable, Codable, Hashable {
     "db-password-\(id.uuidString)"
   }
 
-  /// Name if given, otherwise `engine host`, or the file name for SQLite.
+  /// Name if given, otherwise `engine host`, or the file name for SQLite and DuckDB.
   var displayName: String {
     if !name.isEmpty { return name }
-    if engine == .sqlite {
+    if engine.isFileBased {
       return (host as NSString).lastPathComponent.isEmpty ? host : (host as NSString).lastPathComponent
     }
     if username?.isEmpty == false {
       return "\(engine.displayName) \(username!)@\(host)"
     }
-    return engine == .sqlite ? host : "\(engine.displayName) \(host)"
+    return "\(engine.displayName) \(host)"
   }
 
   /// Whether the connection is fillable enough to attempt a connect.
   var isValid: Bool {
-    if engine == .sqlite { return !host.isEmpty }
+    if engine.isFileBased { return !host.isEmpty }
     return !host.isEmpty && port > 0
   }
 
   /// Subtitle shown under the row: `host:port` (or the file path).
   var subtitle: String {
-    if engine == .sqlite { return host }
+    if engine.isFileBased { return host }
     return "\(host):\(port)"
   }
 
-  /// Whether the connection should be routed through an SSH tunnel. SQLite is
-  /// file-based and never tunnels; every other engine tunnels when an
+  /// Whether the connection should be routed through an SSH tunnel. A file
+  /// database never tunnels; every other engine tunnels when an
   /// `sshConfigID` is set. Pure — unit-testable without a live SSH server.
   var requiresTunnel: Bool {
-    engine != .sqlite && sshConfigID != nil
+    !engine.isFileBased && sshConfigID != nil
   }
 
   /// Where the SSH tunnel connects on the far side: the SSH host's own

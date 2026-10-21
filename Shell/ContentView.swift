@@ -1,6 +1,7 @@
 import Combine
 import ComponentKit
 import SwiftUI
+import ShellDatabaseEngines
 import ShellKit
 import ShellIntegrations
 #if os(macOS)
@@ -88,21 +89,18 @@ struct ContentView: View {
         // The kit's toolbar, on the column rather than on each page, so it
         // stays put while the pages cross-fade under it: the page's title and
         // its tools, compacting to icons and then into "…" as room runs out.
-        .kitToolbar(pageTitle.title, title: { pageTitle.view }, tools: { pageTools })
+        // Database's pages bring their own (the table's title, its filters,
+        // modes and inspector), so the column's steps aside for them.
+        .modifier(PageToolbar(isOn: !showsDatabase, title: pageTitle, tools: pageTools))
+        // The Data menu acts on the database the detail pane shows.
+        .focusedSceneValue(\.databaseWindow, showsDatabase ? model.databaseWindow : nil)
         .kitSidebarToggle(columnVisibility: $columnVisibility)
       }
       .sheet(isPresented: $model.showingNewConnection) {
         NewConnectionView()
       }
-      .sheet(isPresented: $model.showingNewDatabaseConnection) {
-        if let editing = model.editingDatabaseConnection {
-          NewDatabaseConnectionView(connection: editing,
-                                   savedPassword: model.passwordForDatabase(editing))
-        } else {
-          NewDatabaseConnectionView(connection: nil,
-                                   presetSSHConfigID: model.databasePresetSSHConfigID)
-        }
-      }
+      // Database's New and Edit Connection sheets.
+      .databaseSheets(model.databaseWindow)
       .sheet(isPresented: $model.showingNewAction) {
         NewActionView(
           action: model.editingAction,
@@ -189,6 +187,9 @@ struct ContentView: View {
     .animation(.easeOut(duration: 0.15), value: model.showingActions)
     .animation(.easeOut(duration: 0.15), value: model.showingSettings)
     .kitColorScheme(model.appearanceMode.colorScheme)
+    // Database's interface: the tree rows in the sidebar, the detail pages and
+    // the connection sheets read the model.
+    .environment(model.databases)
     .environment(\.terminalBackgroundsDisabled, model.disableTerminalBackgrounds)
     .environment(\.terminalAnimationsEnabled, animates)
     .onAppear {
@@ -284,12 +285,41 @@ struct ContentView: View {
         noSelection
       }
     #endif
+    case .databaseItem(let item):
+      if !model.isDatabaseDetached(item.connectionID), model.databaseConnection(item.connectionID) != nil {
+        databaseDetail
+      } else {
+        noSelection
+      }
     default:
       // Nothing selected, or a saved row (`ssh` / `screen` / `web` /
       // `database`) that is still being opened — those become a session
       // selection once the item they name is open.
       noSelection
     }
+  }
+
+  /// Whether the detail pane shows Database's interface: an open database's
+  /// overview, or one of its tables or queries.
+  private var showsDatabase: Bool {
+    switch model.selection {
+    case .session(let id):
+      guard let session = model.session(id), !model.isDetached(id) else { return false }
+      if case .database = model.kind(of: session) { return true }
+      return false
+    case .databaseItem(let item):
+      return !model.isDatabaseDetached(item.connectionID)
+    default:
+      return false
+    }
+  }
+
+  /// Database's page for what the main window's database navigation shows: a
+  /// connection's overview, a table or collection, a Redis key space or a
+  /// query tab.
+  private var databaseDetail: some View {
+    DetailView(window: model.databaseWindow)
+      .transition(detailTransition)
   }
 
   /// The detail pane for a live session: a `.web` session renders its page,
@@ -326,21 +356,11 @@ struct ContentView: View {
             // user clicks the field when they want to type an address.
             webAddressText = effectiveURLText
           }
-      } else if case .database(let connection) = kind {
-        // A database session renders the per-engine documents/tables
-        // browser (no terminal, no Files panel). The live engine
-        // lifecycle is owned by AppModel.
-        if let dbSession = model.databaseSession(for: connection) {
-          DatabaseBrowserView(session: dbSession)
-            .id(session.id)
-            .transition(detailTransition)
-        } else {
-          EmptyState(
-            systemImage: "server.rack", title: "Database Not Open",
-            message: "The database connection is not open.")
-          .id(session.id)
-          .transition(detailTransition)
-        }
+      } else if case .database = kind {
+        // A database session shows its connection in Database's interface
+        // (no terminal, no Files panel): its overview, until a table or a
+        // query is picked in its tree.
+        databaseDetail
       } else if case .action = kind {
         // An action run nobody types into: run blocks (ActionRunsView.swift).
         ActionRunsView(session: session, showsTerminal: $actionShowsTerminal)
@@ -942,4 +962,19 @@ struct PageTitle {
   }
 
   var view: KitTitle { KitTitle(title, meta: meta, systemImage: systemImage, hue: hue, status: status) }
+}
+
+/// The column's kit toolbar while `isOn` (pages without a toolbar of their own).
+private struct PageToolbar: ViewModifier {
+  let isOn: Bool
+  let title: PageTitle
+  let tools: [ToolbarSlot]
+
+  func body(content: Content) -> some View {
+    if isOn {
+      content.kitToolbar(title.title, title: { title.view }, tools: { tools })
+    } else {
+      content
+    }
+  }
 }

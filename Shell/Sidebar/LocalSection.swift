@@ -190,8 +190,7 @@ struct LocalSectionView: View {
   }
 
   private func localDatabaseRow(_ connection: DatabaseConnection) -> some View {
-    DatabaseConnectionRow(connection: connection)
-      .kitContextMenu { DatabaseConnectionActions(connection: connection) { state.beginRenameDatabase($0) } }
+    DatabaseConnectionRow(connection: connection, state: state)
   }
 
   /// The header's line: the live CPU, GPU and power draw while Monitoring is on
@@ -270,8 +269,7 @@ struct LocalSectionView: View {
         }
         if flags.isEnabled(.database) {
           Button("Database", systemImage: "cylinder.split.1x2") {
-            model.editingDatabaseConnection = nil
-            model.showingNewDatabaseConnection = true
+            model.newDatabaseConnection()
           }
         }
       }
