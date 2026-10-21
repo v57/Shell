@@ -1233,7 +1233,12 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
     channelStreams.closeAll(reason: message)
     let m = message
     DispatchQueue.main.async { [weak self] in
-      guard let self, self.running || self.channel != nil else { return }
+      // Not after the owner closed the connection (teardown frees the channel
+      // and the session). A forwarding-only connection has no channel, and its
+      // socket watch stops running before it reports: its session tells.
+      guard let self, self.running || self.channel != nil || (self.forwardingOnly && self.session != nil) else {
+        return
+      }
       if lost {
         (self.onConnectionLost ?? self.onTerminated)?(m)
       } else {
