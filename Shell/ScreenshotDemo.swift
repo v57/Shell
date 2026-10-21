@@ -15,6 +15,8 @@ import ShellKit
 ///   --new-database            opens the New Database Connection sheet
 ///   --run-action <name>       runs that demo action and shows its run
 ///   --database-link <link>    adds a database connection from a link (`sqlite:///path/shop.db`, a server's URL)
+///   --ssh-host <user@host:port>  adds an SSH host (this Mac's key) named "Test host"; the link's connection goes
+///                             through it
 ///
 /// Database's own arguments then open its pages, as in the Database app (DatabaseUI's `DebugDriver`): `--select
 /// "Name/main/orders"` (a path of tree titles), `--new-query "SELECT 1" [--run]`, `--view cards|json`, `--filter`,
@@ -96,9 +98,24 @@ enum ScreenshotDemo {
       noteIDs[name] = model.notes.addNote(named: name, text: text, encrypted: false).id
     }
 
+    var testHost: SSHConfig?
+    if let address = value("--ssh-host"), let at = address.firstIndex(of: "@") {
+      let server = address[address.index(after: at)...].split(separator: ":")
+      let config = SSHConfig(
+        name: "Test host", host: String(server[0]), user: String(address[..<at]),
+        port: server.count > 1 ? Int(server[1]) ?? 22 : 22)
+      model.updateConnection(config)
+      testHost = config
+    }
     if let link = value("--database-link"), let parsed = ConnectionLink.parse(link) {
       var profile = parsed.profile
       if profile.name.isEmpty { profile.name = profile.displayName }
+      if let testHost {
+        profile.ssh.enabled = true
+        profile.ssh.host = testHost.host
+        profile.ssh.port = testHost.port
+        profile.ssh.user = testHost.user
+      }
       model.databases.save(profile, password: parsed.password, sshPassword: nil)
     }
   }
