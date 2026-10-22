@@ -36,9 +36,14 @@ struct NotesSectionView: View {
         }
       } meta: {
         if let edited = model.notes.notes.map(\.lastUpdate).max() {
-          Text("\(count == 1 ? "1 note" : "\(count) notes")")
-            + Text("  ·  ").foregroundStyle(.kitTertiary)
-            + Text("edited \(edited, format: .relative(presentation: .named))")
+          // "2 notes · edited 2 min. ago", dropping words rather than truncating in a narrow sidebar.
+          let notes = count == 1 ? "1 note" : "\(count) notes"
+          let ago = edited.formatted(.relative(presentation: .named, unitsStyle: .abbreviated))
+          ViewThatFits(in: .horizontal) {
+            MetaLine(notes, "edited \(ago)")
+            MetaLine(notes, ago)
+            MetaLine(notes)
+          }
         } else {
           MetaLine("No notes")
         }

@@ -451,13 +451,16 @@ struct ContentView: View {
       if let note = model.note(id), !model.isDetached(id) {
         return PageTitle(
           model.notes.title(for: note.id),
-          meta: ["Note", "edited " + note.lastUpdate.formatted(.relative(presentation: .named))],
+          meta: [
+            "Note", "edited " + note.lastUpdate.formatted(.relative(presentation: .named, unitsStyle: .abbreviated)),
+          ],
           systemImage: "doc.text", hue: .orange)
       }
     case .history(let id):
       if let record = model.historySession(id), !model.isDetached(id) {
         return PageTitle(
-          record.title, meta: ["History", record.activityDate.formatted(.relative(presentation: .named))],
+          record.title,
+          meta: ["History", record.activityDate.formatted(.relative(presentation: .named, unitsStyle: .abbreviated))],
           systemImage: "clock", hue: .orange)
       }
     #if os(macOS)
