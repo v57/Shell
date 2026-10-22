@@ -165,11 +165,17 @@ struct ContentView: View {
       }
 
       // The actions list as an in-window overlay (not a sheet) so it
-      // appears/closes instantly. Backdrop click, Esc, and ⌘R close it.
+      // appears/closes instantly, over the kit's scrim, which dims the window
+      // as the board does. Backdrop click, Esc, and ⌘R close it.
       if model.showingActions {
-        Color.black.opacity(0.001)
+        Rectangle()
+          .fill(.kitScrim)
           .ignoresSafeArea()
+          .contentShape(Rectangle())
           .onTapGesture { model.showingActions = false }
+          .accessibilityAddTraits(.isButton)
+          .accessibilityLabel("Close")
+          .transition(.opacity)
         ActionsOverlayView()
           .transition(.opacity.combined(with: .scale(scale: 0.97)))
       }
