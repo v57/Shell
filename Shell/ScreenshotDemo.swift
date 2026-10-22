@@ -81,14 +81,24 @@ enum ScreenshotDemo {
     }
     #endif
 
-    model.saveDatabaseConnection(
+    #if DEBUG
+    // Two used lately (the cache saved twice, as an app and a duplicate can), one unused for weeks: the Databases
+    // card lists the first two and keeps Catalog behind Show 1 More.
+    let day: TimeInterval = 24 * 3600
+    model.saveDemoDatabaseConnection(
       DatabaseConnection(
         engine: .postgres, name: "Atlas production", host: "db.atlas.example.com", port: 5432, database: "atlas",
-        username: "readonly", sshConfigID: atlas.id))
-    model.saveDatabaseConnection(
-      DatabaseConnection(engine: .redis, name: "Sessions cache", host: "cache.atlas.example.com", port: 6379))
-    model.saveDatabaseConnection(
-      DatabaseConnection(engine: .mongodb, name: "Catalog", host: "localhost", port: 27017, database: "catalog"))
+        username: "readonly", sshConfigID: atlas.id),
+      usedAgo: 2 * 3600)
+    for usedAgo in [day, 3 * day] {
+      model.saveDemoDatabaseConnection(
+        DatabaseConnection(engine: .redis, name: "Sessions cache", host: "cache.atlas.example.com", port: 6379),
+        usedAgo: usedAgo)
+    }
+    model.saveDemoDatabaseConnection(
+      DatabaseConnection(engine: .mongodb, name: "Catalog", host: "localhost", port: 27017, database: "catalog"),
+      usedAgo: 30 * day)
+    #endif
 
     for (name, category, commands) in [
       ("Build", "Atlas", "swift build"), ("Test", "Atlas", "swift test"), ("Deploy", "Atlas", "atlas deploy --tag v2.0"),

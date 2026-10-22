@@ -9,7 +9,9 @@ import UniformTypeIdentifiers
 
 /// The sidebar: ComponentKit's `KitSidebar` with ONE VIEW PER SECTION, each a
 /// card `KitSection` — `RunningSectionView` (below), `LocalSectionView`,
-/// `RemoteSectionView`, `NotesSectionView` and `TextFilesSectionView` (below).
+/// `RemoteSectionView`, `DatabasesSectionView`, `WebSectionView`,
+/// `NotesSectionView` and `TextFilesSectionView` (below). This Mac and Remote
+/// hold terminals; databases and web pages have cards of their own.
 /// Each section view owns its rows, its feature gate, its collapse state and any
 /// state only it uses.
 ///
@@ -41,15 +43,26 @@ struct SidebarView: View {
     ) {
       RunningSectionView(state: state)
 
+      // Long sections keep their title at the top while they scroll by; the
+      // sections below a long list wait at the bottom as titles, one click
+      // away (the kit's sticky sections).
       #if os(macOS) || os(Windows)
-      // This Mac's terminals, persistent screen/tmux sessions, history, saved
-      // web pages and untunneled database connections.
+      // This Mac's terminals, persistent screen/tmux sessions and history.
       LocalSectionView(state: state)
+        .sidebarSticky()
       #endif
 
       RemoteSectionView(state: state)
+        .sidebarSticky(bottom: .title)
+
+      DatabasesSectionView(state: state)
+        .sidebarSticky(bottom: .title)
+
+      WebSectionView(state: state)
+        .sidebarSticky()
 
       NotesSectionView(state: state)
+        .sidebarSticky(bottom: .title)
 
       #if os(macOS)
       TextFilesSectionView(state: state)
@@ -347,19 +360,20 @@ struct SessionRow: View {
   }
 }
 
-/// A sidebar row for a saved database connection: engine icon, display name,
-/// and host:port (or file path) subtitle, plus an "open" dot when it is open.
-/// Clicking the row opens it (its overview in the detail pane); its chevron
-/// connects and shows Database's tree under it: databases, schemas, tables,
-/// collections and key spaces, then the saved queries and open query tabs.
+/// A row of the Databases section (DatabasesSection.swift): one line with the
+/// engine's icon, the connection's name, how many saved connections it stands
+/// for when several share its name and address, and a dot while it's open.
+/// The address, the file and the SSH host are in its tooltip. Clicking the row
+/// opens it (its overview in the detail pane); its chevron connects and shows
+/// Database's tree under it: databases, schemas, tables, collections and key
+/// spaces, then the saved queries and open query tabs.
 struct DatabaseConnectionRow: View {
   @Environment(AppModel.self) private var model
-  let connection: DatabaseConnection
+  let group: DatabaseGroup
   /// The sidebar's shared state, for the menu's Rename… and Delete….
   let state: SidebarState
-  /// The row's indent: 1 under a Remote host.
-  var level = 0
 
+  private var connection: DatabaseConnection { group.primary }
   private var live: LiveConnection? { model.databases.live[connection.id] }
 
   private var isExpanded: Binding<Bool> {
@@ -378,25 +392,38 @@ struct DatabaseConnectionRow: View {
 
   var body: some View {
     let isOpen = model.liveDatabaseSession(for: connection) != nil
-    // One view with its tree, so the row's menu, its drag and its indent stay the row's.
+    // One view with its tree, so the row's menu and its drag stay the row's.
     VStack(alignment: .leading, spacing: 2) {
       SidebarRow(
-        value: model.rowSelection(for: connection), connection.displayName, subtitle: connection.subtitle,
+        value: model.rowSelection(for: connection), connection.displayName,
         systemImage: connection.engine.systemImage, status: status, isExpanded: isExpanded
       ) {
+        if group.members.count > 1 {
+          Count(group.members.count)
+            .help("\(group.members.count) saved connections with this name and address")
+        }
         if isOpen {
           StatusDot(hue: .green)
-            .help("Open")
+            .accessibilityLabel("Open")
             .transition(.scale.combined(with: .opacity))
         }
       }
-      .kitRowIndent(level)
+      .kitHelp(connection.displayName, meta: address, systemImage: connection.engine.systemImage, hue: .indigo)
       .kitContextMenu { DatabaseConnectionActions(connection: connection, state: state) }
       .animation(.kit, value: isOpen)
       if isExpanded.wrappedValue, let live {
-        ConnectionContents(connection: live, window: model.databaseWindow, level: level + 1)
+        ConnectionContents(connection: live, window: model.databaseWindow, level: 1)
       }
     }
+  }
+
+  /// "PostgreSQL · db.atlas.example.com:5432 via atlas-web-1", or the file.
+  private var address: String {
+    var text = "\(connection.engine.displayName) · \(connection.subtitle)"
+    if connection.requiresTunnel, let host = model.connections.first(where: { $0.id == connection.sshConfigID }) {
+      text += " via \(host.displayName)"
+    }
+    return text
   }
 
   /// The arc while it connects, red once it failed.
@@ -409,8 +436,7 @@ struct DatabaseConnectionRow: View {
   }
 }
 
-/// The context menu for a database connection row, shared by the Local and
-/// Remote (per-host) sections: Database's own (New Query, Refresh,
+/// The context menu for a database connection row: Database's own (New Query, Refresh,
 /// Connect/Disconnect, Edit, Duplicate, Copy Link, Delete) with Shell's
 /// Rename.
 struct DatabaseConnectionActions: View {
@@ -533,5 +559,30 @@ struct DetachReturnBadge: View {
       }
     }
     .animation(.kit, value: isDetached)
+  }
+}
+
+// MARK: - Sticky sections
+
+extension View {
+  /// The kit's sticky sections (`kitSticky`) where they lay out right: with a pointer (Mac, Windows). On iPhone a
+  /// sticky section's header sits above its card (lifted over the large title), so touch layouts scroll as usual
+  /// until the kit fixes that.
+  func sidebarSticky(top: KitStickyTop = .titleWhileVisible, bottom: KitStickyBottom = .none) -> some View {
+    modifier(SidebarSticky(top: top, bottom: bottom))
+  }
+}
+
+private struct SidebarSticky: ViewModifier {
+  let top: KitStickyTop
+  let bottom: KitStickyBottom
+  @Environment(\.kitIdiom) private var idiom
+
+  func body(content: Content) -> some View {
+    if idiom.isTouch {
+      content
+    } else {
+      content.kitSticky(top: top, bottom: bottom)
+    }
   }
 }

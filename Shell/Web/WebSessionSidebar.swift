@@ -2,17 +2,13 @@ import ComponentKit
 import SwiftUI
 import ShellKit
 
-/// A saved web session row in the sidebar's Local or SSH section. Mirrors the
-/// screen/remote rows: an icon, the page name, an open/closed dot, and a
-/// second line (the URL for a plain page, or the SSH host for an ssh-owned
-/// page). The context menu offers Open / Reconnect / Edit / Delete.
+/// A saved web session row in the sidebar's Web section: one line with an
+/// icon, the page name and an open/closed dot; the URL and the SSH host it
+/// tunnels through are in its tooltip. The context menu offers Open /
+/// Reconnect / Edit / Delete.
 struct WebSessionRow: View {
   @Environment(AppModel.self) private var model
   let web: WebSession
-  /// The SSH host name shown as the row's environment subtitle (ssh-owned
-  /// rows), like remote screen rows carry their origin. nil for plain pages.
-  var environmentName: String? = nil
-
   private var liveSession: TerminalSession? { model.liveWebSession(for: web) }
 
   var body: some View {
@@ -21,13 +17,14 @@ struct WebSessionRow: View {
     // selected while its WebView is visible), else the page's own id —
     // activating that opens it.
     SidebarRow(
-      value: model.rowSelection(for: web), web.sidebarTitle, subtitle: subtitle, systemImage: "globe",
+      value: model.rowSelection(for: web), web.sidebarTitle, systemImage: "globe",
       status: model.webSessionRuntime(for: web)?.status ?? .idle
     ) {
       StatusDot(hue: isOpen ? .green : .gray, isHollow: !isOpen)
         .accessibilityLabel(isOpen ? "Open" : "Closed")
         .help(isOpen ? "Web session open" : "Web session closed")
     }
+    .kitHelp(web.sidebarTitle, meta: address, systemImage: "globe", hue: .teal)
     .kitContextMenu {
       Button("Open") { model.openOrFocusWebSession(web) }
       Button("Reconnect") { model.reconnectWebSession(web) }
@@ -38,10 +35,11 @@ struct WebSessionRow: View {
     }
   }
 
-  /// The row's second line: the SSH host for ssh-owned pages, else the URL.
-  private var subtitle: String? {
-    if let environmentName, !environmentName.isEmpty { return environmentName }
-    return web.url.isEmpty ? nil : web.url
+  /// The URL, and the SSH host an ssh-owned page tunnels through.
+  private var address: String? {
+    let host = web.sshConfigID.flatMap { id in model.connections.first { $0.id == id } }?.displayName
+    let parts = [web.url, host.map { "via \($0)" } ?? ""].filter { !$0.isEmpty }
+    return parts.isEmpty ? nil : parts.joined(separator: " ")
   }
 }
 

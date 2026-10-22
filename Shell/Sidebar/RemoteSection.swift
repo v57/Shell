@@ -3,10 +3,10 @@ import Foundation
 import SwiftUI
 import ShellKit
 
-/// The Remote section: saved SSH hosts, each emitting its running sessions, its
-/// host-bound web pages and its tunneled database connections as indented
-/// sub-rows. Hidden entirely while the ssh feature is off (this section's own
-/// gate).
+/// The Remote section: saved SSH hosts, each emitting its running sessions as
+/// indented sub-rows. Web pages and database connections tunneled through a
+/// host are in the Web and Databases sections, their tooltips naming the host.
+/// Hidden entirely while the ssh feature is off (this section's own gate).
 ///
 /// The Edit… sheet for a saved connection and the collapse state are local to
 /// this section; the session rename, the database rename sheet and the filter
@@ -109,29 +109,6 @@ private struct SSHConfigGroup: View {
   static func isShown(_ config: SSHConfig, model: AppModel, state: SidebarState) -> Bool {
     state.matches(config.displayName)
       || model.shellSessions(for: config).contains { state.matches(model.displayName(for: $0)) }
-      || !webSessions(of: config, model: model, state: state).isEmpty
-      || !databaseConnections(of: config, model: model, state: state).isEmpty
-  }
-
-  private static func webSessions(of config: SSHConfig, model: AppModel, state: SidebarState) -> [WebSession] {
-    FeatureFlagsStore.shared.isEnabled(.web)
-      ? model.webSessions.all.filter { $0.sshConfigID == config.id && shows($0.sidebarTitle, of: config, state: state) }
-      : []
-  }
-
-  private static func databaseConnections(of config: SSHConfig, model: AppModel, state: SidebarState)
-    -> [DatabaseConnection]
-  {
-    FeatureFlagsStore.shared.isEnabled(.database)
-      ? model.databaseConnections.filter {
-        $0.sshConfigID == config.id && shows($0.displayName, of: config, state: state)
-      } : []
-  }
-
-  private var webSessions: [WebSession] { Self.webSessions(of: config, model: model, state: state) }
-
-  private var databaseConnections: [DatabaseConnection] {
-    Self.databaseConnections(of: config, model: model, state: state)
   }
 
   private var shellSessions: [TerminalSession] { model.shellSessions(for: config) }
@@ -141,10 +118,9 @@ private struct SSHConfigGroup: View {
     let sessions = shellSessions
     let shown = sessions.filter { shows(model.displayName(for: $0)) }
     hostRow
-    // Only SSH SHELL sessions get a terminal row here. A host-bound web page or
-    // database connection has its own row view in the loops below; emitting one
-    // here too would render its name twice (once with a terminal icon). They are
-    // a reorderable list of their own, so dragging a session never moves the host.
+    // Only SSH SHELL sessions get a terminal row here (a host-bound web page or
+    // database connection is in its own section). They are a reorderable list
+    // of their own, so dragging a session never moves the host.
     ReorderableSection(shown, move: { source, destination in
       let move = FilteredMove(source, destination, shown: shown, in: sessions)
       model.moveSSHSession(for: config, from: move.source, to: move.destination)
@@ -173,18 +149,6 @@ private struct SSHConfigGroup: View {
       #else
       false
       #endif
-    }
-    // Saved web pages bound to this host render as indented sub-rows, like the
-    // connection's terminals. Hidden when the web feature is disabled.
-    ForEach(webSessions) { web in
-      WebSessionRow(web: web, environmentName: config.displayName)
-        .kitRowIndent(1)
-    }
-    // Database connections tunneled through this host render as sub-rows,
-    // grouped per host the same way web sessions are. Hidden when the database
-    // feature is disabled; orphaned refs (a removed host) simply don't render.
-    ForEach(databaseConnections) { connection in
-      DatabaseConnectionRow(connection: connection, state: state, level: 1)
     }
   }
 

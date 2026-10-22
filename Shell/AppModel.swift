@@ -1791,6 +1791,13 @@ final class AppModel {
     databaseStore.save(connection, password: password)
   }
 
+  #if DEBUG
+  /// Saves a demo connection as if it had last connected `usedAgo` seconds ago (`ScreenshotDemo`).
+  func saveDemoDatabaseConnection(_ connection: DatabaseConnection, usedAgo: TimeInterval?) {
+    databaseStore.saveDemo(connection, lastUsed: usedAgo.map { Date(timeIntervalSinceNow: -$0) })
+  }
+  #endif
+
   // MARK: - Public keys
   
   /// Copies the Secure Enclave key's public key (OpenSSH authorized_keys
@@ -2366,18 +2373,12 @@ final class AppModel {
     )
   }
 
-  /// Reorders the Local section's saved web-page rows (pages not bound to an
-  /// SSH tunnel). Web sessions live in `WebSessionStore`, not `sessions`, so
-  /// the move is delegated to the store's local-subset reorder.
-  func moveLocalWebSession(from source: IndexSet, to destination: Int) {
-    webSessions.moveLocalSubset(from: source, to: destination)
-  }
-
-  /// Reorders the Local section's database-connection rows (connections not
-  /// reached through an SSH tunnel). Delegated to the store's local-subset
-  /// reorder, which reassigns `order` for the whole list.
-  func moveLocalDatabaseConnection(from source: IndexSet, to destination: Int) {
-    databaseStore.moveLocalSubset(from: source, to: destination)
+  /// Reorders the Web section's saved pages (drag-to-reorder). Web sessions
+  /// live in `WebSessionStore`, not `sessions`.
+  func moveWebSession(from source: IndexSet, to destination: Int) {
+    var reordered = webSessions.all
+    reordered.move(fromOffsets: source, toOffset: destination)
+    webSessions.reorder(reordered)
   }
 
   // MARK: - Authorized keys

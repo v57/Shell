@@ -7,15 +7,17 @@ import ShellMonitoring
 
 #if os(macOS) || os(Windows)
 /// The Local section ("This Mac"): this Mac's terminals, its persistent
-/// screen/tmux sessions (local AND the ones scanned from connected SSH hosts),
-/// local history while history mode is on, saved web pages not bound to a
-/// tunnel, and database connections with no tunnel. Rendered while ANY of those
-/// features is enabled — the gate below is this section's own.
+/// screen/tmux sessions (local AND the ones scanned from connected SSH hosts)
+/// and local history while history mode is on. Web pages and database
+/// connections have sections of their own (WebSection.swift,
+/// DatabasesSection.swift). Rendered while ANY of those features is enabled
+/// (the + menu also makes web pages and database connections) — the gate below
+/// is this section's own.
 ///
-/// State only this section uses lives here. The session rename, the database
-/// rename sheet, the filter and the stats monitor stay with the sidebar
-/// (`SidebarState` in SidebarChrome.swift, shared with the Remote section) and
-/// are handed in as `state`.
+/// State only this section uses lives here. The session rename, the filter and
+/// the stats monitor stay with the sidebar (`SidebarState` in
+/// SidebarChrome.swift, shared with the Remote section) and are handed in as
+/// `state`.
 struct LocalSectionView: View {
   @Environment(AppModel.self) private var model
   /// The sidebar's shared state (SidebarChrome.swift): the session rename, the
@@ -36,24 +38,6 @@ struct LocalSectionView: View {
   private var localSessions: [TerminalSession] {
     model.sessions.filter { model.kind(of: $0) == .local }
   }
-
-  /// Saved web pages shown in the Local section: those not bound to an SSH
-  /// host. A page is "local" when no sshConfigID is set — the WebView loads
-  /// its URL directly (this covers localhost URLs).
-  private var localWebSessions: [WebSession] {
-    model.webSessions.all.filter { $0.sshConfigID == nil }
-  }
-
-  /// Local database connections: those reached directly (no SSH tunnel), so
-  /// they render under Local alongside local shells. Connections bound to an
-  /// SSH host render under Remote, grouped by that host.
-  private var localDatabaseConnections: [DatabaseConnection] {
-    model.databaseConnections.filter { $0.sshConfigID == nil }
-  }
-
-  /// Whether the filter is on: reordering a filtered list would move rows by
-  /// the wrong indices, so the lists don't reorder while it is.
-  private var isFiltering: Bool { !state.searchText.trimmingCharacters(in: .whitespaces).isEmpty }
 
   var body: some View {
     sectionContent
@@ -89,7 +73,7 @@ struct LocalSectionView: View {
     } // end if (local section gate)
   }
 
-  /// The terminals, persistent sessions, web pages and databases.
+  /// The terminals and persistent sessions.
   @ViewBuilder
   private var rows: some View {
     let sessions = flags.isEnabled(.sessions) ? localSessions : []
@@ -165,32 +149,6 @@ struct LocalSectionView: View {
           }
         }
     }
-    if flags.isEnabled(.web) {
-      if isFiltering {
-        ForEach(localWebSessions.filter { state.matches($0.sidebarTitle) }) { web in WebSessionRow(web: web) }
-      } else {
-        ReorderableSection(localWebSessions, move: { model.moveLocalWebSession(from: $0, to: $1) }) { web in
-          WebSessionRow(web: web)
-        }
-      }
-    }
-    // Local database connections (no SSH tunnel) live in the Local section like
-    // local shells; remote ones group under Remote instead.
-    if flags.isEnabled(.database) {
-      if isFiltering {
-        ForEach(localDatabaseConnections.filter { state.matches($0.displayName) }) { connection in
-          localDatabaseRow(connection)
-        }
-      } else {
-        ReorderableSection(localDatabaseConnections, move: { model.moveLocalDatabaseConnection(from: $0, to: $1) }) {
-          localDatabaseRow($0)
-        }
-      }
-    }
-  }
-
-  private func localDatabaseRow(_ connection: DatabaseConnection) -> some View {
-    DatabaseConnectionRow(connection: connection, state: state)
   }
 
   /// The header's line: the live CPU, GPU and power draw while Monitoring is on

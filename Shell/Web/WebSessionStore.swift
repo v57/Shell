@@ -48,20 +48,6 @@ final class WebSessionStore {
     persist()
   }
 
-  /// Moves a subset of `all` (the local, no-SSH-tunnel pages shown in the
-  /// Local section) and persists the new relative order while leaving every
-  /// other page in its slot.
-  func moveLocalSubset(from source: IndexSet, to destination: Int) {
-    guard !source.isEmpty else { return }
-    let indexes = all.indices.filter { all[$0].sshConfigID == nil }
-    var items = indexes.map { all[$0] }
-    items.move(fromOffsets: source, toOffset: destination)
-    for (j, item) in items.enumerated() {
-      all[indexes[j]] = item
-    }
-    persist()
-  }
-
   private func persist() {
     if let data = try? JSONEncoder().encode(all) {
       defaults.set(data, forKey: Self.key)

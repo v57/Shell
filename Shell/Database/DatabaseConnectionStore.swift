@@ -77,19 +77,16 @@ final class DatabaseConnectionStore {
     reload()
   }
 
-  /// Moves a subset of `all` (the local, no-SSH-tunnel connections shown in the Local section) and reassigns
-  /// the order of the whole list, leaving every tunneled connection in its slot.
-  func moveLocalSubset(from source: IndexSet, to destination: Int) {
-    guard !source.isEmpty else { return }
-    let indexes = all.indices.filter { all[$0].sshConfigID == nil }
-    var items = indexes.map { all[$0] }
-    items.move(fromOffsets: source, toOffset: destination)
-    var reordered = all
-    for (j, item) in items.enumerated() {
-      reordered[indexes[j]] = item
-    }
-    reorder(reordered)
+  #if DEBUG
+  /// The screenshot demo's connections, as if they had last connected at `lastUsed` (`ScreenshotDemo`).
+  func saveDemo(_ connection: DatabaseConnection, lastUsed: Date?) {
+    save(connection)
+    guard var record = vault.databases.first(where: { $0.id == connection.id.uuidString }) else { return }
+    record.lastUsed = lastUsed
+    vault.save(record)
+    reload()
   }
+  #endif
 
   /// Re-reads the shared connections (another app or device changed them).
   func refreshOnActivation() {
@@ -132,6 +129,7 @@ final class DatabaseConnectionStore {
       authSource: record.options["authSource"], directConnection: record.options["directConnection"] == "true",
       sshConfigID: host.map { UUID(uuidString: $0.id) ?? stableUUID($0.id) })
     connection.useTLS = record.useTLS
+    connection.lastUsed = record.lastUsed
     return connection
   }
 

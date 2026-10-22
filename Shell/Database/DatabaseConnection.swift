@@ -81,6 +81,9 @@ struct DatabaseConnection: Identifiable, Codable, Hashable {
   /// database as the host reaches it (`tunnelTarget(through:)`). Local
   /// connections (no sshConfigID) connect directly to `host:port`.
   var sshConfigID: UUID?
+  /// When the connection last connected, in any app (the shared record's; Database's model sets it). Read only:
+  /// saving leaves the record's own.
+  var lastUsed: Date?
 
   init(
     id: UUID = UUID(),
