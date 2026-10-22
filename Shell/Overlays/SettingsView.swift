@@ -1,3 +1,4 @@
+import ShellIntegrations
 import SwiftUI
 
 /// The Settings panel — an in-window overlay (like `ActionsOverlayView`), NOT
@@ -91,7 +92,8 @@ private struct SettingsCard<Content: View>: View {
 }
 
 #if os(macOS) || os(Windows)
-/// The "Sessions" card: whether new terminals start as persistent sessions.
+/// The "Sessions" card: whether new terminals start as persistent sessions
+/// (and, on the Mac, whether they outlive Shell: `SessionAgentRow`).
 /// Persistent sessions are the Screen feature's, so the toggle is off and
 /// disabled while that feature is.
 private struct SettingsSessionsCard: View {
@@ -100,23 +102,93 @@ private struct SettingsSessionsCard: View {
 
   var body: some View {
     let available = flags.isEnabled(.sessions) && flags.isEnabled(.screen)
-    Toggle(isOn: Binding(
-      get: { available && model.alwaysPersistentSessions },
-      set: { model.alwaysPersistentSessions = $0 }
-    )) {
+    VStack(alignment: .leading, spacing: 0) {
+      Toggle(isOn: Binding(
+        get: { available && model.alwaysPersistentSessions },
+        set: { model.alwaysPersistentSessions = $0 }
+      )) {
+        VStack(alignment: .leading, spacing: 2) {
+          Text("Always Start Persistent Sessions")
+          Text(available
+               ? "New terminals keep running after you close them; reopen them from the sidebar"
+               : "Turn on Sessions and Screen sessions under Features to use this")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+      }
+      .toggleStyle(.switch)
+      .disabled(!available)
+      .padding(.vertical, 6)
+      #if os(macOS)
+      Divider()
+      SessionAgentRow()
+      #endif
+    }
+  }
+}
+#endif
+
+#if os(macOS)
+/// Whether the `session` tool's sessions outlive Shell: its daemon's LaunchAgent (`SessionAgentModel`), with the
+/// one action its state calls for.
+private struct SessionAgentRow: View {
+  @Environment(AppModel.self) private var model
+  @State private var confirmingRemove = false
+
+  private var agent: SessionAgentModel { model.sessionAgent }
+
+  var body: some View {
+    HStack(spacing: 12) {
       VStack(alignment: .leading, spacing: 2) {
-        Text("Always Start Persistent Sessions")
-        Text(available
-             ? "New terminals keep running after you close them; reopen them from the sidebar"
-             : "Turn on Sessions and Screen sessions under Features to use this")
+        Text("Keep Sessions Running After Quit")
+        Text(caption)
           .font(.caption)
           .foregroundStyle(.secondary)
+        if let error = agent.errorMessage {
+          Text(error)
+            .font(.caption)
+            .foregroundStyle(.red)
+            .textSelection(.enabled)
+        }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
+      if agent.isWorking {
+        ProgressView().controlSize(.small)
+      } else {
+        action
+      }
     }
-    .toggleStyle(.switch)
-    .disabled(!available)
     .padding(.vertical, 6)
+    .confirmationDialog("Remove the login item?", isPresented: $confirmingRemove) {
+      Button("Remove", role: .destructive) { agent.remove() }
+    } message: {
+      Text("Sessions running now end, and new ones end when Shell quits.")
+    }
+  }
+
+  private var caption: String {
+    guard agent.isAvailable else { return "Needs the session tool (v57.dev/install/session)" }
+    switch agent.status {
+    case nil: return "Checking…"
+    case .notInstalled: return "Sessions end when Shell quits; a login item keeps the session daemon running"
+    case .outdated: return "The login item runs a session that is no longer installed"
+    case .needsApproval: return "The login item is off in Login Items & Extensions"
+    case .stopped: return "The login item is on, but the session daemon isn't running"
+    case .waiting: return "Takes over when Shell quits; the sessions running now end then"
+    case .running: return "Sessions keep running after Shell quits"
+    }
+  }
+
+  @ViewBuilder private var action: some View {
+    switch agent.status {
+    case .notInstalled: Button("Install") { agent.install() }
+    case .outdated: Button("Update") { agent.install() }
+    case .needsApproval: Button("Open Login Items") { agent.openLoginItems() }
+    case .stopped: Button("Start") { agent.start() }
+    case .running: Button("Remove") { confirmingRemove = true }
+    case .waiting, nil: EmptyView()
+    }
   }
 }
 #endif

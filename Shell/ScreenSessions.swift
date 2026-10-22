@@ -152,6 +152,9 @@ final class ScreenSessionsMonitor {
     let kind = Self.preferredKind
     queue.async { [weak self] in
       guard let self else { return }
+      #if os(macOS)
+      if kind == .session { SessionAgentModel.prepareDaemon() }
+      #endif
       let (current, _) = Self.runList()
       let live = Set(current.map(\.shortName))
       self.claimedNames.subtract(live)

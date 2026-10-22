@@ -105,6 +105,11 @@ final class AppModel {
   /// remote persistent rows alongside the local ones.
   var remoteScreenScanner = RemoteScreenSessionsScanner()
   #endif
+  #if os(macOS)
+  /// The `session` daemon's LaunchAgent, which lets persistent sessions
+  /// outlive Shell.
+  let sessionAgent = SessionAgentModel()
+  #endif
 
   /// The sidebar's encrypted Notes list (SwiftData-backed, lazy decryption).
   var notes: NotesStore
@@ -378,6 +383,9 @@ final class AppModel {
     smartActionsEnabled = features.isEnabled(.smartActions)
     // Start (or leave stopped) the Screen feature's pollers to match the flag.
     configureGatedBackgroundWork()
+    #if os(macOS)
+    sessionAgent.refresh()
+    #endif
     // React to runtime feature-flag flips (start/stop pollers, re-probe).
     startFeatureFlagReactivity()
     // Start with a local terminal so the window is never empty, unless
@@ -2393,5 +2401,9 @@ final class AppModel {
     connectionStore.refreshOnActivation()
     if features.isEnabled(.authorizedKeys) { deviceKeys.refreshOnActivation() }
     databaseStore.refreshOnActivation()
+    #if os(macOS)
+    // Coming back from Login Items & Extensions after switching the agent on.
+    sessionAgent.refresh()
+    #endif
   }
 }

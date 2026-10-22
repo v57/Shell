@@ -367,26 +367,67 @@ struct ContentView: View {
           .id(session.id)
           .transition(detailTransition)
       } else {
-        ZStack {
-          // The terminal stays mounted so its scrollback/focus state is
-          // preserved while the Files panel is shown on top of it. The
-          // panel only covers it (and blocks its hit-testing) when the
-          // Files feature is enabled AND the panel is open.
-          TerminalView(session: session)
-            .id(session.id)
-            .transition(detailTransition)
-            .terminalFileDrop(session)
-            .allowsHitTesting(!(model.directoryBrowser.visible && flags.isEnabled(.files)))
+        VStack(spacing: 0) {
+          #if os(macOS)
+          if case .screen(let info) = kind, info.kind == .session, !info.isRemote {
+            sessionAgentBanner
+          }
+          #endif
+          ZStack {
+            // The terminal stays mounted so its scrollback/focus state is
+            // preserved while the Files panel is shown on top of it. The
+            // panel only covers it (and blocks its hit-testing) when the
+            // Files feature is enabled AND the panel is open.
+            TerminalView(session: session)
+              .id(session.id)
+              .transition(detailTransition)
+              .terminalFileDrop(session)
+              .allowsHitTesting(!(model.directoryBrowser.visible && flags.isEnabled(.files)))
 
-          if model.directoryBrowser.visible, flags.isEnabled(.files) {
-            FilesPanelView(model: model.directoryBrowser)
-              .transition(.opacity)
-              .background(.background)
+            if model.directoryBrowser.visible, flags.isEnabled(.files) {
+              FilesPanelView(model: model.directoryBrowser)
+                .transition(.opacity)
+                .background(.background)
+            }
           }
         }
       }
     }
   }
+
+  #if os(macOS)
+  /// Over a `session` session's terminal while it would end when Shell quits:
+  /// the daemon's LaunchAgent (`SessionAgentModel`) isn't running.
+  @ViewBuilder
+  private var sessionAgentBanner: some View {
+    let agent = model.sessionAgent
+    if agent.sessionsEndWithShell, !agent.tipDismissed, let status = agent.status {
+      Banner(
+        "This session ends when Shell quits",
+        message: Self.sessionAgentMessage(status),
+        systemImage: "power", hue: .orange, onDismiss: { agent.tipDismissed = true }
+      ) {
+        switch status {
+        case .needsApproval: Button("Open Login Items") { agent.openLoginItems() }
+        case .stopped: Button("Start") { agent.start() }
+        case .waiting, .running: EmptyView()
+        case .notInstalled, .outdated: Button("Keep Running") { agent.install() }
+        }
+      }
+      .disabled(agent.isWorking)
+      .padding(KitMetrics.gutter)
+      .transition(.opacity)
+    }
+  }
+
+  private static func sessionAgentMessage(_ status: SessionAgent.Status) -> String {
+    switch status {
+    case .needsApproval: "Its login item is off in Login Items & Extensions."
+    case .waiting: "The login item takes over when Shell quits; sessions started after that keep running."
+    default: "A login item for the session daemon keeps sessions running."
+    }
+  }
+  #endif
 
   // MARK: - Toolbar
 
@@ -893,7 +934,7 @@ extension ConnectionKind {
   var titleMeta: [String] {
     switch self {
     case .local: [thisComputerName]
-    case .screen(let info): [info.kind == .tmux ? "tmux" : "screen"]
+    case .screen(let info): [info.kind == .tmux ? "tmux" : info.kind == .session ? "session" : "screen"]
     case .ssh(let config): ["\(config.user)@\(config.host)"]
     case .action(let spec): [spec.config?.displayName ?? "Local"]
     case .web(let web): [web.url]
