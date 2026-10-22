@@ -1,9 +1,9 @@
+import ComponentKit
 import ShellIntegrations
 import SwiftUI
 
-/// The Settings panel — an in-window overlay (like `ActionsOverlayView`), NOT
-/// a separate window or a `.sheet`, so it appears/closes instantly over the
-/// main window.
+/// The Settings panel: the kit's sheet over the main window (`kitSheet` in
+/// ContentView), never a separate window or a system sheet.
 ///
 /// Hosts these cards:
 /// - **Sessions** (macOS) — how new terminals start (`SettingsSessionsCard`).
@@ -11,50 +11,32 @@ import SwiftUI
 /// - **Actions** — the shell actions surfaced here so they're reachable on iOS
 ///   (macOS reaches the same actions through the Shell menu).
 ///
-/// Presented the same way on macOS and iOS: a non-modal overlay over the main
-/// window (Backdrop click or Esc closes it). On macOS the Shell menu's
-/// Settings…/⌘, entry point sets `AppModel.showingSettings`; on iOS the sidebar
-/// gear button does the same.
+/// Presented the same way on macOS and iPad: a card over the dimmed window (a
+/// click on the dim, Esc or its close button closes it); a system sheet on
+/// iPhone. On macOS the Shell menu's Settings…/⌘, entry point sets
+/// `AppModel.showingSettings`; on iOS the sidebar gear button does the same.
 struct SettingsView: View {
   @Environment(AppModel.self) private var model
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 0) {
-      HStack {
-        Text("Settings").font(.headline)
-        Spacer()
-        Button {
-          model.showingSettings = false
-        } label: {
-          Image(systemName: "xmark")
+    KitSheet(
+      title: "Settings", systemImage: "gearshape", hue: .gray, width: 480,
+      onClose: { model.showingSettings = false }
+    ) {
+      VStack(alignment: .leading, spacing: 20) {
+        #if os(macOS) || os(Windows)
+        SettingsCard(title: "Sessions", systemImage: "terminal") {
+          SettingsSessionsCard()
         }
-        .buttonStyle(.borderless)
-        .help("Close (Esc)")
-      }
-      .padding(.top, 12)
-
-      ScrollView {
-        VStack(alignment: .leading, spacing: 20) {
-          #if os(macOS) || os(Windows)
-          SettingsCard(title: "Sessions", systemImage: "terminal") {
-            SettingsSessionsCard()
-          }
-          #endif
-          SettingsCard(title: "Features", systemImage: "square.grid.2x2") {
-            FeatureSelectionView()
-          }
-          SettingsCard(title: "Actions", systemImage: "bolt") {
-            SettingsActionsCard()
-          }
+        #endif
+        SettingsCard(title: "Features", systemImage: "square.grid.2x2") {
+          FeatureSelectionView()
         }
-        .padding(.vertical, 12)
+        SettingsCard(title: "Actions", systemImage: "bolt") {
+          SettingsActionsCard()
+        }
       }
-    }
-    .frame(width: 480, height: 420)
-    .safeAreaPadding(.horizontal, 12)
-    .background {
-      RoundedRectangle(cornerRadius: 16).fill(.background)
-        .strokeBorder(.quaternary).shadow(radius: 32, y: 8)
+      .padding(.horizontal, 4)
     }
   }
 }
@@ -160,11 +142,11 @@ private struct SessionAgentRow: View {
       }
     }
     .padding(.vertical, 6)
-    .confirmationDialog("Remove the login item?", isPresented: $confirmingRemove) {
-      Button("Remove", role: .destructive) { agent.remove() }
-    } message: {
-      Text("Sessions running now end, and new ones end when Shell quits.")
-    }
+    .kitConfirmation(
+      "Remove the login item?", isPresented: $confirmingRemove,
+      message: "Sessions running now end, and new ones end when Shell quits.", systemImage: "person.badge.minus",
+      confirm: "Remove"
+    ) { agent.remove() }
   }
 
   private var caption: String {

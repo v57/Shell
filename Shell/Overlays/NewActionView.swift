@@ -1,3 +1,4 @@
+import ComponentKit
 import SwiftUI
 import ShellKit
 import ShellIntegrations
@@ -8,7 +9,7 @@ import ShellIntegrations
 /// the commands to run.
 struct NewActionView: View {
   @Environment(AppModel.self) private var model
-  @Environment(\.dismiss) private var dismiss
+  @Environment(\.kitDismiss) private var dismiss
 
   /// The action being edited, nil when creating a new one.
   private let editing: Action?

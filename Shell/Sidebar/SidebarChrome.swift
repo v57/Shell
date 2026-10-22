@@ -105,17 +105,15 @@ struct SidebarChrome: ViewModifier {
       // (both branches carry .transition(.blurReplace)).
       .animation(.kit, value: model.historyMode)
       #if os(macOS) || os(Windows)
-      .alert(item: $model.screenMonitor.actionError) { error in
-        Alert(
-          title: Text(error.title),
-          message: Text(error.message),
-          dismissButton: .default(Text("OK"))
-        )
-      }
+      .noticeSheet(
+        model.screenMonitor.actionError?.title ?? "",
+        isPresented: Binding(
+          get: { model.screenMonitor.actionError != nil }, set: { if !$0 { model.screenMonitor.actionError = nil } }),
+        message: model.screenMonitor.actionError?.message ?? "")
       #endif
       // The authorized-keys panel (key.2.on.ring in the Local/Remote
       // headers); opens for this Mac or the selected SSH connection.
-      .sheet(isPresented: $model.showingAuthorizedKeys) {
+      .kitSheet(isPresented: $model.showingAuthorizedKeys) {
         if let target = model.authorizedKeysTarget, flags.isEnabled(.authorizedKeys) {
           AuthorizedKeysView(target: target)
             .environment(model)
@@ -123,13 +121,13 @@ struct SidebarChrome: ViewModifier {
       }
       // The Edit… action on a saved web session: the same form as new,
       // prefilled, saving in place (same id).
-      .sheet(item: $model.editingWebSession) { web in
+      .kitSheet(item: $model.editingWebSession) { web in
         NewWebSessionView(web: web)
       }
       // The Rename… action on a database connection: a small sheet with a
       // TextField pre-filled with the connection's current name/display name.
       // Empty input resets to the engine display name.
-      .sheet(item: $state.renamingDatabaseConnection) { connection in
+      .kitSheet(item: $state.renamingDatabaseConnection) { connection in
         DatabaseRenameSheet(
           connection: connection,
           text: $state.databaseRenameText,
@@ -148,14 +146,11 @@ struct SidebarChrome: ViewModifier {
         if let connection = state.deletingDatabaseConnection { model.deleteDatabaseConnection(connection) }
         state.deletingDatabaseConnection = nil
       }
-      .alert("Authorized Keys", isPresented: Binding(
-        get: { model.authorizedKeysError != nil },
-        set: { if !$0 { model.authorizedKeysError = nil } }
-      )) {
-        Button("OK", role: .cancel) { model.authorizedKeysError = nil }
-      } message: {
-        Text(model.authorizedKeysError ?? "")
-      }
+      .noticeSheet(
+        "Authorized Keys",
+        isPresented: Binding(
+          get: { model.authorizedKeysError != nil }, set: { if !$0 { model.authorizedKeysError = nil } }),
+        message: model.authorizedKeysError ?? "", systemImage: "key.2.on.ring")
       #if os(macOS) || os(Windows)
       #if os(macOS)
       .background {
@@ -171,7 +166,7 @@ struct SidebarChrome: ViewModifier {
       }
       .onDisappear { state.statsMonitor.stop() }
       // Stats graphs for the last minute, opened from the Local header.
-      .sheet(isPresented: $state.showingStatsGraphs) {
+      .kitSheet(isPresented: $state.showingStatsGraphs) {
         StatsGraphView(monitor: state.statsMonitor)
       }
       #endif

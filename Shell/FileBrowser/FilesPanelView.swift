@@ -1,3 +1,4 @@
+import ComponentKit
 import SwiftUI
 import ShellIntegrations
 
@@ -47,16 +48,11 @@ struct FilesPanelView: View {
       onMoveCopyIntoDirectory: { names, targetPath, mode in
         model.moveCopy(names, to: targetPath, mode: mode)
       })
-      .confirmationDialog(
+      .kitConfirmation(
         "Delete \(deleteCandidates.count) item\(deleteCandidates.count == 1 ? "" : "s")?",
-        isPresented: $showsDeleteConfirm, titleVisibility: .visible
-      ) {
-        Button("Delete", role: .destructive) { model.delete(deleteCandidates) }
-        Button("Cancel", role: .cancel) {}
-      } message: {
-        Text("This cannot be undone.")
-      }
-      .sheet(isPresented: $showsDestinationSheet) {
+        isPresented: $showsDeleteConfirm, message: "This cannot be undone.", systemImage: "trash", confirm: "Delete"
+      ) { model.delete(deleteCandidates) }
+      .kitSheet(isPresented: $showsDestinationSheet) {
         DestinationSheet(
           defaultPath: model.path.isEmpty ? "/" : model.path, text: $destinationText,
           initialMode: mutatingMode

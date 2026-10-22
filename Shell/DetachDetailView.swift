@@ -76,6 +76,7 @@ struct DetachDetailView: View {
             .id(session.id)
         } else {
           TerminalView(session: session)
+            .terminalPrompts(session)
             .id(session.id)
             .terminalFileDrop(session)
         }

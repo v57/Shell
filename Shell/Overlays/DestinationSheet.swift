@@ -11,7 +11,7 @@ struct DestinationSheet: View {
   let initialMode: FileCommandBuilder.MoveCopyMode
   let onConfirm: (String, FileCommandBuilder.MoveCopyMode) -> Void
 
-  @Environment(\.dismiss) private var dismiss
+  @Environment(\.kitDismiss) private var dismiss
   @State private var mode: FileCommandBuilder.MoveCopyMode
 
   init(
@@ -40,6 +40,6 @@ struct DestinationSheet: View {
           dismiss()
         }.disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
       }
-    }.padding().frame(minWidth: 340).background(.regularMaterial)
+    }.padding().frame(minWidth: 340)
   }
 }

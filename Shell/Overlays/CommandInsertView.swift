@@ -1,3 +1,4 @@
+import ComponentKit
 import SwiftUI
 import ShellKit
 
@@ -11,7 +12,7 @@ import ShellKit
 /// editor (e.g. a multi-line paste inside a heredoc or a quoted string).
 struct CommandInsertView: View {
   @Environment(AppModel.self) private var model
-  @Environment(\.dismiss) private var dismiss
+  @Environment(\.kitDismiss) private var dismiss
   @State private var text = ""
   @FocusState private var editorFocused: Bool
 

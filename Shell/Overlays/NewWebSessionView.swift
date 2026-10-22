@@ -1,14 +1,15 @@
+import ComponentKit
 import Foundation
 import SwiftUI
 import ShellKit
 
-/// Sheet for EDITING a saved web session: fields prefill and the toolbar button
+/// The kit sheet for EDITING a saved web session: fields prefill and the footer's button
 /// saves in place (same id) — mirrors NewConnectionView. Creating a page has no
 /// sheet: the SSH host menu items open one immediately (openNewWebSession), and
 /// the page names itself from its HTML title.
 struct NewWebSessionView: View {
   @Environment(AppModel.self) private var model
-  @Environment(\.dismiss) private var dismiss
+  @Environment(\.kitDismiss) private var dismiss
 
   /// The saved web session being edited.
   private let editing: WebSession
@@ -29,46 +30,43 @@ struct NewWebSessionView: View {
   }
 
   var body: some View {
-    NavigationStack {
-      Form {
-        Section {
-          TextField("Name", text: $name)
-          TextField("URL", text: $url)
-            .textContentType(.URL)
-            #if os(iOS)
-            .textInputAutocapitalization(.never)
-            #endif
-            .autocorrectionDisabled()
-        }
-        Section("SSH Host") {
+    KitSheet(
+      title: "Edit Web Session", meta: editing.sidebarTitle, systemImage: "globe", hue: .teal
+    ) {
+      FormCard {
+        FormRow("Name", help: "Empty takes the page's title", systemImage: "character.cursor.ibeam", hue: .teal,
+                field: TextField("Name", text: $name))
+        FormRow("URL", systemImage: "link", hue: .teal, field: urlField)
+      }
+      FormCard(footer: sshConfigID == nil ? nil : "The host's localhost is tunnelled to the page.") {
+        FormRow("SSH Host", systemImage: "network", hue: .blue) {
           Picker("SSH host", selection: $sshConfigID) {
             Text("None (open directly)").tag(nil as UUID?)
             ForEach(model.connections) { config in
               Text(config.displayName).tag(config.id as UUID?)
             }
           }
-          if sshConfigID != nil {
-            Text("The host's localhost will be tunnelled to the WebView.")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-          }
+          .labelsHidden()
+          .fixedSize()
         }
       }
-      .formStyle(.grouped)
-      .toolbar {
-        ToolbarItem(placement: .confirmationAction) {
-          Button("Save", systemImage: "checkmark") {
-            submit()
-          }
-          .keyboardShortcut(.defaultAction)
-          .disabled(!canSave)
-        }
-      }
-      .navigationTitle("Edit Web Session")
-      #if os(iOS)
-      .navigationBarTitleDisplayMode(.inline)
-      #endif
+    } footer: {
+      Button("Cancel") { dismiss() }
+        .keyboardShortcut(.cancelAction)
+      Button("Save") { submit() }
+        .buttonStyle(.kitPrimary)
+        .keyboardShortcut(.defaultAction)
+        .disabled(!canSave)
     }
+  }
+
+  private var urlField: some View {
+    #if os(iOS)
+    TextField("https://", text: $url).textContentType(.URL).textInputAutocapitalization(.never)
+      .autocorrectionDisabled()
+    #else
+    TextField("https://", text: $url).textContentType(.URL).autocorrectionDisabled()
+    #endif
   }
 
   private func submit() {

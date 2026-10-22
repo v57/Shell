@@ -25,6 +25,7 @@ struct ActionRunsView: View {
     Group {
       if showsTerminal {
         TerminalView(session: session)
+          .terminalPrompts(session)
           .transition(.opacity)
       } else {
         ScrollView {

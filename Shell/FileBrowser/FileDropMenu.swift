@@ -1,3 +1,4 @@
+import ComponentKit
 import ShellKit
 import SwiftUI
 #if os(macOS)
@@ -70,17 +71,13 @@ private struct FileDropMenuPresenter: ViewModifier {
         }
         .animation(animates ? .smooth(duration: 0.25) : nil, value: request?.id)
       }
-      .alert(
+      .noticeSheet(
         "Couldn't Drop Files",
         isPresented: Binding(
           get: { showsErrors && model.fileDropError != nil },
           set: { if !$0 { model.fileDropError = nil } }
-        )
-      ) {
-        Button("OK", role: .cancel) {}
-      } message: {
-        Text(model.fileDropError ?? "")
-      }
+        ),
+        message: model.fileDropError ?? "", systemImage: "doc.badge.ellipsis")
     #else
     content
     #endif

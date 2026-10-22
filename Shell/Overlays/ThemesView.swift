@@ -5,7 +5,7 @@ import SwiftUI
 /// picker and the "disable character backgrounds" toggle.
 struct ThemesView: View {
   @Environment(AppModel.self) private var model
-  @Environment(\.dismiss) private var dismiss
+  @Environment(\.kitDismiss) private var dismiss
 
   var body: some View {
     @Bindable var model = model

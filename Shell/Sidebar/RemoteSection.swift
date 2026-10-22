@@ -27,7 +27,7 @@ struct RemoteSectionView: View {
     sectionContent
       // The Edit… action on a saved SSH connection: the same form as new
       // connections, prefilled, saving in place (same id).
-      .sheet(item: $editingConfig) { config in
+      .kitSheet(item: $editingConfig) { config in
         NewConnectionView(config: config)
       }
   }

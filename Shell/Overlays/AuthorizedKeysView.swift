@@ -1,3 +1,4 @@
+import ComponentKit
 import SwiftUI
 import ShellKit
 
@@ -88,7 +89,7 @@ struct AuthorizedKeysView: View {
     .padding(16)
     .frame(minWidth: 420, minHeight: 340)
     .task { await load() }
-    .sheet(isPresented: $showingAddKey) {
+    .kitSheet(isPresented: $showingAddKey) {
       AddKeySheet { line, name, saveToICloud in
         try await addCustomKey(line: line, name: name, saveToICloud: saveToICloud)
       }
@@ -325,7 +326,7 @@ private struct KeyRow: View {
 /// Paste a public key ("ssh-ed25519 AAAA… comment"), name it, and choose
 /// whether to keep it in iCloud for the other machines.
 private struct AddKeySheet: View {
-  @Environment(\.dismiss) private var dismiss
+  @Environment(\.kitDismiss) private var dismiss
   let onAdd: (_ line: String, _ name: String, _ saveToICloud: Bool) async throws -> Void
 
   @State private var line = ""

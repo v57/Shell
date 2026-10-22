@@ -1,3 +1,4 @@
+import ComponentKit
 import SwiftUI
 
 /// The first-launch "choose your features" welcome: hosts `FeatureSelectionView`
@@ -5,7 +6,7 @@ import SwiftUI
 /// does not reappear. Present this as a sheet when
 /// `FeatureFlagsStore.needsFirstLaunchSelection` is true.
 struct FeatureWelcomeView: View {
-  @Environment(\.dismiss) private var dismiss
+  @Environment(\.kitDismiss) private var dismiss
   private let store: FeatureFlagsStore
 
   init(store: FeatureFlagsStore? = nil) {

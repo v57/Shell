@@ -13,6 +13,7 @@ import ShellKit
 ///   --note <name>             shows a demo note
 ///   --actions / --settings    opens that overlay
 ///   --new-database            opens the New Database Connection sheet
+///   --new-connection          opens the New Connection (SSH) sheet
 ///   --run-action <name>       runs that demo action and shows its run
 ///   --database-link <link>    adds a database connection from a link (`sqlite:///path/shop.db`, a server's URL)
 ///   --ssh-host <user@host:port>  adds an SSH host (this Mac's key) named "Test host"; the link's connection goes
@@ -138,7 +139,7 @@ enum ScreenshotDemo {
 
   /// A scene, from its arguments: the first one's at launch, the later ones' in place. Closes what the scene before
   /// opened and clears the command it typed, then selects the terminal, types `--run`'s command, shows `--note`'s note
-  /// and opens `--actions`, `--settings` or `--new-database`.
+  /// and opens `--actions`, `--settings`, `--new-database` or `--new-connection`.
   @MainActor static func open(_ arguments: [String], in model: AppModel) async {
     // The same scene again (its other appearance) is already on screen.
     guard arguments != shown else { return }
@@ -174,6 +175,7 @@ enum ScreenshotDemo {
     if flag("--actions", in: arguments) { model.showingActions = true }
     if flag("--settings", in: arguments) { model.showingSettings = true }
     if flag("--new-database", in: arguments) { model.newDatabaseConnection() }
+    if flag("--new-connection", in: arguments) { model.showingNewConnection = true }
     if let name = value("--run-action", in: arguments), let action = model.actions.all.first(where: { $0.name == name }) {
       model.runAction(action)
       // The run's session, once it has started and printed something.

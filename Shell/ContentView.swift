@@ -96,33 +96,33 @@ struct ContentView: View {
         .focusedSceneValue(\.databaseWindow, showsDatabase ? model.databaseWindow : nil)
         .kitSidebarToggle(columnVisibility: $columnVisibility)
       }
-      .sheet(isPresented: $model.showingNewConnection) {
+      .kitSheet(isPresented: $model.showingNewConnection) {
         NewConnectionView()
       }
       // Database's New and Edit Connection sheets.
       .databaseSheets(model.databaseWindow)
-      .sheet(isPresented: $model.showingNewAction) {
+      .kitSheet(isPresented: $model.showingNewAction) {
         NewActionView(
           action: model.editingAction,
           commands: model.newActionCommands,
           targetSSHConnectionID: model.newActionTargetSSHConnectionID
         )
       }
-      .sheet(isPresented: $model.showingCommandInsert) {
+      .kitSheet(isPresented: $model.showingCommandInsert) {
         CommandInsertView()
       }
-      .sheet(isPresented: $model.showingThemes) {
+      .kitSheet(isPresented: $model.showingThemes) {
         ThemesView()
       }
 #if os(macOS) || os(Windows)
-      .sheet(item: $model.notarizationSetup) { request in
+      .kitSheet(item: $model.notarizationSetup) { request in
         NotarizationSetupView(request: request)
       }
 #endif
       // First-launch "choose your features" welcome (FeatureSelectionView as a
       // sheet). Present once, when the feature-flags store has never been
       // configured; Continue records the selection via markConfigured().
-      .sheet(isPresented: $showFirstLaunchWelcome) {
+      .kitSheet(isPresented: $showFirstLaunchWelcome) {
         FeatureWelcomeView()
       }
       // Notes: refresh on activation (no-push sync trigger — re-fetch shows
@@ -155,13 +155,17 @@ struct ContentView: View {
         }
       }
       .fileDropMenu(showsErrors: true)
-      .alert("Encrypted Storage Error", isPresented: Binding(
-        get: { model.notes.storageError != nil || model.history.storageError != nil },
-        set: { if !$0 { model.notes.storageError = nil; model.history.storageError = nil } }
-      )) {
-        Button("OK", role: .cancel) {}
-      } message: {
-        Text(model.notes.storageError ?? model.history.storageError ?? "Unknown encrypted storage error.")
+      .noticeSheet(
+        "Encrypted Storage Error",
+        isPresented: Binding(
+          get: { model.notes.storageError != nil || model.history.storageError != nil },
+          set: { if !$0 { model.notes.storageError = nil; model.history.storageError = nil } }
+        ),
+        message: model.notes.storageError ?? model.history.storageError ?? "Unknown encrypted storage error.")
+      // Settings, as the kit's sheet over the window (Escape, a click on the
+      // dim, its close button and ⌘, close it).
+      .kitSheet(isPresented: $model.showingSettings) {
+        SettingsView()
       }
 
       // The actions list as an in-window overlay (not a sheet) so it
@@ -179,19 +183,8 @@ struct ContentView: View {
         ActionsOverlayView()
           .transition(.opacity.combined(with: .scale(scale: 0.97)))
       }
-
-      // Settings as an in-window overlay (same instant appear/close pattern as
-      // the Actions overlay above). Backdrop click, Esc, and ⌘, close it.
-      if model.showingSettings {
-        Color.black.opacity(0.001)
-          .ignoresSafeArea()
-          .onTapGesture { model.showingSettings = false }
-        SettingsView()
-          .transition(.opacity.combined(with: .scale(scale: 0.97)))
-      }
     }
     .animation(.easeOut(duration: 0.15), value: model.showingActions)
-    .animation(.easeOut(duration: 0.15), value: model.showingSettings)
     .kitColorScheme(model.appearanceMode.colorScheme)
     // Database's interface: the tree rows in the sidebar, the detail pages and
     // the connection sheets read the model.
@@ -237,14 +230,7 @@ struct ContentView: View {
       }
     }
     .onChange(of: model.showingActions) { _, _ in
-      // The Esc monitor closes whichever overlay is up (actions or settings).
-      // It is armed while EITHER overlay is showing. Both on/off transitions
-      // re-evaluate the need for the monitor.
-      #if os(macOS)
-      updateEscMonitor()
-      #endif
-    }
-    .onChange(of: model.showingSettings) { _, _ in
+      // The Esc monitor closes the actions overlay; it is armed while it shows.
       #if os(macOS)
       updateEscMonitor()
       #endif
@@ -385,6 +371,7 @@ struct ContentView: View {
             // panel only covers it (and blocks its hit-testing) when the
             // Files feature is enabled AND the panel is open.
             TerminalView(session: session)
+              .terminalPrompts(session)
               .id(session.id)
               .transition(detailTransition)
               .terminalFileDrop(session)
@@ -718,20 +705,14 @@ struct ContentView: View {
   }
 
   #if os(macOS)
-  /// Arms/re-arms the local Esc key monitor while either overlay (Actions or
-  /// Settings) is showing, and removes it once both are closed. Esc closes
-  /// whichever overlay is up first.
+  /// Arms the local Esc key monitor while the Actions overlay shows, and
+  /// removes it once it closes (Settings is a kit sheet, which handles Esc).
   private func updateEscMonitor() {
-    let anyOverlay = model.showingActions || model.showingSettings
-    if anyOverlay {
+    if model.showingActions {
       if escMonitor == nil {
         escMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
           if event.keyCode == 53 {   // Esc
-            if AppModel.shared.showingActions {
-              AppModel.shared.showingActions = false
-            } else if AppModel.shared.showingSettings {
-              AppModel.shared.showingSettings = false
-            }
+            AppModel.shared.showingActions = false
             return nil
           }
           return event

@@ -1,13 +1,14 @@
+import ComponentKit
 import Foundation
 import SwiftUI
 import ShellKit
 
-/// Sheet for creating a NEW SSH connection, or EDITING a saved one (when
-/// initialized with a `config`): fields prefill and the toolbar button
+/// The kit sheet for creating a NEW SSH connection, or EDITING a saved one
+/// (when initialized with a `config`): fields prefill and the footer's button
 /// saves in place (same id) instead of connecting.
 struct NewConnectionView: View {
   @Environment(AppModel.self) private var model
-  @Environment(\.dismiss) private var dismiss
+  @Environment(\.kitDismiss) private var dismiss
   
   /// Non-nil when editing a saved connection.
   private let editing: SSHConfig?
@@ -43,70 +44,80 @@ struct NewConnectionView: View {
   }
   
   var body: some View {
-    NavigationStack {
-      VStack(spacing: 0) {
-        Form {
-          Section {
-            TextField("Host", text: $host).textContentType(.URL)
-            TextField("User", text: $user).textContentType(.username)
-            TextField("Name \(host)", text: $name)
-            TextField("Port", value: $port, format: .number)
-          }
-          
-          Section("Authentication") {
-            Picker("Method", selection: $authMethod) {
-              ForEach(SSHConfig.AuthMethod.allCases) { method in
-                Text(method.label).tag(method)
-              }
-            }
-            if authMethod == .password {
-              SecureField("Password", text: $password)
-                .textContentType(.password)
-              Toggle("Save in Keychain", isOn: $savePassword)
+    KitSheet(
+      title: editing == nil ? "New Connection" : "Edit Connection",
+      meta: editing == nil ? "An SSH host to open terminals on" : editing?.displayName,
+      systemImage: "network", hue: .blue
+    ) {
+      FormCard {
+        FormRow("Host", systemImage: "server.rack", hue: .blue, field: hostField)
+        FormRow("User", systemImage: "person", hue: .blue, field: userField)
+        FormRow("Name", help: "Shown in the sidebar", systemImage: "character.cursor.ibeam", hue: .blue,
+                field: TextField(host.isEmpty ? "Optional" : host, text: $name))
+        FormRow("Port", systemImage: "number", hue: .blue, field: TextField("22", value: $port, format: .number))
+      }
+      FormCard("Authentication") {
+        FormRow("Method", systemImage: "key", hue: .indigo) {
+          Picker("Method", selection: $authMethod) {
+            ForEach(SSHConfig.AuthMethod.allCases) { method in
+              Text(method.label).tag(method)
             }
           }
-          
-          if authMethod == .keychainKey {
-            Section {
-              KeyRow(
-                label: "Default key",
-                fingerprint: model.publicKeyFingerprint(),
-                onCopy: {
-                  model.copyPublicKey()
-                  keyError = model.publicKeyError
-                }
-              )
-            } header: {
-              Text("SSH key")
-            } footer: {
-              Text("Add this key to the server's ~/.ssh/authorized_keys to use key authentication.")
-            }
-          }
-        }.formStyle(.grouped)
-      }.toolbar {
-        ToolbarItem(placement: .cancellationAction) {
-          Button("Cancel", systemImage: "xmark") { dismiss() }
-            .keyboardShortcut(.cancelAction)
+          .labelsHidden()
+          .fixedSize()
         }
-        ToolbarItem(placement: .confirmationAction) {
-          Button(editing == nil ? "Connect" : "Save", systemImage: "checkmark") {
-            submit()
-          }.keyboardShortcut(.defaultAction).disabled(!canConnect)
+        if authMethod == .password {
+          FormRow("Password", systemImage: "ellipsis.rectangle", hue: .indigo,
+                  field: SecureField(editing?.authMethod == .password ? "Unchanged" : "Password", text: $password)
+                    .textContentType(.password))
+          FormRow("Save in Keychain", systemImage: "lock", hue: .indigo) {
+            Toggle("Save in Keychain", isOn: $savePassword).labelsHidden()
+          }
         }
-      }.alert("Could not copy public key", isPresented: Binding(
-        get: { keyError != nil },
-        set: { if !$0 { keyError = nil } }
-      )) {
-        Button("OK", role: .cancel) {}
-      } message: {
-        Text(keyError ?? "")
-      }.navigationTitle(editing == nil ? "New Connection" : "Edit Connection")
-#if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-#endif
+      }
+      if authMethod == .keychainKey {
+        FormCard("SSH key", footer: "Add this key to the server's ~/.ssh/authorized_keys to use key authentication.") {
+          FormRow("Default key", help: model.publicKeyFingerprint(), systemImage: "key.horizontal", hue: .gray) {
+            Button("Copy", systemImage: "doc.on.doc") {
+              model.copyPublicKey()
+              keyError = model.publicKeyError
+            }
+            .buttonStyle(.kit)
+            .help("Copy the default key's public key")
+          }
+        }
+      }
+    } footer: {
+      if let keyError {
+        SheetStatus(keyError, systemImage: "exclamationmark.triangle", hue: .red)
+      }
+      Button("Cancel") { dismiss() }
+        .keyboardShortcut(.cancelAction)
+      Button(editing == nil ? "Connect" : "Save") { submit() }
+        .buttonStyle(.kitPrimary)
+        .keyboardShortcut(.defaultAction)
+        .disabled(!canConnect)
     }
   }
-  
+
+  private var hostField: some View {
+    #if os(iOS)
+    TextField("example.com", text: $host).textContentType(.URL).textInputAutocapitalization(.never)
+      .autocorrectionDisabled()
+    #else
+    TextField("example.com", text: $host).textContentType(.URL).autocorrectionDisabled()
+    #endif
+  }
+
+  private var userField: some View {
+    #if os(iOS)
+    TextField("User", text: $user).textContentType(.username).textInputAutocapitalization(.never)
+      .autocorrectionDisabled()
+    #else
+    TextField("User", text: $user).textContentType(.username).autocorrectionDisabled()
+    #endif
+  }
+
   private func submit() {
     let config = SSHConfig(
       id: editing?.id ?? UUID(),
@@ -137,34 +148,5 @@ struct NewConnectionView: View {
       model.connect(to: config)
     }
     dismiss()
-  }
-}
-
-/// One row in the SSH key section: label + fingerprint + copy button.
-private struct KeyRow: View {
-  let label: String
-  let fingerprint: String?
-  let onCopy: () -> Void
-  
-  var body: some View {
-    HStack {
-      Text(label)
-        .foregroundStyle(.secondary)
-      Spacer()
-      if let fingerprint {
-        Text(fingerprint)
-          .font(.caption.monospaced())
-          .lineLimit(1)
-          .truncationMode(.middle)
-          .textSelection(.enabled)
-      }
-      Button {
-        onCopy()
-      } label: {
-        Image(systemName: "doc.on.doc")
-      }
-      .buttonStyle(.borderless)
-      .help("Copy \(label.lowercased()) public key")
-    }
   }
 }
