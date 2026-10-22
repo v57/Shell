@@ -284,6 +284,22 @@ private struct SSHConfigRow: View {
       }
     }
     .animation(.kit, value: isConnected)
-    .help(hub.map { "\($0) via Hub, at its Hub Network address" } ?? "")
+    .modifier(HubDeviceHelp(deviceName: hub))
+  }
+}
+
+/// A Hub device's row explains itself in the kit's tooltip: the device, and that it's reached at its Hub Network
+/// address. Other hosts have none.
+private struct HubDeviceHelp: ViewModifier {
+  let deviceName: String?
+
+  func body(content: Content) -> some View {
+    if let deviceName {
+      content.kitHelp(
+        "\(deviceName) via Hub", meta: "At its Hub Network address",
+        systemImage: "point.3.connected.trianglepath.dotted", hue: .gray)
+    } else {
+      content
+    }
   }
 }

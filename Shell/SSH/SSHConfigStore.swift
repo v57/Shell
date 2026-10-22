@@ -74,6 +74,17 @@ final class SSHConfigStore {
   /// The Hub's name for the device a saved connection reaches, nil for a host the user added.
   func hubDeviceName(for id: UUID) -> String? { hubRoute(for: id)?.deviceName }
 
+  #if DEBUG
+  /// The screenshot demo's Hub devices (`ScreenshotDemo`): a host with the route the Vault app would keep for it.
+  func saveDemoHubDevice(_ config: SSHConfig) {
+    save(config)
+    guard var host = vault.hosts.first(where: { $0.id == config.id.uuidString }) else { return }
+    host.hub = VaultHost.HubRoute(hubID: "demo", deviceID: config.name, deviceName: config.name, platform: "macos")
+    vault.save(host)
+    reload()
+  }
+  #endif
+
   /// Re-reads the shared hosts (another app or device changed them).
   func refreshOnActivation() {
     vault.reload()

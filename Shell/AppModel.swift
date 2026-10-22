@@ -320,6 +320,10 @@ final class AppModel {
   var connections: [SSHConfig] { connectionStore.all }
   /// The device name of a saved connection that is a device on the user's Hub (see `SSHConfigStore.hubRoute`).
   func hubDeviceName(for config: SSHConfig) -> String? { connectionStore.hubDeviceName(for: config.id) }
+  #if DEBUG
+  /// Saves a demo host as a device on the user's Hub (`ScreenshotDemo`).
+  func saveDemoHubDevice(_ config: SSHConfig) { connectionStore.saveDemoHubDevice(config) }
+  #endif
 
   /// Persists the sidebar's saved database connections (SwiftData, shared
   /// container, encrypted — mirrors SSHConfigStore). Cheap `@Observable`

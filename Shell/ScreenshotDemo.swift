@@ -74,6 +74,12 @@ enum ScreenshotDemo {
     let staging = SSHConfig(name: "staging", host: "staging.atlas.example.com", user: "maya")
     let pi = SSHConfig(name: "Raspberry Pi", host: "pi.local", user: "pi")
     for config in [atlas, staging, pi] { model.updateConnection(config) }
+    #if DEBUG
+    // Devices on the user's Hub, as the Vault app keeps them: the Hub glyph and its tooltip.
+    for name in ["studio-mac", "home-nas"] {
+      model.saveDemoHubDevice(SSHConfig(name: name, host: "\(name).hub.internal", user: "maya"))
+    }
+    #endif
 
     model.saveDatabaseConnection(
       DatabaseConnection(
