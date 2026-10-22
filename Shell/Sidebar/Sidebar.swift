@@ -49,20 +49,20 @@ struct SidebarView: View {
       #if os(macOS) || os(Windows)
       // This Mac's terminals, persistent screen/tmux sessions and history.
       LocalSectionView(state: state)
-        .sidebarSticky()
+        .kitSticky()
       #endif
 
       RemoteSectionView(state: state)
-        .sidebarSticky(bottom: .title)
+        .kitSticky(bottom: .title)
 
       DatabasesSectionView(state: state)
-        .sidebarSticky(bottom: .title)
+        .kitSticky(bottom: .title)
 
       WebSectionView(state: state)
-        .sidebarSticky()
+        .kitSticky()
 
       NotesSectionView(state: state)
-        .sidebarSticky(bottom: .title)
+        .kitSticky(bottom: .title)
 
       #if os(macOS)
       TextFilesSectionView(state: state)
@@ -559,30 +559,5 @@ struct DetachReturnBadge: View {
       }
     }
     .animation(.kit, value: isDetached)
-  }
-}
-
-// MARK: - Sticky sections
-
-extension View {
-  /// The kit's sticky sections (`kitSticky`) where they lay out right: the Mac, Windows and iPad. On iPhone, under the
-  /// root screen's large title, a sticky section's header sits above its card and another section's title sticks
-  /// over the list, so the iPhone scrolls as usual until the kit fixes that.
-  func sidebarSticky(top: KitStickyTop = .titleWhileVisible, bottom: KitStickyBottom = .none) -> some View {
-    modifier(SidebarSticky(top: top, bottom: bottom))
-  }
-}
-
-private struct SidebarSticky: ViewModifier {
-  let top: KitStickyTop
-  let bottom: KitStickyBottom
-  @Environment(\.kitIdiom) private var idiom
-
-  func body(content: Content) -> some View {
-    if idiom == .phone {
-      content
-    } else {
-      content.kitSticky(top: top, bottom: bottom)
-    }
   }
 }
