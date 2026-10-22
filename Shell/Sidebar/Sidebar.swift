@@ -565,9 +565,9 @@ struct DetachReturnBadge: View {
 // MARK: - Sticky sections
 
 extension View {
-  /// The kit's sticky sections (`kitSticky`) where they lay out right: with a pointer (Mac, Windows). On iPhone a
-  /// sticky section's header sits above its card (lifted over the large title), so touch layouts scroll as usual
-  /// until the kit fixes that.
+  /// The kit's sticky sections (`kitSticky`) where they lay out right: the Mac, Windows and iPad. On iPhone, under the
+  /// root screen's large title, a sticky section's header sits above its card and another section's title sticks
+  /// over the list, so the iPhone scrolls as usual until the kit fixes that.
   func sidebarSticky(top: KitStickyTop = .titleWhileVisible, bottom: KitStickyBottom = .none) -> some View {
     modifier(SidebarSticky(top: top, bottom: bottom))
   }
@@ -579,7 +579,7 @@ private struct SidebarSticky: ViewModifier {
   @Environment(\.kitIdiom) private var idiom
 
   func body(content: Content) -> some View {
-    if idiom.isTouch {
+    if idiom == .phone {
       content
     } else {
       content.kitSticky(top: top, bottom: bottom)
