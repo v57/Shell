@@ -26,8 +26,10 @@ struct NewActionView: View {
   @State private var keepAfterCompletion = false
   @State private var seededImplicitConnections = false
 
-  init(action: Action? = nil, commands: String = "", targetSSHConnectionID: UUID? = nil) {
+  /// `draft` fills a new action's form (a smart action added to Your actions).
+  init(action: Action? = nil, draft: Action? = nil, commands: String = "", targetSSHConnectionID: UUID? = nil) {
     self.editing = action
+    let action = action ?? draft
     _name = State(initialValue: action?.name ?? "")
     _category = State(initialValue: action?.category ?? "")
     _appliesToLocal = State(initialValue: action?.appliesToLocal ?? (targetSSHConnectionID == nil))

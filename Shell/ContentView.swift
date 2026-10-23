@@ -104,6 +104,7 @@ struct ContentView: View {
       .kitSheet(isPresented: $model.showingNewAction) {
         NewActionView(
           action: model.editingAction,
+          draft: model.newActionDraft,
           commands: model.newActionCommands,
           targetSSHConnectionID: model.newActionTargetSSHConnectionID
         )

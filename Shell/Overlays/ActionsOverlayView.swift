@@ -10,8 +10,8 @@ import ShellIntegrations
 ///
 /// Results are group cards: the smart actions of the active local directory's
 /// schemes (Code's CodeActions: run, build, test, lint, clean and distribute,
-/// live while one runs), your own actions, and the apps that open the
-/// directory. With a terminal selected only the actions applicable to its
+/// live while one runs; a group's + adds one to your actions), your own
+/// actions, and the apps that open the directory. With a terminal selected only the actions applicable to its
 /// environment are shown; with none selected everything is listed and still
 /// runnable — `runAction` defaults to the local machine (macOS; on iOS there
 /// is no local pty, so they stay disabled). The scope pop-up picks the
@@ -206,6 +206,8 @@ struct ActionsOverlayView: View {
             scheme.name, meta: [scheme.toolchain.displayName, scheme.directory.lastPathComponent],
             systemImage: scheme.toolchain.symbolName, hue: .blue
           ) {
+            AddToActionsMenu(scheme: scheme) { addToActions($0, scheme: scheme) }
+          } items: {
             ForEach(kinds, id: \.self) { kind in
               smartActionItem(kind, scheme: scheme, directory: directory)
             }
@@ -220,6 +222,16 @@ struct ActionsOverlayView: View {
           }
         }
       }
+    }
+  }
+
+  /// Opens the New Action sheet for `kind` of `scheme`, or the action it
+  /// already became.
+  private func addToActions(_ kind: ActionKind, scheme: ActionScheme) {
+    if let saved = model.savedAction(for: kind, scheme: scheme) {
+      model.editAction(saved)
+    } else {
+      model.addSmartActionToActions(kind, scheme: scheme)
     }
   }
 
@@ -238,6 +250,13 @@ struct ActionsOverlayView: View {
       }
     }
     .help(running ? "Stop" : "\(kind.title) \(scheme.name)")
+    .kitContextMenu {
+      if model.savedAction(for: kind, scheme: scheme) != nil {
+        Button("Edit Action…") { addToActions(kind, scheme: scheme) }
+      } else if model.smartActionCommand(kind, scheme: scheme) != nil {
+        Button("Add to Your Actions…") { addToActions(kind, scheme: scheme) }
+      }
+    }
   }
   #endif
 
@@ -298,6 +317,34 @@ struct ActionsOverlayView: View {
 }
 
 #if os(macOS) || os(Windows)
+/// A smart-action group's + button: a menu of the scheme's smart actions to
+/// add to Your actions (the New Action sheet, filled in). Added ones are
+/// checked and open their action instead.
+private struct AddToActionsMenu: View {
+  @Environment(AppModel.self) private var model
+  let scheme: ActionScheme
+  let pick: (ActionKind) -> Void
+  @State private var isOpen = false
+
+  var body: some View {
+    let kinds = ActionKind.allCases.filter {
+      model.smartActionCommand($0, scheme: scheme) != nil && ($0.isDistribution ? scheme.supports($0) : true)
+    }
+    Button("Add to Your Actions", systemImage: "plus") { isOpen = true }
+      .help("Add \(scheme.name)'s smart actions to Your actions")
+      .kitMenu(isPresented: $isOpen) {
+        KitMenuSection("Add to Your Actions") {
+          ForEach(kinds, id: \.self) { kind in
+            let isSaved = model.savedAction(for: kind, scheme: scheme) != nil
+            Toggle(isOn: Binding(get: { isSaved }, set: { _ in pick(kind) })) {
+              Label(kind.title, systemImage: SmartActionStyle(kind).systemImage)
+            }
+          }
+        }
+      }
+  }
+}
+
 /// A smart action's tile: Run green play, Build orange hammer, Test purple
 /// diamond, Lint teal seal, Clean gray trash, distribution blue.
 private struct SmartActionStyle {

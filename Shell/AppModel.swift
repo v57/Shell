@@ -164,6 +164,9 @@ final class AppModel {
   var showingCommandInsert = false
   /// The action being edited in the sheet (nil = creating a new one).
   var editingAction: Action?
+  /// A new action the sheet starts from (a smart action added to Your
+  /// actions); nil = a blank form.
+  var newActionDraft: Action?
   var newActionCommands = ""
   var newActionTargetSSHConnectionID: UUID?
 
@@ -283,6 +286,7 @@ final class AppModel {
   /// Opens the create-action sheet (fresh form).
   func createAction(commands: String = "", from targetSession: TerminalSession? = nil) {
     editingAction = nil
+    newActionDraft = nil
     newActionCommands = commands
     let session = targetSession ?? selectedSession
     if let session {
@@ -308,6 +312,7 @@ final class AppModel {
   /// Opens the create-action sheet pre-filled with `action`.
   func editAction(_ action: Action) {
     editingAction = action
+    newActionDraft = nil
     newActionCommands = ""
     newActionTargetSSHConnectionID = nil
     showingNewAction = true
@@ -2263,23 +2268,17 @@ final class AppModel {
   /// current run for that directory (stops it first); archives to history on
   /// completion via `actionSessionCompleted`.
   func runSmartAction(_ kind: ActionKind, scheme: ActionScheme, in directory: URL) {
-    guard let schemeCommand = scheme.terminalCommand(for: kind) else { return }
     // An Export needs notarization set up first: the sheet checks it and
     // runs the action again once a profile is saved.
-    var environment = ""
-    if kind.needsNotarization {
-      guard let notaryProfile else {
-        notarizationSetup = NotarizationSetupRequest(scheme: scheme, directory: directory)
-        return
-      }
-      environment = "export NOTARY_PROFILE=\(shellQuote(notaryProfile)) && "
+    if kind.needsNotarization, notaryProfile == nil {
+      notarizationSetup = NotarizationSetupRequest(scheme: scheme, directory: directory)
+      return
     }
+    guard let command = smartActionCommand(kind, scheme: scheme) else { return }
 
     // Replace semantics: stop the current run for this dir before starting.
     stopSmartAction(in: directory)
 
-    // LocalPTYTransport has no working-dir parameter, so cd into the project.
-    let command = "\(environment)cd \(shellQuote(scheme.directory.path)) && \(schemeCommand)"
     let spec = ActionSpec(
       action: Action(
         id: UUID(),
@@ -2308,6 +2307,44 @@ final class AppModel {
     }
     sessions.append(newSession)
     // No focus: the run stays in Running, the user's selection is unchanged.
+  }
+
+  /// The script a smart action runs: CodeActions' terminal command in the
+  /// scheme's folder (LocalPTYTransport has no working-dir parameter, so it
+  /// cds there), with the notary profile for an Export. nil when the scheme
+  /// has no command for `kind`, or an Export has no profile yet.
+  func smartActionCommand(_ kind: ActionKind, scheme: ActionScheme) -> String? {
+    guard let schemeCommand = scheme.terminalCommand(for: kind) else { return nil }
+    var environment = ""
+    if kind.needsNotarization {
+      guard let notaryProfile else { return nil }
+      environment = "export NOTARY_PROFILE=\(shellQuote(notaryProfile)) && "
+    }
+    return "\(environment)cd \(shellQuote(scheme.directory.path)) && \(schemeCommand)"
+  }
+
+  /// The saved action that runs `kind` of `scheme`, if one was added.
+  func savedAction(for kind: ActionKind, scheme: ActionScheme) -> Action? {
+    guard let command = smartActionCommand(kind, scheme: scheme) else { return nil }
+    return actions.all.first { $0.commands == command }
+  }
+
+  /// Opens the New Action sheet with `kind` of `scheme` filled in (name,
+  /// the project's folder as its category, the command), so the smart
+  /// action becomes one of Your actions: runnable from any terminal,
+  /// with dependencies, a web address and the rest of an action's options.
+  func addSmartActionToActions(_ kind: ActionKind, scheme: ActionScheme) {
+    guard let command = smartActionCommand(kind, scheme: scheme) else { return }
+    editingAction = nil
+    newActionDraft = Action(
+      name: "\(kind.title) \(scheme.name)",
+      category: scheme.directory.lastPathComponent,
+      appliesToLocal: true,
+      commands: command
+    )
+    newActionCommands = ""
+    newActionTargetSSHConnectionID = nil
+    showingNewAction = true
   }
 
   /// Terminates the running smart-action session for a directory and takes
