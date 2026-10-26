@@ -7,15 +7,15 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		C0C0CC000000000000000003 /* ComponentKit in Frameworks */ = {isa = PBXBuildFile; productRef = C0C0CC000000000000000002 /* ComponentKit */; };
 		2611F6FA3042CFF000E1213E /* MarkdownKit in Frameworks */ = {isa = PBXBuildFile; productRef = 2611F6F93042CFF000E1213E /* MarkdownKit */; };
 		26C2D067302C066C008363F2 /* ShellKit in Frameworks */ = {isa = PBXBuildFile; productRef = 26C2D066302C066C008363F2 /* ShellKit */; };
+		9679FEAC025FAE0AB39B25A5 /* VaultKit in Frameworks */ = {isa = PBXBuildFile; productRef = 93C4E2596D30DACA6BC3EEA7 /* VaultKit */; };
 		A10000000000000000000002 /* ShellIntegrations in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000001 /* ShellIntegrations */; };
 		A10000000000000000000004 /* ShellMonitoring in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000003 /* ShellMonitoring */; };
 		A35000000000000000000002 /* ShellDatabaseEngines in Frameworks */ = {isa = PBXBuildFile; productRef = A35000000000000000000001 /* ShellDatabaseEngines */; };
+		C0C0CC000000000000000003 /* ComponentKit in Frameworks */ = {isa = PBXBuildFile; productRef = C0C0CC000000000000000002 /* ComponentKit */; };
 		D5C0DE000000000000000003 /* UpdateKit in Frameworks */ = {isa = PBXBuildFile; platformFilters = (macos, ); productRef = D5C0DE000000000000000002 /* UpdateKit */; };
 		DE5C0DE00000000000000003 /* DevScreenshots in Frameworks */ = {isa = PBXBuildFile; productRef = DE5C0DE00000000000000002 /* DevScreenshots */; };
-		9679FEAC025FAE0AB39B25A5 /* VaultKit in Frameworks */ = {isa = PBXBuildFile; productRef = 93C4E2596D30DACA6BC3EEA7 /* VaultKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -183,7 +183,7 @@
 			mainGroup = 000000000000000000000001;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				26C2D065302C066C008363F2 /* XCLocalSwiftPackageReference "../Shell" */,
+				26C2D065302C066C008363F2 /* XCLocalSwiftPackageReference "." */,
 				A200000000000000000000E1 /* XCRemoteSwiftPackageReference "Database" */,
 				2611F6F83042CFF000E1213E /* XCRemoteSwiftPackageReference "Markdown" */,
 				D5C0DE000000000000000001 /* XCRemoteSwiftPackageReference "UpdateKit" */,
@@ -403,7 +403,7 @@
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
-				INFOPLIST_KEY_UIBackgroundModes = remote-notification;
+				INFOPLIST_KEY_UIBackgroundModes = "remote-notification";
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
@@ -466,7 +466,7 @@
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
-				INFOPLIST_KEY_UIBackgroundModes = remote-notification;
+				INFOPLIST_KEY_UIBackgroundModes = "remote-notification";
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
@@ -581,7 +581,7 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		26C2D065302C066C008363F2 /* XCLocalSwiftPackageReference "../Shell" */ = {
+		26C2D065302C066C008363F2 /* XCLocalSwiftPackageReference "." */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = .;
 		};
@@ -599,6 +599,14 @@
 		A200000000000000000000E1 /* XCRemoteSwiftPackageReference "Database" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/v57/Database.git";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
+		};
+		C0C0CC000000000000000001 /* XCRemoteSwiftPackageReference "Component" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/v57/Component.git";
 			requirement = {
 				branch = main;
 				kind = branch;
@@ -628,22 +636,9 @@
 				kind = branch;
 			};
 		};
-		C0C0CC000000000000000001 /* XCRemoteSwiftPackageReference "Component" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/v57/Component.git";
-			requirement = {
-				branch = main;
-				kind = branch;
-			};
-		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		C0C0CC000000000000000002 /* ComponentKit */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = C0C0CC000000000000000001 /* XCRemoteSwiftPackageReference "Component" */;
-			productName = ComponentKit;
-		};
 		2611F6F93042CFF000E1213E /* MarkdownKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = MarkdownKit;
@@ -651,6 +646,11 @@
 		26C2D066302C066C008363F2 /* ShellKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = ShellKit;
+		};
+		93C4E2596D30DACA6BC3EEA7 /* VaultKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = ED38B9478C4FFC2CA253C5C2 /* XCRemoteSwiftPackageReference "Vault" */;
+			productName = VaultKit;
 		};
 		A10000000000000000000001 /* ShellIntegrations */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -664,14 +664,14 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = ShellDatabaseEngines;
 		};
+		C0C0CC000000000000000002 /* ComponentKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C0C0CC000000000000000001 /* XCRemoteSwiftPackageReference "Component" */;
+			productName = ComponentKit;
+		};
 		D5C0DE000000000000000002 /* UpdateKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = UpdateKit;
-		};
-		93C4E2596D30DACA6BC3EEA7 /* VaultKit */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = ED38B9478C4FFC2CA253C5C2 /* XCRemoteSwiftPackageReference "Vault" */;
-			productName = VaultKit;
 		};
 		DE5C0DE00000000000000002 /* DevScreenshots */ = {
 			isa = XCSwiftPackageProductDependency;

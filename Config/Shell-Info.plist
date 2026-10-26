@@ -20,8 +20,6 @@
 			<key>LSHandlerRank</key>
 			<string>Alternate</string>
 		</dict>
-		<!-- A folder opened with Shell (Open With, a drop on the Dock icon, `open -a Shell <folder>`) starts a
-		     terminal there. Alternate: Finder stays the folders' default app. -->
 		<dict>
 			<key>CFBundleTypeName</key>
 			<string>Folder</string>
@@ -35,8 +33,6 @@
 			</array>
 		</dict>
 	</array>
-	<!-- Shell's own drag types. public.item, never public.data: Finder takes the first data type of a drag and
-	     saved a Files-panel row's description as a "Shell File" clipping instead of copying the file. -->
 	<key>UTExportedTypeDeclarations</key>
 	<array>
 		<dict>
