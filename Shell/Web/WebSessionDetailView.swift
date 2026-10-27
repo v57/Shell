@@ -1,12 +1,11 @@
 import ComponentKit
 import SwiftUI
-#if canImport(WebKit)
-import WebKit
-import _WebKit_SwiftUI
+#if canImport(PlatformWeb)
+import PlatformWeb
 #endif
 
 /// The detail pane for an opened `.web` session: renders the session's URL in
-/// the system SwiftUI `WebView`.
+/// Platform's `PlatformWebView` (WKWebView on Apple platforms, WebKitGTK on Linux).
 ///
 /// For a plain web session (`tunnel == nil`) it loads the stored URL directly.
 /// For an ssh-owned session the AppModel supplies a `WebSessionRuntime` whose
@@ -15,14 +14,8 @@ import _WebKit_SwiftUI
 /// URL, or a clear error in place of the blank WebView if the tunnel cannot be
 /// established or drops.
 ///
-/// The system SwiftUI Web API (`WebKit.WebPage` + `WebView`, available macOS /
-/// iOS 26+) is used whenever it is available — which is always on this app's
-/// 27.0 deployment target. Owning the `WebPage` (instead of the `WebView(url:)`
-/// convenience) is what gives the app a handle on the loaded page's HTML
-/// `<title>`, which names the session (`AppModel.autoNameWebSession`). A thin
-/// representable fallback exists ONLY for a hypothetical pre-26 build (it is
-/// dead code here) so the platform contract holds on any target that might ever
-/// lower its deployment; that fallback cannot report a title.
+/// Owning the `PlatformWebPage` is what gives the app a handle on the loaded
+/// page's HTML `<title>`, which names the session (`AppModel.autoNameWebSession`).
 struct WebSessionDetailView: View {
   @Environment(AppModel.self) private var model
   let web: WebSession
@@ -73,23 +66,16 @@ struct WebSessionDetailView: View {
 
   @ViewBuilder
   private func webView(for url: URL) -> some View {
-    #if !canImport(WebKit)
-    // No web view where WebKit is missing (Windows): the page opens in the browser.
-    BrowserPageView(url: url)
+    #if canImport(PlatformWeb)
+    SystemWebView(web: web, url: url)
     #else
-    if #available(macOS 26.0, iOS 26.0, *) {
-      SystemWebView(web: web, url: url)
-    } else {
-      // Dead code on the 27.0 deployment target — present only to satisfy the
-      // "thin representable fallback where the system API is unavailable"
-      // contract. Not a hand-rolled browser: a 1:1 WKWebView wrapper.
-      WebViewRepresentableFallback(url: url)
-    }
+    // No web view where Platform's web library isn't linked (Windows): the page opens in the browser.
+    BrowserPageView(url: url)
     #endif
   }
 }
 
-#if !canImport(WebKit)
+#if !canImport(PlatformWeb)
 /// The page's address and a button that opens it in the system browser.
 private struct BrowserPageView: View {
   let url: URL
@@ -103,21 +89,18 @@ private struct BrowserPageView: View {
   }
 }
 #else
-
-
-/// The system SwiftUI web view, plus the page-title observer that names the
-/// session. Owns the `WebPage` so the loaded document's `<title>` is readable
-/// (`WebPage` is `Observable`, so reading `page.title` in `body` re-runs it and
-/// fires `.onChange` when the loaded page's title arrives or changes).
-@available(macOS 26.0, iOS 26.0, *)
+/// The web view, plus the page-title observer that names the session. Owns the
+/// `PlatformWebPage` so the loaded document's `<title>` is readable (the page is
+/// `Observable`, so reading `page.title` in `body` re-runs it and fires
+/// `.onChange` when the loaded page's title arrives or changes).
 private struct SystemWebView: View {
   @Environment(AppModel.self) private var model
   let web: WebSession
   let url: URL
-  @State private var page = WebPage()
+  @State private var page = PlatformWebPage()
 
   var body: some View {
-    _WebKit_SwiftUI.WebView(page)
+    PlatformWebView(page)
       .onAppear { loadIfNeeded() }
       .onChange(of: url) { _, _ in loadIfNeeded() }
       .onChange(of: page.title) { _, title in
@@ -131,45 +114,7 @@ private struct SystemWebView: View {
   /// coming up re-supplies the same address on a re-render.
   private func loadIfNeeded() {
     guard page.url != url else { return }
-    _ = page.load(url)
+    page.load(url)
   }
 }
-
-#if os(macOS)
-/// Thin representable used ONLY when the system SwiftUI WebView API is
-/// unavailable (pre-macOS 26). Never reached on the 27.0 target.
-private struct WebViewRepresentableFallback: NSViewRepresentable {
-  let url: URL
-
-  func makeNSView(context: Context) -> WKWebView {
-    let view = WKWebView()
-    view.load(URLRequest(url: url))
-    return view
-  }
-
-  func updateNSView(_ nsView: WKWebView, context: Context) {
-    if nsView.url != url {
-      nsView.load(URLRequest(url: url))
-    }
-  }
-}
-#else
-/// Thin representable used ONLY when the system SwiftUI WebView API is
-/// unavailable (pre-iOS 26). Never reached on the 27.0 target.
-private struct WebViewRepresentableFallback: UIViewRepresentable {
-  let url: URL
-
-  func makeUIView(context: Context) -> WKWebView {
-    let view = WKWebView()
-    view.load(URLRequest(url: url))
-    return view
-  }
-
-  func updateUIView(_ uiView: WKWebView, context: Context) {
-    if uiView.url != url {
-      uiView.load(URLRequest(url: url))
-    }
-  }
-}
-#endif
 #endif

@@ -15,6 +15,7 @@ import ShellKit
 ///   --new-database            opens the New Database Connection sheet
 ///   --new-connection          opens the New Connection (SSH) sheet
 ///   --run-action <name>       runs that demo action and shows its run
+///   --web <url>               opens a web session on that page
 ///   --database-link <link>    adds a database connection from a link (`sqlite:///path/shop.db`, a server's URL)
 ///   --ssh-host <user@host:port>  adds an SSH host (this Mac's key) named "Test host"; the link's connection goes
 ///                             through it
@@ -176,6 +177,7 @@ enum ScreenshotDemo {
     if flag("--settings", in: arguments) { model.showingSettings = true }
     if flag("--new-database", in: arguments) { model.newDatabaseConnection() }
     if flag("--new-connection", in: arguments) { model.showingNewConnection = true }
+    if let address = value("--web", in: arguments) { model.openWebSession(WebSession(url: address)) }
     if let name = value("--run-action", in: arguments), let action = model.actions.all.first(where: { $0.name == name }) {
       model.runAction(action)
       // The run's session, once it has started and printed something.
