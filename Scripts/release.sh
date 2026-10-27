@@ -23,10 +23,14 @@ mkdir -p $out
 cd $root
 
 echo "Archiving"
-# LTO, and ld-archive-prelink so Xcode's per-package `ld -r` doesn't keep unused package code.
+# LTO, and ld-archive-prelink so Xcode's per-package `ld -r` doesn't keep unused package code. actool-icon-slim
+# stores the flattened pictures of an Icon Composer icon as HEVC instead of lossless (Assets.car 1.7 MB -> 140 KB);
+# Xcode reads a tool's version under its file name (com.apple.actool.version), so the copy is named actool.
+install -d $out/icon-slim
+install -m 755 $root/Scripts/actool-icon-slim $out/icon-slim/actool
 xcodebuild archive -project Shell.xcodeproj -scheme Shell -configuration Release \
   -destination 'generic/platform=macOS' -archivePath $out/Shell.xcarchive \
-  SWIFT_LTO=YES ALTERNATE_LINKER_PATH=$root/Scripts/ld-archive-prelink \
+  SWIFT_LTO=YES ALTERNATE_LINKER_PATH=$root/Scripts/ld-archive-prelink ASSETCATALOG_EXEC=$out/icon-slim/actool \
   'OTHER_SWIFT_FLAGS=$(inherited) -Xfrontend -internalize-at-link -Xfrontend -conditional-runtime-records' \
   > $out/archive.log
 
