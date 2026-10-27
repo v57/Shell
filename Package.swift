@@ -132,6 +132,7 @@ package.targets.append(
       .product(name: "Charts", package: "SwiftUI"), .product(name: "SQLite3", package: "SwiftUI"),
       .product(name: "CryptoKit", package: "SwiftUI"), .product(name: "ComponentKit", package: "Component"),
       .product(name: "UpdateKit", package: "UpdateKit"), .product(name: "VaultKit", package: "Vault"),
+      .product(name: "VaultUI", package: "Vault"),
       .product(name: "MarkdownKit", package: "Markdown"), .product(name: "DevScreenshots", package: "Dev"),
       .product(name: "SSHTunnel", package: "Database"), .product(name: "WireKit", package: "Database"),
     ],

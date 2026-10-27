@@ -318,7 +318,7 @@ final class AppModel {
     showingNewAction = true
   }
   
-  private let connectionStore: SSHConfigStore
+  private var connectionStore: SSHConfigStore
   /// Observable source of truth for saved SSH rows. Computed from the
   /// store so saves/reloads (including iCloud sync refreshes) flow through
   /// Observation automatically.
@@ -333,17 +333,35 @@ final class AppModel {
   /// Persists the sidebar's saved database connections (SwiftData, shared
   /// container, encrypted — mirrors SSHConfigStore). Cheap `@Observable`
   /// accessor so SidebarView re-renders on save/reload.
-  private let databaseStore: DatabaseConnectionStore
+  private var databaseStore: DatabaseConnectionStore
   var databaseConnections: [DatabaseConnection] { databaseStore.all }
   /// Database's interface for those connections (DatabaseUI): the live
   /// connections and their trees, browsers and query tabs, saved queries and
   /// the connection sheets. Their SSH tunnels go through Shell's own logins
   /// (`DatabaseTunnels`).
-  let databases: DatabaseModel
+  private(set) var databases: DatabaseModel
   /// The main window's database navigation: the connection, table or query
   /// its detail pane shows (`Selection.databaseItem`), its sheets and its
   /// inspector.
-  let databaseWindow: WindowModel
+  private(set) var databaseWindow: WindowModel
+  /// Personal's database model, which makes the accounts' (`DatabaseModel.model(for:)`: shared folder, imported SSH
+  /// keys and host keys).
+  private let personalDatabases: DatabaseModel
+
+  /// The account the main window shows (`VaultAccountScope`, ../Ideas/Accounts.md): its SSH hosts, database
+  /// connections, notes and their passwords. Shell has one main window, so the window's account is the model's;
+  /// `show(_:)` switches it. Device keys and accepted host keys stay Personal's: they describe this device and the
+  /// servers, whoever works on them. Terminals, actions and web pages are the device's.
+  private(set) var vault: Vault = .shared
+  /// The stores of the accounts shown before, kept while Shell runs, so switching back finds their open databases.
+  private var accountStores: [String: AccountStores] = [:]
+  private struct AccountStores {
+    let connections: SSHConfigStore
+    let databaseConnections: DatabaseConnectionStore
+    let notes: NotesStore
+    let databases: DatabaseModel
+    let databaseWindow: WindowModel
+  }
 
   /// The iCloud registry of every device's public key (this device
   /// publishes on launch; other devices' keys power the authorized-keys
@@ -365,11 +383,13 @@ final class AppModel {
     deviceKeys = DeviceKeyStore()
     databaseStore = DatabaseConnectionStore()
     // Saved queries and the optional DuckDB library live with Shell's data.
-    databases = DatabaseModel(
+    let databases = DatabaseModel(
       folder: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         .appendingPathComponent(Bundle.main.bundleIdentifier ?? "Shell", isDirectory: true)
         .appendingPathComponent("Database", isDirectory: true),
       vault: .shared)
+    self.databases = databases
+    personalDatabases = databases
     databaseWindow = WindowModel(app: databases)
     DatabaseUI.accent = .accentColor
     // Notes gating must not read `self` here (stored properties are still
@@ -1627,6 +1647,53 @@ final class AppModel {
   /// Unlike `connect(to:)` it does not open a session.
   func updateConnection(_ config: SSHConfig) {
     connectionStore.save(config)
+  }
+
+  // MARK: - Accounts
+
+  /// Shows an account's hosts, database connections and notes (the window's `VaultAccountScope`). The account shown
+  /// before keeps its stores and open databases; a selection that belongs to it is cleared, so nothing of one
+  /// account stays on screen in another.
+  func show(_ vault: Vault) {
+    guard vault !== self.vault else { return }
+    notes.flush()
+    accountStores[self.vault.accountID] = AccountStores(
+      connections: connectionStore, databaseConnections: databaseStore, notes: notes, databases: databases,
+      databaseWindow: databaseWindow)
+    let stores =
+      accountStores[vault.accountID].flatMap { $0.databases.vault === vault ? $0 : nil }
+      ?? {
+        let databases = personalDatabases.model(for: vault)
+        return AccountStores(
+          connections: SSHConfigStore(vault: vault), databaseConnections: DatabaseConnectionStore(vault: vault),
+          notes: NotesStore(vault: vault), databases: databases, databaseWindow: WindowModel(app: databases))
+      }()
+    if let selection, !isDevice(selection) { self.selection = nil }
+    self.vault = vault
+    connectionStore = stores.connections
+    databaseStore = stores.databaseConnections
+    notes = stores.notes
+    databases = stores.databases
+    databaseWindow = stores.databaseWindow
+    configureDatabases()
+  }
+
+  /// Whether a selection is the device's (a local terminal, a persistent session, history, an opened file) rather
+  /// than the shown account's.
+  private func isDevice(_ selection: Selection) -> Bool {
+    switch selection {
+    case .screen, .history, .openedFile:
+      return true
+    case .session(let id):
+      guard let session = sessions.first(where: { $0.id == id }) else { return false }
+      switch kind(of: session) {
+      case .local, .screen: return true
+      case .action(let spec): return spec.config == nil
+      case .ssh, .web, .database: return false
+      }
+    case .ssh, .web, .database, .databaseItem, .note:
+      return false
+    }
   }
 
   // MARK: - Database connections

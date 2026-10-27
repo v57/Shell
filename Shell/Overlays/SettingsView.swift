@@ -1,6 +1,7 @@
 import ComponentKit
 import ShellIntegrations
 import SwiftUI
+import VaultUI
 
 /// The Settings panel: the kit's sheet over the main window (`kitSheet` in
 /// ContentView), never a separate window or a system sheet.
@@ -10,6 +11,8 @@ import SwiftUI
 /// - **Features** — the feature-flags panel (`FeatureSelectionView`).
 /// - **Actions** — the shell actions surfaced here so they're reachable on iOS
 ///   (macOS reaches the same actions through the Shell menu).
+/// - **Accounts** — the v57 accounts, the same screen in every app
+///   (`VaultAccountsSettings`; the account picker's Manage Accounts… opens it).
 ///
 /// Presented the same way on macOS and iPad: a card over the dimmed window (a
 /// click on the dim, Esc or its close button closes it); a system sheet on
@@ -34,6 +37,12 @@ struct SettingsView: View {
         }
         SettingsCard(title: "Actions", systemImage: "bolt") {
           SettingsActionsCard()
+        }
+        // The kit's own cards, one per account, under the same header.
+        VStack(alignment: .leading, spacing: 12) {
+          Label("Accounts", systemImage: "person.2")
+            .font(.headline)
+          VaultAccountsSettings()
         }
       }
       .padding(.horizontal, 4)

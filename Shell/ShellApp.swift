@@ -4,6 +4,7 @@ import ShellDatabaseEngines
 import ShellKit
 import ShellIntegrations
 import VaultKit
+import VaultUI
 import DevScreenshots
 #if os(macOS) || os(Windows)
 import UpdateKit
@@ -48,7 +49,7 @@ struct ShellApp: App {
 
   var body: some Scene {
     WindowGroup {
-      ContentView()
+      MainWindow()
         .environment(AppModel.shared)
         // ComponentKit's design, in the system accent Shell has always used.
         .componentKit(accent: .accentColor)
@@ -91,6 +92,32 @@ struct ShellApp: App {
     #if os(macOS)
     .handlesExternalEvents(matching: [])
     #endif
+  }
+}
+
+/// The main window on one account (`VaultAccountScope`, ../Ideas/Accounts.md): the window keeps the account, and
+/// `AppModel.show(_:)` puts its hosts, database connections and notes in the model. Shell has one main window and
+/// one model, so Open in a New Window isn't offered; Manage Accounts… opens Settings.
+private struct MainWindow: View {
+  @SceneStorage("vault.account") private var accountID = VaultAccount.personal.id
+
+  var body: some View {
+    VaultAccountScope(selection: $accountID, manage: { AppModel.shared.showingSettings = true }) { vault in
+      AccountContent(vault: vault)
+    }
+  }
+}
+
+/// The window's content once the model shows the window's account (empty for the moment it takes to switch).
+private struct AccountContent: View {
+  let vault: Vault
+  @Environment(AppModel.self) private var model
+
+  var body: some View {
+    Group {
+      if model.vault === vault { ContentView() } else { Color.clear }
+    }
+    .onAppear { model.show(vault) }
   }
 }
 

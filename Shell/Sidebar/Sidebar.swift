@@ -6,6 +6,7 @@ import ShellKit
 import ShellIntegrations
 import ShellMonitoring
 import UniformTypeIdentifiers
+import VaultUI
 
 /// The sidebar: ComponentKit's `KitSidebar` with ONE VIEW PER SECTION, each a
 /// card `KitSection` — `RunningSectionView` (below), `LocalSectionView`,
@@ -41,6 +42,9 @@ struct SidebarView: View {
       selection: $model.selection, searchText: $state.searchText, searchPrompt: "Filter",
       columnVisibility: $columnVisibility
     ) {
+      // The window's account, hidden while Personal is the only one.
+      VaultAccountPicker(meta: model.connections.count == 1 ? "1 host" : "\(model.connections.count) hosts")
+
       RunningSectionView(state: state)
 
       // Long sections keep their title at the top while they scroll by; the

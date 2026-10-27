@@ -10,6 +10,7 @@
 		2611F6FA3042CFF000E1213E /* MarkdownKit in Frameworks */ = {isa = PBXBuildFile; productRef = 2611F6F93042CFF000E1213E /* MarkdownKit */; };
 		26C2D067302C066C008363F2 /* ShellKit in Frameworks */ = {isa = PBXBuildFile; productRef = 26C2D066302C066C008363F2 /* ShellKit */; };
 		9679FEAC025FAE0AB39B25A5 /* VaultKit in Frameworks */ = {isa = PBXBuildFile; productRef = 93C4E2596D30DACA6BC3EEA7 /* VaultKit */; };
+		9679FEAC025FAE0AB39B25A6 /* VaultUI in Frameworks */ = {isa = PBXBuildFile; productRef = 93C4E2596D30DACA6BC3EEA8 /* VaultUI */; };
 		A10000000000000000000002 /* ShellIntegrations in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000001 /* ShellIntegrations */; };
 		A10000000000000000000004 /* ShellMonitoring in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000003 /* ShellMonitoring */; };
 		A35000000000000000000002 /* ShellDatabaseEngines in Frameworks */ = {isa = PBXBuildFile; productRef = A35000000000000000000001 /* ShellDatabaseEngines */; };
@@ -70,6 +71,7 @@
 				A35000000000000000000002 /* ShellDatabaseEngines in Frameworks */,
 				D5C0DE000000000000000003 /* UpdateKit in Frameworks */,
 				9679FEAC025FAE0AB39B25A5 /* VaultKit in Frameworks */,
+				9679FEAC025FAE0AB39B25A6 /* VaultUI in Frameworks */,
 				DE5C0DE00000000000000003 /* DevScreenshots in Frameworks */,
 				C0C0CC000000000000000003 /* ComponentKit in Frameworks */,
 			);
@@ -125,6 +127,7 @@
 				2611F6F93042CFF000E1213E /* MarkdownKit */,
 				D5C0DE000000000000000002 /* UpdateKit */,
 				93C4E2596D30DACA6BC3EEA7 /* VaultKit */,
+				93C4E2596D30DACA6BC3EEA8 /* VaultUI */,
 				DE5C0DE00000000000000002 /* DevScreenshots */,
 				C0C0CC000000000000000002 /* ComponentKit */,
 			);
@@ -651,6 +654,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = ED38B9478C4FFC2CA253C5C2 /* XCRemoteSwiftPackageReference "Vault" */;
 			productName = VaultKit;
+		};
+		93C4E2596D30DACA6BC3EEA8 /* VaultUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = ED38B9478C4FFC2CA253C5C2 /* XCRemoteSwiftPackageReference "Vault" */;
+			productName = VaultUI;
 		};
 		A10000000000000000000001 /* ShellIntegrations */ = {
 			isa = XCSwiftPackageProductDependency;
