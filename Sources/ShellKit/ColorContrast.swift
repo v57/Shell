@@ -3,12 +3,10 @@ import SwiftUI
 /// Contrast math and the "replace low-contrast colors with primary" policy
 /// used when character backgrounds are disabled.
 ///
-/// The terminal window background is a DYNAMIC system color
-/// (NSColor.windowBackgroundColor), which has no resolvable RGB until paint
-/// time. Contrast decisions therefore compare against fixed sRGB
-/// approximations of that color per appearance scheme, so the math is pure
-/// and memoizable:
-///   dark  ≈ #272727 (0.153)    light ≈ #ECECEC (0.925)
+/// The terminal's ground is ComponentKit's window color
+/// (`TerminalPalette.windowBackground`), fixed per appearance scheme, so the
+/// math is pure and memoizable:
+///   dark  #1C1C1E    light #FFFFFF
 public enum TerminalContrast {
   /// The floor below which an explicit foreground is considered unreadable
   /// and replaced with `.primary`. 1.8 keeps mid-grays on light, kills
@@ -17,8 +15,8 @@ public enum TerminalContrast {
 
   // MARK: - Scheme backgrounds used for contrast decisions
 
-  public static let darkBackground: (r: CGFloat, g: CGFloat, b: CGFloat) = (0.153, 0.153, 0.153)
-  public static let lightBackground: (r: CGFloat, g: CGFloat, b: CGFloat) = (0.925, 0.925, 0.925)
+  public static let darkBackground: (r: CGFloat, g: CGFloat, b: CGFloat) = (0x1c / 255, 0x1c / 255, 0x1e / 255)
+  public static let lightBackground: (r: CGFloat, g: CGFloat, b: CGFloat) = (1, 1, 1)
 
   public static func background(for scheme: ColorScheme) -> (r: CGFloat, g: CGFloat, b: CGFloat) {
     scheme == .dark ? darkBackground : lightBackground
@@ -49,7 +47,7 @@ public enum TerminalContrast {
   /// the scheme's terminal background. Only .rgb/.ansi have components;
   /// .clear/.default answer false (the caller renders those as primary).
   public static func isLowContrast(_ color: TerminalColor, on scheme: ColorScheme) -> Bool {
-    guard let c = color.colorComponents() else { return false }
+    guard let c = color.colorComponents(in: scheme) else { return false }
     return contrastRatio(c, background(for: scheme)) < minimumRatio
   }
 

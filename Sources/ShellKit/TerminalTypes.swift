@@ -58,20 +58,20 @@ public struct TerminalModifierFlags: OptionSet, Sendable {
 /// background, text selection, secondary text). Keeps the renderer free of
 /// #if per color site.
 public enum TerminalPalette {
+  /// The terminal's ground: ComponentKit's window colour (`kitWindow`, white and #1C1C1E), as on the canvas's
+  /// Shell boards, on every platform. ShellKit doesn't link the kit, so the values are repeated here and in
+  /// `TerminalContrast`.
+  public static let windowBackground = Color(terminalLight: 0xffffff, dark: 0x1c1c1e)
   #if os(macOS)
-  public static let windowBackground = Color(nsColor: .windowBackgroundColor)
   public static let selectionBackground = Color(nsColor: .selectedTextBackgroundColor)
   public static let selectionForeground = Color(nsColor: .selectedTextColor)
   public static let secondaryText = Color(nsColor: .secondaryLabelColor)
   #elseif os(iOS)
-  public static let windowBackground = Color(uiColor: .systemBackground)
   public static let selectionBackground = Color(uiColor: .tintColor)
   public static let selectionForeground = Color(uiColor: .white)
   public static let secondaryText = Color(uiColor: .secondaryLabel)
   #else
   // AppKit's colors, light and dark.
-  public static let windowBackground = Color(
-    light: Color(red: 0.925, green: 0.925, blue: 0.925), dark: Color(red: 0.196, green: 0.196, blue: 0.196))
   public static let selectionBackground = Color(
     light: Color(red: 0.702, green: 0.843, blue: 1), dark: Color(red: 0.247, green: 0.396, blue: 0.584))
   public static let selectionForeground = Color.primary
@@ -546,15 +546,23 @@ public enum TerminalColor: Equatable {
     }
   }
 
-  /// Standard 16-color ANSI palette, tuned for a dark background (near-black
-  /// is lifted so it stays visible; the rest are the conventional xterm
-  /// hues). Stored as hex so the same source drives both the SwiftUI Color
-  /// and the luminance math.
-  private static let palette16Hex: [Int] = [
-    0x2a2a2a, 0xe05561, 0x8cc265, 0xd18f52,
-    0x4aa5f0, 0xc586c0, 0x42b3c2, 0xdfdfdf,
-    0x666666, 0xff616e, 0xa5e075, 0xf0a45d,
-    0x71b8f9, 0xe2a8df, 0x6cd8e0, 0xffffff
+  /// The 16 ANSI colors, light and dark, from ComponentKit's hues (red, green, yellow, blue, purple, teal), as the
+  /// canvas's Shell boards color a terminal: in light the normal colors are the hues' text colors (dark enough to
+  /// read on white) and the bright ones halfway to their fills (yellow a third of the way), which keeps them at 3:1
+  /// or more on white, where the fills themselves fall to 1.5:1; in dark the normal colors are the fills and the
+  /// bright ones the lighter text colors. Black and white are grays that stay visible on either ground. Stored as hex
+  /// so the same source drives both the SwiftUI Color and the luminance math.
+  private static let palette16LightHex: [Int] = [
+    0x262628, 0xc00012, 0x146c2e, 0x8a6d00,
+    0x0a5cc2, 0x8a35b5, 0x1d6f84, 0x8e8e93,
+    0x5f5f64, 0xe01e21, 0x1e9c38, 0xad8a00,
+    0x056be0, 0x9c44ca, 0x3b8ea4, 0xaeaeb2
+  ]
+  private static let palette16DarkHex: [Int] = [
+    0x48484a, 0xff453a, 0x32d74b, 0xffd60a,
+    0x0a84ff, 0xbf5af2, 0x6ac4dc, 0xe0e0e0,
+    0x98989d, 0xff6961, 0x4cd964, 0xffe066,
+    0x5eaaff, 0xd08bf5, 0x7fd3ea, 0xffffff
   ]
 
   private nonisolated static func components(_ hex: Int) -> (r: CGFloat, g: CGFloat, b: CGFloat) {
@@ -563,8 +571,11 @@ public enum TerminalColor: Equatable {
      CGFloat(hex & 0xff) / 255)
   }
 
-  private static let palette16Components = palette16Hex.map(components)
-  private static let palette16: [Color] = palette16Components.map { Color(red: $0.r, green: $0.g, blue: $0.b) }
+  private static let palette16LightComponents = palette16LightHex.map(components)
+  private static let palette16DarkComponents = palette16DarkHex.map(components)
+  private static let palette16: [Color] = zip(palette16LightHex, palette16DarkHex).map {
+    Color(terminalLight: $0, dark: $1)
+  }
 
   /// 6x6x6 color cube (indices 16...231), kept as components.
   private static let colorCubeComponents: [(r: CGFloat, g: CGFloat, b: CGFloat)] = {
@@ -605,14 +616,15 @@ public enum TerminalColor: Equatable {
     }
   }
 
-  /// sRGB components of an explicit color (.rgb/.ansi); nil for .clear/.default.
-  public func colorComponents() -> (r: CGFloat, g: CGFloat, b: CGFloat)? {
+  /// sRGB components of an explicit color (.rgb/.ansi) in `scheme` (the 16 ANSI colors differ between light and
+  /// dark); nil for .clear/.default.
+  public func colorComponents(in scheme: ColorScheme = .dark) -> (r: CGFloat, g: CGFloat, b: CGFloat)? {
     switch self {
     case .rgb(let red, let green, let blue):
       return (red, green, blue)
     case .ansi(let index):
       switch index {
-      case 0..<16: return Self.palette16Components[index]
+      case 0..<16: return (scheme == .dark ? Self.palette16DarkComponents : Self.palette16LightComponents)[index]
       case 16..<232: return Self.colorCubeComponents[index - 16]
       case 232..<256: return Self.grayscaleComponents[index - 232]
       default: return nil
@@ -624,3 +636,25 @@ public enum TerminalColor: Equatable {
 }
 
 extension TerminalColor: Hashable {}   // synthesized; CGFloat components are Hashable
+
+extension Color {
+  /// A color that follows the appearance: `light` in light mode, `dark` in dark mode (sRGB hex, 0xRRGGBB).
+  init(terminalLight light: Int, dark: Int) {
+    func component(_ hex: Int, _ shift: Int) -> CGFloat { CGFloat((hex >> shift) & 0xff) / 255 }
+    #if os(macOS)
+    self.init(nsColor: NSColor(name: nil) { appearance in
+      let hex = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light
+      return NSColor(srgbRed: component(hex, 16), green: component(hex, 8), blue: component(hex, 0), alpha: 1)
+    })
+    #elseif os(iOS)
+    self.init(uiColor: UIColor { traits in
+      let hex = traits.userInterfaceStyle == .dark ? dark : light
+      return UIColor(red: component(hex, 16), green: component(hex, 8), blue: component(hex, 0), alpha: 1)
+    })
+    #else
+    self.init(
+      light: Color(red: component(light, 16), green: component(light, 8), blue: component(light, 0)),
+      dark: Color(red: component(dark, 16), green: component(dark, 8), blue: component(dark, 0)))
+    #endif
+  }
+}

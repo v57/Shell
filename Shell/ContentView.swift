@@ -83,6 +83,9 @@ struct ContentView: View {
         ZStack {
           detailPane
         }
+        // The kit's window ground under every page (and its empty state): the
+        // split view's own is black on iPhone and iPad in dark mode.
+        .background { Rectangle().fill(.kitWindow).ignoresSafeArea() }
         // Switching pages cross-fades the outgoing page into the incoming
         // one (each page carries `detailTransition`).
         .animation(animates ? .smooth(duration: 0.25) : nil, value: model.selection)
@@ -381,7 +384,7 @@ struct ContentView: View {
             if model.directoryBrowser.visible, flags.isEnabled(.files) {
               FilesPanelView(model: model.directoryBrowser)
                 .transition(.opacity)
-                .background(.background)
+                .background(.kitWindow)
             }
           }
         }

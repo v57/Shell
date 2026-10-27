@@ -1403,7 +1403,7 @@ private struct TerminalKeyBar: View {
     }
     .padding(.vertical, 3)
     .frame(maxWidth: .infinity, minHeight: model.contentHeight, maxHeight: model.contentHeight, alignment: .top)
-    .background(Color(uiColor: .systemBackground))
+    .background(TerminalPalette.windowBackground)
     .onAppear { onHeightChange(model.contentHeight) }
     .onChange(of: model.showArrows) { _, _ in onHeightChange(model.contentHeight) }
     .onChange(of: model.showFunction) { _, _ in onHeightChange(model.contentHeight) }
