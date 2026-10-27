@@ -31,7 +31,11 @@ public final class TerminalOutputParser {
     label: "ShellKit.TerminalOutputParser.parse",
     qos: .utility   // background-ish: efficiency cores
   )
-  
+  /// How many `consumeAsync` chunks the parse queue has finished. The
+  /// session compares it with the chunks it handed over to tell whether a
+  /// snapshot missed output that was still queued. Guarded by `lock`.
+  private var parsedAsyncChunkCount = 0
+
   public init(sendResponse: @escaping (String) -> Void) {
     self.sendResponse = sendResponse
     // The alternate screen (1049) has no scrollback of its own. tmux's
@@ -48,7 +52,15 @@ public final class TerminalOutputParser {
       lock.lock()
       defer { lock.unlock() }
       consumeLocked(data)
+      parsedAsyncChunkCount += 1
     }
+  }
+
+  /// The number of `consumeAsync` chunks parsed so far.
+  public var parsedAsyncChunks: Int {
+    lock.lock()
+    defer { lock.unlock() }
+    return parsedAsyncChunkCount
   }
 
   /// Blocks until every previously-enqueued `consumeAsync` block has run.

@@ -243,6 +243,10 @@ public final class TerminalSession: Identifiable {
   private var pendingPublish = false
   @ObservationIgnored
   private var publishTimer: Timer?
+  /// Chunks handed to `parser.consumeAsync`, compared with the parser's
+  /// `parsedAsyncChunks` on each publish.
+  @ObservationIgnored
+  private var receivedChunks = 0
   @ObservationIgnored
   private var lastPublishedEpoch = 0
   @ObservationIgnored
@@ -642,6 +646,7 @@ public final class TerminalSession: Identifiable {
     // the main thread on byte parsing. The 30fps publish timer picks up
     // the latest state when it fires.
     parser.consumeAsync(data)
+    receivedChunks += 1
     noteActivity()
     schedulePublish()
   }
@@ -691,7 +696,15 @@ public final class TerminalSession: Identifiable {
     // being parsed when the link dropped must not replace it.
     guard force || snapshot.message == nil else { return }
 
+    // Read before the snapshot, which then holds at least these chunks.
+    let parsedChunks = parser.parsedAsyncChunks
     let newSnapshot = parser.snapshotForPublish()  // consumes the dirty set
+    // A tick can fire while the last chunk is still on the parse queue:
+    // publish again on the next tick, or that output (typically the new
+    // prompt) stays unseen until more output arrives.
+    if parsedChunks != receivedChunks {
+      schedulePublish()
+    }
     // Skip when nothing VISIBLE changed since the last publish (bytes
     // arrived, but they were OSC/title-only, SGR-only, or cursor moves):
     // empty dirty set + same cursor + same epoch/size. Keeps `ping`-style
