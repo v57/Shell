@@ -56,7 +56,7 @@ struct ActionsOverlayView: View {
     ) {
       scope
     } content: {
-      #if os(macOS) || os(Windows)
+      #if os(macOS) || os(Windows) || os(Linux)
       smartActions
       #endif
       yourActions
@@ -145,7 +145,7 @@ struct ActionsOverlayView: View {
   /// has no local pty so the run would be a silent no-op — keep disabled.
   private var canRun: Bool {
     if model.selectedSession != nil { return true }
-    #if os(macOS) || os(Windows)
+    #if os(macOS) || os(Windows) || os(Linux)
     return true
     #else
     return false
@@ -154,7 +154,7 @@ struct ActionsOverlayView: View {
 
   private var helpText: String {
     guard let session = model.selectedSession else {
-      #if os(macOS) || os(Windows)
+      #if os(macOS) || os(Windows) || os(Linux)
       return "Run locally (no terminal selected)"
       #else
       return "Select a terminal first"
@@ -187,7 +187,7 @@ struct ActionsOverlayView: View {
     #endif
   }
 
-  #if os(macOS) || os(Windows)
+  #if os(macOS) || os(Windows) || os(Linux)
   // MARK: Smart actions
 
   /// A group per scheme of the active local directory: its run, build, test,
@@ -198,7 +198,7 @@ struct ActionsOverlayView: View {
     if let directory = model.smartActionDirectory {
       ForEach(model.smartActionSchemes) { scheme in
         let kinds = ActionKind.allCases.filter {
-          scheme.terminalCommand(for: $0) != nil && ($0.isDistribution ? scheme.supports($0) : true)
+          scheme.terminalCommand(for: $0) != nil && ($0.isDistribution ? $0.isOfferedHere && scheme.supports($0) : true)
             && (matches($0.title) || matches(scheme.name))
         }
         if !kinds.isEmpty {
@@ -316,7 +316,7 @@ struct ActionsOverlayView: View {
   #endif
 }
 
-#if os(macOS) || os(Windows)
+#if os(macOS) || os(Windows) || os(Linux)
 /// A smart-action group's + button: a menu of the scheme's smart actions to
 /// add to Your actions (the New Action sheet, filled in). Added ones are
 /// checked and open their action instead.
@@ -328,7 +328,7 @@ private struct AddToActionsMenu: View {
 
   var body: some View {
     let kinds = ActionKind.allCases.filter {
-      model.smartActionCommand($0, scheme: scheme) != nil && ($0.isDistribution ? scheme.supports($0) : true)
+      model.smartActionCommand($0, scheme: scheme) != nil && ($0.isDistribution ? $0.isOfferedHere && scheme.supports($0) : true)
     }
     Button("Add to Your Actions", systemImage: "plus") { isOpen = true }
       .help("Add \(scheme.name)'s smart actions to Your actions")

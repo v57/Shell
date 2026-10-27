@@ -50,7 +50,7 @@ struct SidebarView: View {
       // Long sections keep their title at the top while they scroll by; the
       // sections below a long list wait at the bottom as titles, one click
       // away (the kit's sticky sections).
-      #if os(macOS) || os(Windows)
+      #if os(macOS) || os(Windows) || os(Linux)
       // This Mac's terminals, persistent screen/tmux sessions and history.
       LocalSectionView(state: state)
         .kitSticky()
@@ -72,7 +72,7 @@ struct SidebarView: View {
       TextFilesSectionView(state: state)
       #endif
     } bottomBar: {
-      #if os(macOS) || os(Windows)
+      #if os(macOS) || os(Windows) || os(Linux)
       if FeatureFlagsStore.shared.isEnabled(.sessions) {
         Button("New Terminal", systemImage: "terminal") { model.newTerminal() }
           .help("New terminal")
@@ -105,7 +105,7 @@ struct SidebarView: View {
     hasher.combine(model.databaseConnections.map(\.id))
     hasher.combine(model.history.sessions.map(\.id))
     hasher.combine(model.historyMode)
-    #if os(macOS) || os(Windows)
+    #if os(macOS) || os(Windows) || os(Linux)
     hasher.combine(model.screenMonitor.sessions.map(\.name))
     hasher.combine(model.remoteScreenSessions.map(\.name))
     #endif

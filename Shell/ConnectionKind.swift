@@ -10,10 +10,12 @@ struct ActionSpec: Hashable {
   var config: SSHConfig?
 }
 
-/// What the app calls the computer it runs on: "This Mac", "This PC" on Windows.
+/// What the app calls the computer it runs on: "This Mac", "This PC" on Windows, "This Computer" on Linux.
 let thisComputerName: String = {
   #if os(Windows)
   "This PC"
+  #elseif os(Linux)
+  "This Computer"
   #else
   "This Mac"
   #endif

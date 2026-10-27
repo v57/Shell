@@ -1,4 +1,4 @@
-#if os(macOS) || os(Windows)
+#if os(macOS) || os(Windows) || os(Linux)
 import SwiftUI
 import Charts
 import ShellMonitoring

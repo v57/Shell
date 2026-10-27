@@ -1,5 +1,7 @@
 #if canImport(Darwin)
 import Darwin
+#elseif canImport(Glibc)
+import Glibc
 #endif
 import Foundation
 
@@ -140,7 +142,13 @@ public extension TerminalTransport {
 
 // MARK: - Local pty transport
 
-#if os(macOS)
+#if os(macOS) || os(Linux)
+#if canImport(Darwin)
+private let libc = (close: Darwin.close, read: Darwin.read, write: Darwin.write)
+#else
+private let libc = (close: Glibc.close, read: Glibc.read, write: Glibc.write)
+#endif
+
 /// Spawns a local executable in a pty (forkpty) and bridges it to the
 /// session: the child's output arrives via `onOutput`, its exit via
 /// `onExit`, and `write`/`resize`/`close` go straight to the master fd.
@@ -150,8 +158,9 @@ public extension TerminalTransport {
 /// which is what lets ^C (ISIG/VINTR) deliver SIGINT to the foreground
 /// process group.
 ///
-/// macOS only: forkpty does not exist on iOS, and local terminals are not
-/// a supported iOS feature (the iOS app ships SSH + notes).
+/// macOS and Linux: forkpty does not exist on iOS, and local terminals are
+/// not a supported iOS feature (the iOS app ships SSH + notes). Linux has no
+/// dispatch process sources, so a thread waits for the child there.
 public final class LocalPTYTransport: TerminalTransport {
   public var onOutput: ((Data) -> Void)?
   public var onConnected: (() -> Void)?
@@ -191,7 +200,12 @@ public final class LocalPTYTransport: TerminalTransport {
   private let queueIdentity = DispatchSpecificKey<UInt8>()
   private var masterFD: Int32 = -1
   private var childPID: pid_t = -1
+  #if os(Linux)
+  /// Whether the child's exit still reaches `onExit` (cleared by close).
+  private var watchingExit = false
+  #else
   private var processWatch: DispatchSourceProcess?
+  #endif
   private var readSource: DispatchSourceRead?
   private var isRunning = false
   /// Internal regression-test probe; not part of the public transport API.
@@ -214,7 +228,7 @@ public final class LocalPTYTransport: TerminalTransport {
     // The child starts in the working directory when one is given (⌘T
     // reopens a terminal in the current directory), else the home directory.
     let launchDirectory = workingDirectory ?? homeDirectory
-    let executableCString = executable.withCString { strdup($0) }
+    let executableCString = executable.withCString { strdup($0)! }
     var argvPointers: [UnsafeMutablePointer<CChar>?] = argv.map {
       $0.withCString { strdup($0) }
     }
@@ -224,7 +238,7 @@ public final class LocalPTYTransport: TerminalTransport {
       .sorted()
       .map { $0.withCString { strdup($0) } }
     envp.append(nil)
-    let launchCString = launchDirectory.withCString { strdup($0) }
+    let launchCString = launchDirectory.withCString { strdup($0)! }
 
     // The pty starts at the SAME size the parser grid starts at (see
     // `spawnSize` / `initialGridSize`): a grid narrower than the pty makes
@@ -242,7 +256,7 @@ public final class LocalPTYTransport: TerminalTransport {
     let pid = forkpty(&master, nil, nil, &windowSize)
     if pid == 0 {
       // Child — async-signal-safe only from here on.
-      Darwin.close(master)
+      _ = libc.close(master)
       if chdir(launchCString) != 0 {
         _exit(127)
       }
@@ -282,6 +296,25 @@ public final class LocalPTYTransport: TerminalTransport {
     source.resume()
     readSource = source
 
+    #if os(Linux)
+    // Linux's libdispatch has no process sources: a thread waits for the
+    // child and hands its status to the queue, which drops it after close.
+    watchingExit = true
+    let waiter = Thread { [weak self] in
+      var status: Int32 = 0
+      var waitResult: pid_t
+      repeat {
+        waitResult = waitpid(pid, &status, 0)
+      } while waitResult == -1 && errno == EINTR
+      self?.queue.async {
+        guard let self, self.watchingExit else { return }
+        self.watchingExit = false
+        self.childExited(pid: pid, waitResult: waitResult, status: status)
+      }
+    }
+    waiter.name = "ShellKit.LocalPTYTransport.wait"
+    waiter.start()
+    #else
     let exitSource = DispatchSource.makeProcessSource(identifier: pid, eventMask: .exit, queue: queue)
     exitSource.setEventHandler { [weak self] in
       guard let self else { return }
@@ -292,24 +325,30 @@ public final class LocalPTYTransport: TerminalTransport {
       } while waitResult == -1 && errno == EINTR
       self.processWatch?.cancel()
       self.processWatch = nil
-      if waitResult == pid {
-        self.childPID = -1
-      }
-      DispatchQueue.main.async {
-        self.isRunning = false
-        // Wait status: exit code in bits 8-15, signal in low 7. Normal
-        // exits read their code directly; signal deaths (e.g. ^C) get
-        // the shell convention 128+signal so an interrupted action
-        // shows as a failure (exit 130), not a clean exit.
-        let signal = status & 0x7F
-        let code = (status >> 8) & 0xFF
-        self.onExit?((signal != 0 && code == 0) ? Int32(128 + signal) : code)
-      }
+      self.childExited(pid: pid, waitResult: waitResult, status: status)
     }
     exitSource.resume()
     processWatch = exitSource
+    #endif
 
     onConnected?()
+  }
+
+  /// On the transport queue, once the child has been reaped.
+  private func childExited(pid: pid_t, waitResult: pid_t, status: Int32) {
+    if waitResult == pid {
+      childPID = -1
+    }
+    DispatchQueue.main.async {
+      self.isRunning = false
+      // Wait status: exit code in bits 8-15, signal in low 7. Normal
+      // exits read their code directly; signal deaths (e.g. ^C) get
+      // the shell convention 128+signal so an interrupted action
+      // shows as a failure (exit 130), not a clean exit.
+      let signal = status & 0x7F
+      let code = (status >> 8) & 0xFF
+      self.onExit?((signal != 0 && code == 0) ? Int32(128 + signal) : code)
+    }
   }
 
   public func write(_ data: Data) {
@@ -321,7 +360,7 @@ public final class LocalPTYTransport: TerminalTransport {
       var offset = 0
 
       while remaining > 0 {
-        let written = Darwin.write(masterFD, base.advanced(by: offset), remaining)
+        let written = libc.write(masterFD, base.advanced(by: offset), remaining)
         if written > 0 {
           remaining -= written
           offset += written
@@ -338,7 +377,11 @@ public final class LocalPTYTransport: TerminalTransport {
   public func resize(columns: Int, rows: Int) {
     guard columns > 0, rows > 0, masterFD >= 0 else { return }
     var ws = winsize(ws_row: UInt16(rows), ws_col: UInt16(columns), ws_xpixel: 0, ws_ypixel: 0)
+    #if os(Linux)
+    _ = ioctl(masterFD, UInt(TIOCSWINSZ), &ws)
+    #else
     _ = ioctl(masterFD, TIOCSWINSZ, &ws)
+    #endif
   }
 
   public func close() {
@@ -362,11 +405,15 @@ public final class LocalPTYTransport: TerminalTransport {
       _ = kill(childPID, SIGTERM)
       childPID = -1
     }
+    #if os(Linux)
+    watchingExit = false
+    #else
     processWatch?.cancel()
     processWatch = nil
+    #endif
 
     if masterFD >= 0 {
-      Darwin.close(masterFD)
+      _ = libc.close(masterFD)
       masterFD = -1
     }
   }
@@ -376,7 +423,7 @@ public final class LocalPTYTransport: TerminalTransport {
 
     var buffer = [UInt8](repeating: 0, count: 4096)
     while true {
-      let count = Darwin.read(masterFD, &buffer, buffer.count)
+      let count = libc.read(masterFD, &buffer, buffer.count)
       if count > 0 {
         let data = Data(buffer.prefix(count))
         DispatchQueue.main.async { [weak self] in
@@ -441,22 +488,37 @@ public final class LocalPTYTransport: TerminalTransport {
 // MARK: - Local pty presets
 
 public extension LocalPTYTransport {
+  /// The shell local terminals run: zsh on the Mac; on Linux the user's
+  /// login shell (`$SHELL`), else bash. Both take `-l -i` and `-lic`.
+  nonisolated static let loginShell: String = {
+    #if os(Linux)
+    if let shell = ProcessInfo.processInfo.environment["SHELL"], !shell.contains(" "),
+       FileManager.default.isExecutableFile(atPath: shell) {
+      return shell
+    }
+    return "/bin/bash"
+    #else
+    return "/bin/zsh"
+    #endif
+  }()
+  nonisolated static var loginShellName: String { (loginShell as NSString).lastPathComponent }
+
   /// Interactive zsh login shell — the default local terminal.
   /// Use via the short form: `TerminalSession(session: .zsh)`.
   static var zsh: LocalPTYTransport {
-    LocalPTYTransport(executable: "/bin/zsh", argv: ["zsh", "-l", "-i"])
+    LocalPTYTransport(executable: loginShell, argv: [loginShellName, "-l", "-i"])
   }
 
   /// Interactive zsh login shell that starts in `directory` — used by
   /// ⌘T to open a new terminal tab in the current directory. The default
   /// `.zsh` starts in the home directory.
   static func zsh(in directory: String) -> LocalPTYTransport {
-    LocalPTYTransport(executable: "/bin/zsh", argv: ["zsh", "-l", "-i"], workingDirectory: directory)
+    LocalPTYTransport(executable: loginShell, argv: [loginShellName, "-l", "-i"], workingDirectory: directory)
   }
 
   /// Runs `commands` in a zsh login shell and exits with their status (actions).
   static func command(_ commands: String, in directory: String? = nil) -> LocalPTYTransport {
-    LocalPTYTransport(executable: "/bin/zsh", argv: ["zsh", "-lic", commands], workingDirectory: directory)
+    LocalPTYTransport(executable: loginShell, argv: [loginShellName, "-lic", commands], workingDirectory: directory)
   }
 
   /// Attach to a named GNU screen session (`screen -x`, multi-attaches).
@@ -523,7 +585,7 @@ public extension LocalPTYTransport {
     let escaped = directory.utf8.map { byte in
       plain.contains(byte) ? String(UnicodeScalar(byte)) : String(format: "\\0%03o", byte)
     }.joined()
-    return ["/bin/sh", "-c", "cd${IFS}\"$(printf${IFS}%b${IFS}'\(escaped)')\";exec${IFS}/bin/zsh${IFS}-l${IFS}-i"]
+    return ["/bin/sh", "-c", "cd${IFS}\"$(printf${IFS}%b${IFS}'\(escaped)')\";exec${IFS}\(loginShell)${IFS}-l${IFS}-i"]
   }
 
   /// Resolves the `session` tool executable: common install locations first,

@@ -5,7 +5,7 @@ import SwiftUI
 /// Animations freeze while it is false.
 @propertyWrapper
 struct WindowAppearsActive: DynamicProperty {
-  #if os(macOS) || os(Windows)
+  #if os(macOS) || os(Windows) || os(Linux)
   @Environment(\.appearsActive) private var appearsActive
   var wrappedValue: Bool { appearsActive }
   #else

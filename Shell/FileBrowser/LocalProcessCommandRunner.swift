@@ -1,5 +1,6 @@
 import Foundation
 import ShellIntegrations
+import ShellKit
 
 /// Runs a single shell command locally and invisibly, capturing its output.
 ///
@@ -26,12 +27,20 @@ public actor LocalProcessCommandRunner: FileCommandExecutor {
   }
 
   public func run(inDirectory dir: String, _ command: String) async throws -> CommandResult {
-    #if os(macOS) || os(Windows)
+    #if os(macOS) || os(Windows) || os(Linux)
       let process = Process()
+      #if os(Linux)
+      // The user's login shell (bash, usually): -l reads the profile, which
+      // reads ~/.bashrc; -i without a terminal would only add job-control
+      // warnings to the output.
+      process.executableURL = URL(fileURLWithPath: LocalPTYTransport.loginShell)
+      process.arguments = ["-lc", command]
+      #else
       process.executableURL = URL(fileURLWithPath: "/bin/zsh")
       // -lic sources ~/.zshrc so the user's interactive PATH (e.g. bun) is
       // available, not just login-level env. -c keeps it one-shot/headless.
       process.arguments = ["-lic", command]
+      #endif
       process.currentDirectoryURL = URL(fileURLWithPath: dir)
       process.environment = ProcessInfo.processInfo.environment
 
@@ -63,7 +72,7 @@ public actor LocalProcessCommandRunner: FileCommandExecutor {
     #endif
   }
 
-  #if os(macOS) || os(Windows)
+  #if os(macOS) || os(Windows) || os(Linux)
     /// Reads a pipe to EOF. Marked `nonisolated` so the two pipe drains run on the
     /// cooperative pool instead of serializing on this actor's executor.
     private nonisolated func drain(_ handle: FileHandle) -> Data {
@@ -103,7 +112,7 @@ public actor LocalProcessCommandRunner: FileCommandExecutor {
   #endif
 }
 
-#if !os(macOS) && !os(Windows)
+#if !os(macOS) && !os(Windows) && !os(Linux)
 /// Shown when a local command run is requested on a platform that has no local
 /// shell (iOS). iOS is SSH + notes only, so this path is never taken at runtime.
 enum LocalProcessCommandRunnerError: Error {

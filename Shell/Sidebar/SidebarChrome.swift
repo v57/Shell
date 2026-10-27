@@ -42,7 +42,7 @@ final class SidebarState {
   /// The database connection whose Delete… awaits confirmation.
   var deletingDatabaseConnection: DatabaseConnection?
 
-  #if os(macOS) || os(Windows)
+  #if os(macOS) || os(Windows) || os(Linux)
   /// Live CPU/GPU/wattage for the Local section header (macOS only — the reads
   /// need IOKit's AppleSMC / IOAccelerator).
   ///
@@ -104,7 +104,7 @@ struct SidebarChrome: ViewModifier {
       // Drive the history-mode → terminals swap with a blur-replace transition
       // (both branches carry .transition(.blurReplace)).
       .animation(.kit, value: model.historyMode)
-      #if os(macOS) || os(Windows)
+      #if os(macOS) || os(Windows) || os(Linux)
       .noticeSheet(
         model.screenMonitor.actionError?.title ?? "",
         isPresented: Binding(
@@ -151,7 +151,7 @@ struct SidebarChrome: ViewModifier {
         isPresented: Binding(
           get: { model.authorizedKeysError != nil }, set: { if !$0 { model.authorizedKeysError = nil } }),
         message: model.authorizedKeysError ?? "", systemImage: "key.2.on.ring")
-      #if os(macOS) || os(Windows)
+      #if os(macOS) || os(Windows) || os(Linux)
       #if os(macOS)
       .background {
         // The observer owns the enable-state policy: it starts the monitor when
@@ -172,7 +172,7 @@ struct SidebarChrome: ViewModifier {
       #endif
   }
 
-  #if os(macOS) || os(Windows)
+  #if os(macOS) || os(Windows) || os(Linux)
   /// Whether the Monitoring feature is on — gates the live stats monitor so
   /// it never samples when the feature is off.
   private var monitoringEnabled: Bool {

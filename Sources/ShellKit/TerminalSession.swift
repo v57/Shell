@@ -89,7 +89,8 @@ public final class TerminalSession: Identifiable {
 
   /// The current working directory of the child process, read live from
   /// the OS on each access. Follows the shell's `cd` without any shell
-  /// cooperation (libproc `PROC_PIDVNODEPATHINFO`). Nil for non-local
+  /// cooperation (libproc `PROC_PIDVNODEPATHINFO`; `/proc/<pid>/cwd` on
+  /// Linux). Nil for non-local
   /// transports (SSH has no local child) and while no child is running.
   ///
   /// Cheap to call (one syscall), so a view can poll it on a timer to
@@ -107,6 +108,11 @@ public final class TerminalSession: Identifiable {
       return String(cString: base.assumingMemoryBound(to: CChar.self))
     }
     return path.map { URL(fileURLWithPath: $0) }
+    #elseif os(Linux)
+    guard let pid = transport.childProcessID,
+          let path = try? FileManager.default.destinationOfSymbolicLink(atPath: "/proc/\(pid)/cwd")
+    else { return nil }
+    return URL(fileURLWithPath: path)
     #else
     return nil
     #endif
@@ -1013,7 +1019,7 @@ public final class TerminalSession: Identifiable {
 
 // MARK: - Local pty preset init
 
-#if os(macOS) || os(Windows)
+#if os(macOS) || os(Windows) || os(Linux)
 public extension TerminalSession {
   /// Short form for local terminals: `TerminalSession(session: .zsh)` for
   /// an interactive login shell, `.screen(name)` to attach to a GNU screen

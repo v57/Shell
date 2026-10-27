@@ -9,7 +9,7 @@ struct ScreenActionError: Identifiable, Equatable {
   let message: String
 }
 
-#if os(macOS) || os(Windows)
+#if os(macOS) || os(Windows) || os(Linux)
 /// Lists the local multiplexers (`tmux ls`, `screen -ls`, `session list`) and
 /// publishes the merged list of persistent sessions. When tmux is installed,
 /// tmux is the preferred backend for creating/renaming; screen sessions
@@ -259,7 +259,7 @@ final class ScreenSessionsMonitor {
     // when launched via Finder — cd explicitly inside the shell (the
     // directory is sh's $1, so it needs no quoting).
     let directory = directory ?? FileManager.default.homeDirectoryForCurrentUser.path
-    process.arguments = ["-dmS", name, "/bin/sh", "-c", "cd \"$1\"; exec /bin/zsh -l -i", "sh", directory]
+    process.arguments = ["-dmS", name, "/bin/sh", "-c", "cd \"$1\"; exec \(LocalPTYTransport.loginShell) -l -i", "sh", directory]
     let err = Pipe()
     process.standardOutput = Pipe()
     process.standardError = err
@@ -347,7 +347,7 @@ final class ScreenSessionsMonitor {
     let directory = directory ?? FileManager.default.homeDirectoryForCurrentUser.path
     let process = Process()
     process.executableURL = URL(fileURLWithPath: tmux)
-    process.arguments = ["new-session", "-d", "-s", name, "-c", directory, "exec /bin/zsh -l -i"]
+    process.arguments = ["new-session", "-d", "-s", name, "-c", directory, "exec \(LocalPTYTransport.loginShell) -l -i"]
     let err = Pipe()
     process.standardOutput = Pipe()
     process.standardError = err

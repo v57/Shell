@@ -1,4 +1,4 @@
-#if os(macOS) || os(Windows)
+#if os(macOS) || os(Windows) || os(Linux)
 #if os(macOS)
 import AppKit
 #endif
@@ -97,7 +97,7 @@ final class AppModel {
   var editingWebSession: WebSession?
   var publicKeyError: String?
   
-  #if os(macOS) || os(Windows)
+  #if os(macOS) || os(Windows) || os(Linux)
   /// Polls `screen -ls` for the sidebar's Screen section.
   var screenMonitor = ScreenSessionsMonitor()
   /// Scans GNU screen/tmux sessions on the currently-connected SSH hosts and
@@ -224,7 +224,7 @@ final class AppModel {
   /// re-arms on every observed flag change).
   private var notesFeatureEnabled = false
 
-  #if os(macOS) || os(Windows)
+  #if os(macOS) || os(Windows) || os(Linux)
   /// Project detection over the active directory with Code's CodeActions,
   /// driving the toolbar's smart-action Run/Stop controls. Per-directory
   /// results are encrypted-cached.
@@ -408,7 +408,7 @@ final class AppModel {
     if features.isEnabled(.authorizedKeys), !ScreenshotDemo.isOn {
       deviceKeys.publishThisDevice()
     }
-    #if os(macOS) || os(Windows)
+    #if os(macOS) || os(Windows) || os(Linux)
     smartActionsEnabled = features.isEnabled(.smartActions)
     // Start (or leave stopped) the Screen feature's pollers to match the flag.
     configureGatedBackgroundWork()
@@ -430,7 +430,7 @@ final class AppModel {
     #endif
   }
 
-  #if os(macOS) || os(Windows)
+  #if os(macOS) || os(Windows) || os(Linux)
   /// Starts or stops the Screen feature's background pollers to match the
   /// current feature flag. Idempotent; safe to call at any time.
   private func configureGatedBackgroundWork() {
@@ -562,7 +562,7 @@ final class AppModel {
         openOrFocusDatabaseConnection(connection)
       }
     case .screen(let tagID):
-      #if os(macOS) || os(Windows)
+      #if os(macOS) || os(Windows) || os(Linux)
       if let info = screenMonitor.sessions.first(where: { $0.tagID == tagID }) {
         attachOrFocus(info)
       } else if let info = remoteScreenSessions.first(where: { $0.tagID == tagID }),
@@ -593,7 +593,7 @@ final class AppModel {
     return .database(connection.id)
   }
 
-  #if os(macOS) || os(Windows)
+  #if os(macOS) || os(Windows) || os(Linux)
   /// The selection a persistent (screen/tmux) session's sidebar row tags
   /// with: the attached terminal's session when one is open (so the row
   /// highlights while its terminal is up), else the row's stable `tagID` —
@@ -604,7 +604,7 @@ final class AppModel {
   }
   #endif
 
-  #if os(macOS) || os(Windows)
+  #if os(macOS) || os(Windows) || os(Linux)
   /// Focuses the open terminal attached to `info`, or attaches a new one.
   /// Focusing (rather than multi-attaching) keeps the persistent session's
   /// state honest — a second client would leave it "Attached" after either
@@ -779,7 +779,7 @@ final class AppModel {
 
   // MARK: - Sessions
   
-  #if os(macOS) || os(Windows)
+  #if os(macOS) || os(Windows) || os(Linux)
   /// A new terminal the user asked for: a persistent session when
   /// `alwaysPersistentSessions` is on (and the Screen feature is), else a
   /// plain local terminal. `directory` starts its shell there.
@@ -808,7 +808,7 @@ final class AppModel {
   }
   #endif
 
-  #if os(macOS) || os(Windows)
+  #if os(macOS) || os(Windows) || os(Linux)
   /// ⌘T: opens a new terminal (`newTerminal`) whose shell starts in the SAME
   /// directory as the selected session's current working directory.
   /// Falls back to the home directory when the selected session has no
@@ -833,7 +833,7 @@ final class AppModel {
     registerCapture(for: session, archiveLocally: false)
     sessions.append(session)
     selection = .session(session.id)
-    #if os(macOS) || os(Windows)
+    #if os(macOS) || os(Windows) || os(Linux)
     // Kick a remote scan on connect. The just-created session isn't
     // `.connected` yet, so it's skipped this pass; every already-connected
     // host is scanned, and the next refresh (or the connected-state refresh
@@ -974,7 +974,7 @@ final class AppModel {
     webSessions.remove(web.id)
   }
 
-  #if os(macOS) || os(Windows)
+  #if os(macOS) || os(Windows) || os(Linux)
   /// The SSH sessions that are currently open (kind `.ssh` AND
   /// `connectionState == .connected`). This is the ONLY set the remote
   /// persistent-session scanner iterates — it never dials a connection from a
@@ -1006,7 +1006,7 @@ final class AppModel {
     remoteScreenScanner.scan(using: self)
   }
   #endif
-  #if os(macOS) || os(Windows)
+  #if os(macOS) || os(Windows) || os(Linux)
   /// Opens a local terminal attached to an existing persistent session
   /// (`screen -x` for screen, `tmux attach` for tmux).
   /// `directory` starts a `session` session that doesn't exist yet there.
@@ -1273,7 +1273,7 @@ final class AppModel {
     case .local:
       return sessions.filter { kind(of: $0) == .local }
     case .screen:
-      #if os(macOS) || os(Windows)
+      #if os(macOS) || os(Windows) || os(Linux)
       // Local persistent attachments plus remote (SSH) persistent
       // attachments, in sidebar order — Cmd+W/Cmd+N navigate all of them.
       let local = screenMonitor.sessions.compactMap { attachedSession(toScreen: $0) }
@@ -1301,7 +1301,7 @@ final class AppModel {
   /// Creates a new session in the same section as `session`: a local
   /// terminal for local (`newTerminal`), a duplicate connection for SSH, a
   /// brand-new persistent session for screen.
-  #if os(macOS) || os(Windows)
+  #if os(macOS) || os(Windows) || os(Linux)
   @discardableResult
   func newSession(inSameSectionAs session: TerminalSession) -> TerminalSession {
     switch kind(of: session) {
@@ -1341,7 +1341,7 @@ final class AppModel {
 
   /// ⌘N: new session in the same section as the current selection
   /// (new local terminal when nothing is selected).
-  #if os(macOS) || os(Windows)
+  #if os(macOS) || os(Windows) || os(Linux)
   func newSessionInSameSection() {
     if let session = selectedSession {
       newSession(inSameSectionAs: session)
@@ -1520,7 +1520,7 @@ final class AppModel {
     let wasOnly = section.count == 1
     
     if case .screen(let info) = kind(of: session) {
-      #if os(macOS) || os(Windows)
+      #if os(macOS) || os(Windows) || os(Linux)
       if info.isRemote {
         // Remote sessions live on the SSH host; closing the attached terminal
         // detaches our client (and closes the session on the host via SSH).
@@ -1571,7 +1571,7 @@ final class AppModel {
     }
   }
   
-  #if os(macOS) || os(Windows)
+  #if os(macOS) || os(Windows) || os(Linux)
   /// Creates a new persistent session (`session`, else tmux, else screen)
   /// whose shell starts in `directory` (nil = home) and immediately opens a
   /// terminal attached to it, so the new session is usable at once.
@@ -1952,7 +1952,7 @@ final class AppModel {
 
   func replayHistorySession(_ record: HistorySession) {
     if historyMode { toggleHistoryMode() }
-    #if os(macOS) || os(Windows)
+    #if os(macOS) || os(Windows) || os(Linux)
     let session = addLocalTerminal()
     DispatchQueue.main.async {
       for command in record.commands {
@@ -2125,7 +2125,7 @@ final class AppModel {
         return .local
       }
     } else {
-      #if os(macOS) || os(Windows)
+      #if os(macOS) || os(Windows) || os(Linux)
       // Nothing selected (fresh start / nothing open): run locally.
       return .local
       #else
@@ -2147,7 +2147,7 @@ final class AppModel {
       transport = SSHSession(config: config, execCommand: spec.action.commands)
       startupMessage = "Connecting to \(config.host)…"
     } else {
-      #if os(macOS) || os(Windows)
+      #if os(macOS) || os(Windows) || os(Linux)
       // -lic (login + interactive + command) sources ~/.zshrc so the
       // user's environment (e.g. bun's PATH in ~/.zshrc) is present when
       // the action runs. Plain -lc is non-interactive and skips .zshrc.
@@ -2258,7 +2258,7 @@ final class AppModel {
 
   // MARK: - Smart actions
 
-  #if os(macOS) || os(Windows)
+  #if os(macOS) || os(Windows) || os(Linux)
   /// Recomputes the smart actions for the active local directory. Returns
   /// immediately; the blocking scan (directory listing + CodeActions scan +
   /// cache save) runs off the main thread so a large directory never stalls

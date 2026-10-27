@@ -63,7 +63,7 @@ struct DatabasesSectionView: View {
   /// On the Mac the section shows once there's a connection (This Mac's + menu makes the first); on iPhone and iPad,
   /// which have no This Mac, it's always there.
   private var showsSection: Bool {
-    #if os(macOS) || os(Windows)
+    #if os(macOS) || os(Windows) || os(Linux)
     !model.databaseConnections.isEmpty
     #else
     true

@@ -27,7 +27,7 @@ struct SettingsView: View {
       onClose: { model.showingSettings = false }
     ) {
       VStack(alignment: .leading, spacing: 20) {
-        #if os(macOS) || os(Windows)
+        #if os(macOS) || os(Windows) || os(Linux)
         SettingsCard(title: "Sessions", systemImage: "terminal") {
           SettingsSessionsCard()
         }
@@ -82,7 +82,7 @@ private struct SettingsCard<Content: View>: View {
   }
 }
 
-#if os(macOS) || os(Windows)
+#if os(macOS) || os(Windows) || os(Linux)
 /// The "Sessions" card: whether new terminals start as persistent sessions
 /// (and, on the Mac, whether they outlive Shell: `SessionAgentRow`).
 /// Persistent sessions are the Screen feature's, so the toggle is off and

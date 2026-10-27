@@ -3,8 +3,10 @@ import Foundation
 import IOKit
 #elseif os(Windows)
 import WinSDK
+#elseif os(Linux)
+import PlatformSystem
 #endif
-#if os(macOS) || os(Windows)
+#if os(macOS) || os(Windows) || os(Linux)
 
 /// Live system stats for the sidebar's Local section header: CPU usage %,
 /// GPU usage %, and total system wattage. All reads run on a background
@@ -139,6 +141,16 @@ nonisolated final class SystemStatsSampler: @unchecked Sendable {
     guard let previous, current.total > previous.total else { return (0, 0, 0, nil) }
     let busy = Double((current.total - previous.total) - (current.idle - previous.idle))
     return (min(100, max(0, busy / Double(current.total - previous.total) * 100)), 0, 0, nil)
+  }
+}
+#elseif os(Linux)
+/// CPU usage from PlatformSystem's `CPULoad` (/proc/stat deltas, all cores). Linux has no general user-space GPU or
+/// power reading as the Mac's IOAccelerator and SMC keys are: those stay 0, and there is no DC-in reading.
+nonisolated final class SystemStatsSampler: @unchecked Sendable {
+  private let load = CPULoad()
+
+  func sample() -> (cpu: Double, gpu: Double, watts: Int, dcInWatts: Int?) {
+    ((load.usage() ?? 0) * 100, 0, 0, nil)
   }
 }
 #else
@@ -378,4 +390,4 @@ private struct SMCVersion_t { var major: UInt8 = 0; var minor: UInt8 = 0; var bu
 private struct SMCPLimitData_t { var version: UInt16 = 0; var length: UInt16 = 0; var cpuPLimit: UInt32 = 0; var gpuPLimit: UInt32 = 0; var memPLimit: UInt32 = 0 }
 private struct SMCKeyInfo_t { var dataSize: UInt32 = 0; var dataType: UInt32 = 0; var dataAttributes: UInt8 = 0 }
 #endif // os(macOS)
-#endif // os(macOS) || os(Windows)
+#endif // os(macOS) || os(Windows) || os(Linux)

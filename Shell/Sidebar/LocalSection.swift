@@ -5,7 +5,7 @@ import ShellKit
 import ShellIntegrations
 import ShellMonitoring
 
-#if os(macOS) || os(Windows)
+#if os(macOS) || os(Windows) || os(Linux)
 /// The Local section ("This Mac"): this Mac's terminals, its persistent
 /// screen/tmux sessions (local AND the ones scanned from connected SSH hosts)
 /// and local history while history mode is on. Web pages and database

@@ -1,8 +1,21 @@
 import ComponentKit
-#if os(macOS) || os(Windows)
+import ShellIntegrations
+
+extension ActionKind {
+  /// Whether Shell offers this kind on this system: an Export notarizes, which needs Apple's notarytool, so Linux
+  /// leaves it (and the Notarization sheet) out.
+  var isOfferedHere: Bool {
+    #if os(Linux)
+    !needsNotarization
+    #else
+    true
+    #endif
+  }
+}
+
+#if os(macOS) || os(Windows) || os(Linux)
 import SwiftUI
 import ShellKit
-import ShellIntegrations
 import UniformTypeIdentifiers
 
 /// What opened the Notarization sheet: a scheme's Export waiting to run, or
