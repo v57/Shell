@@ -93,7 +93,7 @@ struct LocalSectionView: View {
         if flags.isEnabled(.authorizedKeys) {
           Button("Authorized Keys", systemImage: "key.2.on.ring.fill") {
             model.openLocalAuthorizedKeys()
-          }.help("Manage this Mac's authorized keys")
+          }.help("Manage this \(KitDevice.nameInSentence)'s authorized keys")
         }
         Divider()
         Button("Close Terminal", role: .destructive) {
