@@ -272,12 +272,12 @@ public extension LocalPTYTransport {
   /// The interactive shell: PowerShell 7 when it's installed, else Windows PowerShell. (Named for the Mac's,
   /// so `TerminalSession(session: .zsh)` is the local shell everywhere.)
   static var zsh: LocalPTYTransport {
-    LocalPTYTransport(executable: shellPath, argv: [shellName, "-NoLogo"])
+    LocalPTYTransport(executable: loginShell, argv: [loginShellName, "-NoLogo"])
   }
 
   /// The interactive shell starting in `directory` (⌘T's new tab in the current directory).
   static func zsh(in directory: String) -> LocalPTYTransport {
-    LocalPTYTransport(executable: shellPath, argv: [shellName, "-NoLogo"], workingDirectory: directory)
+    LocalPTYTransport(executable: loginShell, argv: [loginShellName, "-NoLogo"], workingDirectory: directory)
   }
 
   /// Runs `commands` in cmd and exits with their status (actions): the command language Code's actions are written
@@ -295,13 +295,15 @@ public extension LocalPTYTransport {
 
   /// tmux and the `session` tool don't run on Windows.
   static func tmux(_ name: String) -> LocalPTYTransport? { nil }
-  static func session(_ name: String) -> LocalPTYTransport? { nil }
+  static func session(_ name: String, in directory: String? = nil) -> LocalPTYTransport? { nil }
   nonisolated static func tmuxExecutablePath() -> String? { nil }
   nonisolated static func sessionExecutablePath() -> String? { nil }
 
-  private static var shellName: String { (shellPath as NSString).lastPathComponent }
+  /// The shell local terminals run, under the Mac's and Linux's name: PowerShell 7 when it's installed, else
+  /// Windows PowerShell.
+  nonisolated static var loginShellName: String { (loginShell as NSString).lastPathComponent }
 
-  private static let shellPath: String = {
+  nonisolated static let loginShell: String = {
     let environment = ProcessInfo.processInfo.environment
     let programFiles = environment["ProgramFiles"] ?? "C:\\Program Files"
     let candidates = [programFiles + "\\PowerShell\\7\\pwsh.exe"]

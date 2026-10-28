@@ -82,7 +82,7 @@ struct SidebarView: View {
       #endif
     }
     // The rows of a database's tree select as the sidebar's own items.
-    .environment(\.databaseSidebarTag) { AnyHashable(AppModel.Selection.databaseItem($0)) }
+    .environment(\.databaseSidebarTag, DatabaseSidebarTag { AnyHashable(AppModel.Selection.databaseItem($0)) })
     // Rows coming, going and reordering slide rather than jump (the kit stills
     // this in an inactive window and under Reduce Motion).
     .animation(.kit, value: rowIdentities)
