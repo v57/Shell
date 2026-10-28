@@ -36,6 +36,6 @@ struct FeatureWelcomeView: View {
       .keyboardShortcut(.defaultAction)
     }
     .padding(24)
-    .frame(minWidth: 440, minHeight: 520)
+    .frame(minWidth: 440, idealHeight: 520)
   }
 }
