@@ -29,6 +29,8 @@ public struct SSHConfig: Identifiable, Codable, Hashable {
   public var port: Int
   public var authMethod: AuthMethod
   public var savePassword: Bool
+  /// The shared record's id when it isn't `id` (a host another app made, such as a Hub device's), nil otherwise.
+  public var recordID: String?
   
   public init(
     id: UUID = UUID(),
@@ -37,7 +39,8 @@ public struct SSHConfig: Identifiable, Codable, Hashable {
     user: String = NSUserName(),
     port: Int = 22,
     authMethod: AuthMethod = .keychainKey,
-    savePassword: Bool = true
+    savePassword: Bool = true,
+    recordID: String? = nil
   ) {
     self.id = id
     self.name = name
@@ -46,7 +49,11 @@ public struct SSHConfig: Identifiable, Codable, Hashable {
     self.port = port
     self.authMethod = authMethod
     self.savePassword = savePassword
+    self.recordID = recordID
   }
+
+  /// The id of the shared record (`VaultHost`) this connection is.
+  public var vaultID: String { recordID ?? id.uuidString }
   
   /// Name if given, otherwise user@host.
   public var displayName: String {
@@ -58,6 +65,6 @@ public struct SSHConfig: Identifiable, Codable, Hashable {
   
   /// Keychain account used for this connection's saved password.
   public var passwordAccount: String {
-    "ssh-password-\(id.uuidString)"
+    "ssh-password-\(vaultID)"
   }
 }

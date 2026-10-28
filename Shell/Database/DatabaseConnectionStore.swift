@@ -44,7 +44,7 @@ final class DatabaseConnectionStore {
       vault.databases.first { $0.id == id }
       ?? VaultDatabase(
         id: id, engine: connection.engine.rawValue, port: Int(connection.port), order: nextOrder())
-    Self.copy(connection, into: &record, automaticHost: automaticHosts[connection.id])
+    Self.copy(connection, into: &record, automaticHost: automaticHosts[connection.id], hosts: vault.hosts)
     vault.save(record)
     storageError = vault.error
     if let password {
@@ -135,7 +135,9 @@ final class DatabaseConnectionStore {
 
   /// Writes a connection over its shared record. An SSH host that was only picked automatically stays
   /// unsaved, so it follows the host list.
-  static func copy(_ connection: DatabaseConnection, into record: inout VaultDatabase, automaticHost: UUID?) {
+  static func copy(
+    _ connection: DatabaseConnection, into record: inout VaultDatabase, automaticHost: UUID?, hosts: [VaultHost]
+  ) {
     record.name = connection.name
     record.engine = connection.engine.rawValue
     if connection.engine.isFileBased {
@@ -151,7 +153,10 @@ final class DatabaseConnectionStore {
     record.options["directConnection"] = connection.directConnection ? "true" : nil
     record.useTLS = connection.useTLS
     if connection.sshConfigID != automaticHost {
-      record.sshHostID = connection.sshConfigID?.uuidString
+      // A Hub device's host has an id that isn't a UUID: the config's id is made from it.
+      record.sshHostID = connection.sshConfigID.map { id in
+        hosts.first { (UUID(uuidString: $0.id) ?? stableUUID($0.id)) == id }?.id ?? id.uuidString
+      }
     }
   }
 

@@ -37,7 +37,7 @@ final class SSHConfigStore {
   // MARK: - Persistence API
 
   func save(_ config: SSHConfig) {
-    let id = config.id.uuidString
+    let id = config.vaultID
     var host =
       vault.hosts.first { $0.id == id } ?? VaultHost(id: id, hostname: config.host, order: nextOrder(), source: "shell")
     Self.copy(config, into: &host)
@@ -47,7 +47,8 @@ final class SSHConfigStore {
   }
 
   func remove(_ id: UUID) {
-    vault.perform { try $0.delete(id: id.uuidString) }
+    let recordID = vaultID(for: id)
+    vault.perform { try $0.delete(id: recordID) }
     reload()
   }
 
@@ -56,7 +57,7 @@ final class SSHConfigStore {
     let hosts = vault.hosts
     vault.perform { store in
       for (index, config) in list.enumerated() {
-        guard var host = hosts.first(where: { $0.id == config.id.uuidString }), host.order != index else { continue }
+        guard var host = hosts.first(where: { $0.id == config.vaultID }), host.order != index else { continue }
         host.order = index
         try store.save(host)
       }
@@ -68,7 +69,8 @@ final class SSHConfigStore {
   /// directory (overlay address, the host key the device signed, already trusted in `KnownHostsStore`). Nil for a
   /// host the user added.
   func hubRoute(for id: UUID) -> VaultHost.HubRoute? {
-    vault.hosts.first { $0.id == id.uuidString }?.hub
+    let recordID = vaultID(for: id)
+    return vault.hosts.first { $0.id == recordID }?.hub
   }
 
   /// The Hub's name for the device a saved connection reaches, nil for a host the user added.
@@ -78,7 +80,7 @@ final class SSHConfigStore {
   /// The screenshot demo's Hub devices (`ScreenshotDemo`): a host with the route the Vault app would keep for it.
   func saveDemoHubDevice(_ config: SSHConfig) {
     save(config)
-    guard var host = vault.hosts.first(where: { $0.id == config.id.uuidString }) else { return }
+    guard var host = vault.hosts.first(where: { $0.id == config.vaultID }) else { return }
     host.hub = VaultHost.HubRoute(hubID: "demo", deviceID: config.name, deviceName: config.name, platform: "macos")
     vault.save(host)
     reload()
@@ -97,7 +99,7 @@ final class SSHConfigStore {
     SSHConfig(
       id: UUID(uuidString: host.id) ?? stableUUID(host.id), name: host.name, host: host.hostname, user: host.user,
       port: host.port, authMethod: host.auth == .password ? .password : .keychainKey,
-      savePassword: host.savePassword)
+      savePassword: host.savePassword, recordID: UUID(uuidString: host.id)?.uuidString == host.id ? nil : host.id)
   }
 
   static func copy(_ config: SSHConfig, into host: inout VaultHost) {
@@ -114,7 +116,14 @@ final class SSHConfigStore {
   }
 
   private func reload() {
-    all = vault.hosts.map(Self.config(from:))
+    // Not this Mac itself: the Hub lists it, and the host it published is for the other devices.
+    let addresses = VaultDevice.addresses
+    all = vault.hosts.filter { !vault.isThisDevice($0, addresses: addresses) }.map(Self.config(from:))
+  }
+
+  /// The shared record a listed config is: a Hub device's host has an id that isn't a UUID.
+  private func vaultID(for id: UUID) -> String {
+    all.first { $0.id == id }?.vaultID ?? id.uuidString
   }
 
   private func nextOrder() -> Int {
