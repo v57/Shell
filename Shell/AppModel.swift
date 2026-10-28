@@ -2341,7 +2341,9 @@ final class AppModel {
       notarizationSetup = NotarizationSetupRequest(scheme: scheme, directory: directory)
       return
     }
-    guard let command = smartActionCommand(kind, scheme: scheme) else { return }
+    // Builds go to ~/Developer/Builds when it exists, picked now (the
+    // buttons and saved actions keep the plain command).
+    guard let command = smartActionCommand(kind, scheme: scheme.inBuildFolders()) else { return }
 
     // Replace semantics: stop the current run for this dir before starting.
     stopSmartAction(in: directory)
