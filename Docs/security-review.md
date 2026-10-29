@@ -14,14 +14,14 @@ Security framework; libssh2 + mbedTLS only carry the SSH transport.
   OpenSSH `SHA256:`. Signing goes through libssh2's external-signer callback.
 - No user-presence ACL: signing needs no Touch ID (a documented choice).
 
-**Encrypted files: history, smart actions, device-key SSH configs** (`Shell/SecureFileStore.swift`)
+**Encrypted files: history, smart actions, device-key SSH configs** (`App/Sources/ShellApp/SecureFileStore.swift`)
 - A Secure Enclave P-256 key-agreement key (`.privateKeyUsage`, `WhenUnlockedThisDeviceOnly`) does
   ECDH with a stored peer public key; HKDF-SHA256 with a fixed salt and a per-domain `sharedInfo`
   gives four independent AES-256 keys (notes, history, ssh-configs, smart-actions).
 - AES-GCM, random 96-bit nonce per seal, combined format. Files hold only ciphertext.
 - The key envelope sits in the data-protection Keychain, `WhenUnlockedThisDeviceOnly`.
 
-**Notes** (`Shell/Notes/`)
+**Notes** (`App/Sources/ShellApp/Notes/`)
 - Title, subtitle and text are three separate AES-GCM ciphertexts. Local notes use the
   `SecureFileStore` notes key; iCloud notes use a random 256-bit key in iCloud Keychain
   (synchronizable, `AfterFirstUnlock`). CloudKit records carry only id, dates, key id and ciphertext.

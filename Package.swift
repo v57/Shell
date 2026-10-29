@@ -10,6 +10,7 @@ func v57(_ name: String) -> Package.Dependency {
         ? .package(url: "https://github.com/v57/\(name).git", branch: "main") : .package(path: "../\(name)")
 }
 
+// The libraries. The app is a package of its own (App/Package.swift) with the dependencies only it uses.
 let package = Package(
     name: "Shell",
     platforms: [.macOS(.v14), .iOS(.v17)],
@@ -119,66 +120,11 @@ for target in package.targets where target.type == .regular || target.type == .t
       ["FoundationNetworking", "Observation", "SwiftUIPortability"].flatMap { ["-Xfrontend", "-import-module", "-Xfrontend", $0] })
   ]
 }
-#if os(Windows)
-// The app: a DLL the SwiftUI WinUI host loads (SwiftUI's Windows/scripts/build-app.ps1 -PackagePath <this package>
-// -Product ShellWinUI), built from the Xcode project's sources with its settings.
-package.dependencies += [v57("Component"), v57("UpdateKit"), v57("Markdown"), v57("Dev")]
-package.targets.append(
-  .target(
-    name: "ShellApp",
-    dependencies: [
-      "ShellKit", "ShellIntegrations", "ShellMonitoring", "ShellDatabaseEngines",
-      .product(name: "SwiftUI", package: "SwiftUI"), .product(name: "SwiftData", package: "SwiftUI"),
-      .product(name: "Charts", package: "SwiftUI"), .product(name: "SQLite3", package: "SwiftUI"),
-      .product(name: "CryptoKit", package: "SwiftUI"), .product(name: "ComponentKit", package: "Component"),
-      .product(name: "UpdateKit", package: "UpdateKit"), .product(name: "VaultKit", package: "Vault"),
-      .product(name: "VaultUI", package: "Vault"),
-      .product(name: "MarkdownKit", package: "Markdown"), .product(name: "DevScreenshots", package: "Dev"),
-      .product(name: "SSHTunnel", package: "Database"), .product(name: "WireKit", package: "Database"),
-    ],
-    path: "Shell",
-    exclude: ["Assets.xcassets", "Shell.entitlements", "Shell-iOS.entitlements", "PrivacyInfo.xcprivacy"],
-    swiftSettings: [
-      .swiftLanguageMode(.v5), .defaultIsolation(MainActor.self), .enableUpcomingFeature("ApproachableConcurrency"),
-      .enableUpcomingFeature("MemberImportVisibility"),
-      // On Apple platforms `import Foundation` brings Combine (ObservableObject, @Published), Observation
-      // (@Observable), URLSession and the file APIs SwiftUIPortability adds along: every file gets them here too.
-      .unsafeFlags(
-        ["Combine", "Observation", "FoundationNetworking", "SwiftUIPortability"].flatMap { ["-Xfrontend", "-import-module", "-Xfrontend", $0] }),
-    ]))
-package.products.append(.library(name: "ShellWinUI", type: .dynamic, targets: ["ShellApp"]))
-#elseif os(Linux)
-// The app on SwiftUI's GTK backend: an executable built from the Xcode project's sources with its settings
-// (V57_LOCAL=1 swift build --product Shell; SwiftUI's Linux/scripts/build-app --package <this package> Shell stages
-// it). ShellMonitoring reads the CPU load through Platform's PlatformSystem; web sessions are PlatformWeb's (WebKitGTK).
-package.dependencies += [v57("Component"), v57("UpdateKit"), v57("Markdown"), v57("Dev"), v57("Platform")]
+#if os(Linux)
+// ShellMonitoring reads the CPU load through Platform's PlatformSystem.
+package.dependencies += [v57("Platform")]
 for target in package.targets where target.name == "ShellMonitoring" {
   target.dependencies.append(.product(name: "PlatformSystem", package: "Platform"))
 }
-package.targets.append(
-  .executableTarget(
-    name: "ShellApp",
-    dependencies: [
-      "ShellKit", "ShellIntegrations", "ShellMonitoring", "ShellDatabaseEngines",
-      .product(name: "SwiftUI", package: "SwiftUI"), .product(name: "SwiftData", package: "SwiftUI"),
-      .product(name: "Charts", package: "SwiftUI"), .product(name: "SQLite3", package: "SwiftUI"),
-      .product(name: "CryptoKit", package: "SwiftUI"), .product(name: "ComponentKit", package: "Component"),
-      .product(name: "UpdateKit", package: "UpdateKit"), .product(name: "VaultKit", package: "Vault"),
-      .product(name: "VaultUI", package: "Vault"),
-      .product(name: "MarkdownKit", package: "Markdown"), .product(name: "DevScreenshots", package: "Dev"),
-      .product(name: "SSHTunnel", package: "Database"), .product(name: "WireKit", package: "Database"),
-      .product(name: "PlatformWeb", package: "Platform"),
-    ],
-    path: "Shell",
-    exclude: ["AppIcon.icon", "Shell.entitlements", "Shell-iOS.entitlements", "PrivacyInfo.xcprivacy"],
-    swiftSettings: [
-      .swiftLanguageMode(.v5), .defaultIsolation(MainActor.self), .enableUpcomingFeature("ApproachableConcurrency"),
-      .enableUpcomingFeature("MemberImportVisibility"),
-      // On Apple platforms `import Foundation` brings Combine (ObservableObject, @Published), Observation
-      // (@Observable), URLSession and the file APIs SwiftUIPortability adds along: every file gets them here too.
-      .unsafeFlags(
-        ["Combine", "Observation", "FoundationNetworking", "SwiftUIPortability"].flatMap { ["-Xfrontend", "-import-module", "-Xfrontend", $0] }),
-    ]))
-package.products.append(.executable(name: "Shell", targets: ["ShellApp"]))
 #endif
 #endif

@@ -3,7 +3,7 @@ import Foundation
 import SwiftData
 import Testing
 import ShellKit
-@testable import Shell
+@testable import ShellApp
 
 struct FeatureTests {
   @Test func noteTitleAndSubtitleUsePhysicalLines() {

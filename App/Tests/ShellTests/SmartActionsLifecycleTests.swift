@@ -1,7 +1,7 @@
 import Foundation
 import ShellIntegrations
 import Testing
-@testable import Shell
+@testable import ShellApp
 
 /// Smart-action lifecycle on the shared AppModel. Runs in the hosted test
 /// environment (GUI); skipped implicitly if the app can't bootstrap.

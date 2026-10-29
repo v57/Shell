@@ -2,7 +2,7 @@ import Foundation
 import Testing
 import ShellKit
 import VaultKit
-@testable import Shell
+@testable import ShellApp
 
 /// A vault in a temporary folder with in-memory keys: the stores run without the shared container, the
 /// keychain or iCloud.

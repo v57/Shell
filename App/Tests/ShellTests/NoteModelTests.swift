@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import Shell
+@testable import ShellApp
 
 /// Title and subtitle derivation for the sidebar (the note text itself is never changed).
 struct NoteModelTests {

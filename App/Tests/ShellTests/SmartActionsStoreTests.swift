@@ -1,7 +1,7 @@
 import Foundation
 import ShellIntegrations
 import Testing
-@testable import Shell
+@testable import ShellApp
 
 struct SmartActionsStoreTests {
   /// Hosted test (real keychain): writes an encrypted per-directory entry

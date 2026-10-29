@@ -1,7 +1,7 @@
 import Foundation
 import ShellKit
 import Testing
-@testable import Shell
+@testable import ShellApp
 
 /// Hermetic tests for the SSH tunnel routing decision of a database
 /// connection — pure value logic, no live SSH server or driver required (an

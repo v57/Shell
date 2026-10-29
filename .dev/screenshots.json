@@ -2,7 +2,7 @@
   "build": { "scheme": "Shell", "project": "Shell.xcodeproj" },
   "appearances": ["light", "dark"],
   "variables": { "DEMO": "/tmp/ShellDemo" },
-  "watch": ["Shell", "Sources", "Tools/screenshots"],
+  "watch": ["App", "Sources", "Tools/screenshots"],
   "mac": { "window": [1440, 900] },
   "scenes": [
     {

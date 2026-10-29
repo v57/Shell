@@ -10,8 +10,7 @@ import DevScreenshots
 import UpdateKit
 #endif
 
-@main
-struct ShellApp: App {
+public struct ShellApp: App {
   #if os(macOS)
   @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
   #endif
@@ -25,7 +24,7 @@ struct ShellApp: App {
 
   #endif
 
-  init() {
+  public init() {
     #if os(macOS) || os(Windows) || os(Linux)
     updater.start()
     #endif
@@ -47,7 +46,7 @@ struct ShellApp: App {
     }
   }
 
-  var body: some Scene {
+  public var body: some Scene {
     WindowGroup {
       MainWindow()
         .environment(AppModel.shared)

@@ -3,7 +3,7 @@ import Foundation
 import Testing
 import ShellKit
 import VaultKit
-@testable import Shell
+@testable import ShellApp
 
 /// The key registry, on a throwaway vault (publishing this device's key needs the Secure Enclave and the
 /// shared keychain, so it's covered by running the app).

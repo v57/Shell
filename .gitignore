@@ -3,6 +3,7 @@
 
 # Swift Package Manager build artifacts
 /.build
+/App/.build
 /Packages
 
 # Xcode
@@ -21,6 +22,7 @@ build/
 # graphify tool output
 graphify-out/
 /.swiftpm
+/App/.swiftpm
 
 # LLVM code coverage artifacts
 *.profraw
@@ -51,5 +53,6 @@ KANBAN*.md
 # Package pins: the other v57 repositories follow GitHub's main until release (or the checkouts next to this
 # one, through <App>-Local.xcworkspace or V57_LOCAL=1), so nothing pins them
 /Package.resolved
+/App/Package.resolved
 /Shell.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
 /Shell-Local.xcworkspace/xcshareddata/
