@@ -11,11 +11,15 @@ func v57(_ name: String) -> Package.Dependency {
     ? .package(url: "https://github.com/v57/\(name).git", branch: "main") : .package(path: "../../\(name)")
 }
 
+/// This repository's libraries, the package at "..": SwiftPM names a path dependency after its folder, which is Shell in
+/// the main checkout and the worktree's own name in a worktree.
+let kits = String(Context.packageDirectory.split(whereSeparator: { $0 == "/" || $0 == "\\" }).dropLast().last ?? "Shell")
+
 let package = Package(
   name: "ShellApp", platforms: [.macOS(.v14), .iOS(.v17)],
   products: [.library(name: "ShellApp", targets: ["ShellApp"])],
   dependencies: [
-    .package(name: "Shell", path: ".."),
+    .package(path: ".."),
     // Database's tunnels and byte streams, the vault, Markdown's notes, the shared design, in-app updates and
     // screenshot scenes (Platform's web view is added below, everywhere but Windows).
     v57("Database"), v57("Vault"), v57("Markdown"), v57("Component"), v57("UpdateKit"), v57("Dev"),
@@ -28,8 +32,8 @@ let package = Package(
     .target(
       name: "ShellApp",
       dependencies: [
-        .product(name: "ShellKit", package: "Shell"), .product(name: "ShellIntegrations", package: "Shell"),
-        .product(name: "ShellMonitoring", package: "Shell"), .product(name: "ShellDatabaseEngines", package: "Shell"),
+        .product(name: "ShellKit", package: kits), .product(name: "ShellIntegrations", package: kits),
+        .product(name: "ShellMonitoring", package: kits), .product(name: "ShellDatabaseEngines", package: kits),
         .product(name: "SSHTunnel", package: "Database"), .product(name: "WireKit", package: "Database"),
         .product(name: "VaultKit", package: "Vault"), .product(name: "VaultUI", package: "Vault"),
         .product(name: "MarkdownKit", package: "Markdown"), .product(name: "ComponentKit", package: "Component"),
