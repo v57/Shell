@@ -96,14 +96,20 @@ public struct ShellApp: App {
 
 /// The main window on one account (`VaultAccountScope`, ../Ideas/Accounts.md): the window keeps the account, and
 /// `AppModel.show(_:)` puts its hosts, database connections and notes in the model. Shell has one main window and
-/// one model, so Open in a New Window isn't offered; Manage Accounts… opens Settings.
+/// one model, so Open in a New Window isn't offered; Manage Accounts… opens Settings › Accounts.
 private struct MainWindow: View {
   @SceneStorage("vault.account") private var accountID = VaultAccount.personal.id
 
   var body: some View {
-    VaultAccountScope(selection: $accountID, manage: { AppModel.shared.showingSettings = true }) { vault in
+    VaultAccountScope(selection: $accountID, manage: Self.manageAccounts) { vault in
       AccountContent(vault: vault)
     }
+  }
+
+  /// Opens Settings › Accounts.
+  private static func manageAccounts() {
+    UserDefaults.standard.set(SettingsView.accountsPane, forKey: SettingsView.paneKey)
+    AppModel.shared.showingSettings = true
   }
 }
 

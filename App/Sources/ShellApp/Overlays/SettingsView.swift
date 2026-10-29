@@ -3,116 +3,92 @@ import ShellIntegrations
 import SwiftUI
 import VaultUI
 
-/// The Settings panel: the kit's sheet over the main window (`kitSheet` in
-/// ContentView), never a separate window or a system sheet.
+/// The Settings panel: the kit's settings (`KitSettings`, the panes in its sidebar, each a column of form cards, as in
+/// every v57 app) in the kit's overlay over the main window (`kitSheet` in ContentView), never a separate window or a
+/// system sheet. A click on the dim or Esc closes it; on iPhone the panes are rows that push, with Done in the bar.
 ///
-/// Hosts these cards:
-/// - **Sessions** (macOS) — how new terminals start (`SettingsSessionsCard`).
-/// - **Features** — the feature-flags panel (`FeatureSelectionView`).
-/// - **Actions** — the shell actions surfaced here so they're reachable on iOS
-///   (macOS reaches the same actions through the Shell menu).
-/// - **Accounts** — the v57 accounts, the same screen in every app
-///   (`VaultAccountsSettings`; the account picker's Manage Accounts… opens it).
+/// Panes:
+/// - **Sessions** (desktop) — how new terminals start (`SessionsSettings`).
+/// - **Features** — the feature flags (`FeatureSelectionView`).
+/// - **Actions** — the shell actions, reachable here on iOS (macOS reaches the same actions through the Shell menu).
+/// - **Accounts** — the v57 accounts, the same pane in every app (`VaultAccountsSettings`; the account picker's
+///   Manage Accounts… opens it).
 ///
-/// Presented the same way on macOS and iPad: a card over the dimmed window (a
-/// click on the dim, Esc or its close button closes it); a system sheet on
-/// iPhone. On macOS the Shell menu's Settings…/⌘, entry point sets
-/// `AppModel.showingSettings`; on iOS the sidebar gear button does the same.
+/// On macOS the Shell menu's Settings…/⌘, sets `AppModel.showingSettings`; on iOS the sidebar gear button does the same.
 struct SettingsView: View {
+  /// The pane shown, kept for the next time Settings opens.
+  static let paneKey = "settings.pane"
+  static let accountsPane = "accounts"
+
+  @AppStorage(SettingsView.paneKey) private var pane = ""
   @Environment(AppModel.self) private var model
+  @Environment(\.kitIdiom) private var idiom
+  private var flags: FeatureFlagsStore { .shared }
 
   var body: some View {
-    KitSheet(
-      title: "Settings", systemImage: "gearshape", hue: .gray, width: 480,
-      onClose: { model.showingSettings = false }
-    ) {
-      VStack(alignment: .leading, spacing: 20) {
-        #if os(macOS) || os(Windows) || os(Linux)
-        SettingsCard(title: "Sessions", systemImage: "terminal") {
-          SettingsSessionsCard()
+    Group {
+      if idiom == .phone {
+        // A pane pushes on the stack around the settings.
+        NavigationStack {
+          settings
+            .kitToolbar("Settings", systemImage: "gearshape", hue: .gray) {
+              Button("Done") { model.showingSettings = false }.buttonStyle(.kit)
+            }
         }
-        #endif
-        SettingsCard(title: "Features", systemImage: "square.grid.2x2") {
-          FeatureSelectionView()
-        }
-        SettingsCard(title: "Actions", systemImage: "bolt") {
-          SettingsActionsCard()
-        }
-        // The kit's own cards, one per account, under the same header.
-        VStack(alignment: .leading, spacing: 12) {
-          Label("Accounts", systemImage: "person.2")
-            .font(.headline)
-          VaultAccountsSettings()
-        }
+      } else {
+        settings
       }
-      .padding(.horizontal, 4)
     }
-  }
-}
-
-/// A rounded card: an icon + title header and a labelled body. Cross-platform
-/// (no UIKit-typed colors) so it renders in the Settings overlay.
-private struct SettingsCard<Content: View>: View {
-  let title: String
-  let systemImage: String
-  let content: Content
-
-  init(title: String, systemImage: String, @ViewBuilder content: () -> Content) {
-    self.title = title
-    self.systemImage = systemImage
-    self.content = content()
+    .frame(maxWidth: idiom == .phone ? .infinity : 680, maxHeight: idiom == .phone ? .infinity : 500)
   }
 
-  var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      Label(title, systemImage: systemImage)
-        .font(.headline)
-      content
+  private var settings: some View {
+    KitSettings(selection: $pane, window: .titled) {
+      #if os(macOS) || os(Windows) || os(Linux)
+      SettingsPane("Sessions", systemImage: "terminal", hue: .gray, id: "sessions") { SessionsSettings() }
+      #endif
+      SettingsPane(
+        "Features", systemImage: "square.grid.2x2", hue: .blue,
+        value: "\(FeatureID.available.filter(flags.isEnabled).count) on", id: "features"
+      ) {
+        FeatureSelectionView(
+          footer: "Turned-off features are hidden and stop their background work; their data is kept.")
+      }
+      SettingsPane("Actions", systemImage: "bolt", hue: .purple, id: "actions") { ActionsSettings() }
+      SettingsPane("Accounts", systemImage: "person.2", hue: .indigo, section: "v57", id: Self.accountsPane) {
+        VaultAccountsSettings()
+      }
     }
-    .padding(16)
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .background {
-      RoundedRectangle(cornerRadius: 12, style: .continuous)
-        .fill(Color.secondary.opacity(0.12))
-    }
-    .overlay {
-      RoundedRectangle(cornerRadius: 12, style: .continuous)
-        .strokeBorder(Color.secondary.opacity(0.25))
-    }
+    .toggleStyle(.kitSwitch)
   }
 }
 
 #if os(macOS) || os(Windows) || os(Linux)
-/// The "Sessions" card: whether new terminals start as persistent sessions
-/// (and, on the Mac, whether they outlive Shell: `SessionAgentRow`).
-/// Persistent sessions are the Screen feature's, so the toggle is off and
-/// disabled while that feature is.
-private struct SettingsSessionsCard: View {
+/// Settings › Sessions: whether new terminals start as persistent sessions (and, on the Mac, whether they outlive
+/// Shell: `SessionAgentRow`). Persistent sessions are the Screen feature's, so the switch is off and disabled while
+/// that feature is.
+private struct SessionsSettings: View {
   @Environment(AppModel.self) private var model
   private var flags: FeatureFlagsStore { .shared }
 
   var body: some View {
     let available = flags.isEnabled(.sessions) && flags.isEnabled(.screen)
-    VStack(alignment: .leading, spacing: 0) {
-      Toggle(isOn: Binding(
-        get: { available && model.alwaysPersistentSessions },
-        set: { model.alwaysPersistentSessions = $0 }
-      )) {
-        VStack(alignment: .leading, spacing: 2) {
-          Text("Always Start Persistent Sessions")
-          Text(available
-               ? "New terminals keep running after you close them; reopen them from the sidebar"
-               : "Turn on Sessions and Screen sessions under Features to use this")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
+    FormCard {
+      FormRow(
+        "Always Start Persistent Sessions",
+        help: available
+          ? "New terminals keep running after you close them; reopen them from the sidebar"
+          : "Turn on Sessions and Screen sessions under Features to use this",
+        systemImage: "rectangle.stack", hue: .teal
+      ) {
+        Toggle("Always Start Persistent Sessions", isOn: Binding(
+          get: { available && model.alwaysPersistentSessions },
+          set: { model.alwaysPersistentSessions = $0 }
+        ))
+        .kitLabelsHidden()
+        .disabled(!available)
       }
-      .toggleStyle(.switch)
-      .disabled(!available)
-      .padding(.vertical, 6)
       #if os(macOS)
-      Divider()
       SessionAgentRow()
       #endif
     }
@@ -130,27 +106,16 @@ private struct SessionAgentRow: View {
   private var agent: SessionAgentModel { model.sessionAgent }
 
   var body: some View {
-    HStack(spacing: 12) {
-      VStack(alignment: .leading, spacing: 2) {
-        Text("Keep Sessions Running After Quit")
-        Text(caption)
-          .font(.caption)
-          .foregroundStyle(.secondary)
-        if let error = agent.errorMessage {
-          Text(error)
-            .font(.caption)
-            .foregroundStyle(.red)
-            .textSelection(.enabled)
-        }
-      }
-      .frame(maxWidth: .infinity, alignment: .leading)
+    FormRow(
+      "Keep Sessions Running After Quit", help: caption, systemImage: "moon.zzz", hue: .indigo,
+      error: agent.errorMessage
+    ) {
       if agent.isWorking {
-        ProgressView().controlSize(.small)
+        LiveIcon(systemImage: "gearshape.2", hue: .indigo, status: .working, size: 20)
       } else {
-        action
+        action.buttonStyle(.kit)
       }
     }
-    .padding(.vertical, 6)
     .kitConfirmation(
       "Remove the login item?", isPresented: $confirmingRemove,
       message: "Sessions running now end, and new ones end when Shell quits.", systemImage: "person.badge.minus",
@@ -184,67 +149,67 @@ private struct SessionAgentRow: View {
 }
 #endif
 
-/// The "Actions" card: every shell action reachable on macOS through the Shell
-/// menu but with no dedicated control on iOS. Each row invokes the same
-/// `AppModel` method as its menu counterpart.
+/// Settings › Actions: every shell action reachable on macOS through the Shell menu but with no dedicated control on
+/// iOS, a row each with its button. Each row invokes the same `AppModel` method as its menu counterpart.
 ///
-/// NOTE: the macOS Shell menu stays the macOS entry point (it is NOT trimmed);
-/// these rows make the same actions reachable on iOS where there is no menu
-/// bar. If you add a row, call the exact `AppModel` method the menu item calls.
-private struct SettingsActionsCard: View {
+/// NOTE: the macOS Shell menu stays the macOS entry point (it is NOT trimmed); these rows make the same actions
+/// reachable on iOS where there is no menu bar. If you add a row, call the exact `AppModel` method the menu item calls.
+private struct ActionsSettings: View {
   @Environment(AppModel.self) private var model
   private var flags: FeatureFlagsStore { .shared }
 
   private struct Row: Identifiable {
     let title: String
     let systemImage: String
+    let hue: Hue
+    let button: String
     var disabled = false
     let action: () -> Void
     var id: String { title }
   }
 
-  /// The rows whose feature is on: a disabled feature's actions are hidden
-  /// here exactly like its menu items.
+  /// The rows whose feature is on: a disabled feature's actions are hidden here exactly like its menu items.
   private var rows: [Row] {
     var rows: [Row] = []
     if flags.isEnabled(.ssh) {
-      rows.append(Row(title: "New Connection", systemImage: "plus") {
+      rows.append(Row(title: "New Connection", systemImage: "plus", hue: .blue, button: "New…") {
         model.showingNewConnection = true
       })
     }
     if flags.isEnabled(.actions) {
-      rows.append(Row(title: "Actions…", systemImage: "folder") {
+      rows.append(Row(title: "Actions", systemImage: "folder", hue: .purple, button: "Show") {
         model.showingActions = true
       })
-      rows.append(Row(title: "Create Action from Session", systemImage: "calendar.badge.plus",
-                      disabled: !model.canCreateActionFromCurrentSession) {
+      rows.append(Row(title: "Create Action from Session", systemImage: "calendar.badge.plus", hue: .purple,
+                      button: "Create", disabled: !model.canCreateActionFromCurrentSession) {
         model.createActionFromCurrentSession()
       })
     }
-    rows.append(Row(title: "Insert into Terminal…", systemImage: "arrow.down.to.line",
+    rows.append(Row(title: "Insert into Terminal", systemImage: "arrow.down.to.line", hue: .gray, button: "Insert…",
                     disabled: model.selectedSession == nil) {
       model.showingCommandInsert = true
     })
-    rows.append(Row(title: "Themes…", systemImage: "paintpalette") {
+    rows.append(Row(title: "Themes", systemImage: "paintpalette", hue: .pink, button: "Show") {
       model.showingThemes = true
     })
     if flags.isEnabled(.files) {
-      rows.append(Row(title: "Toggle Files Panel", systemImage: "sidebar.left",
+      rows.append(Row(title: "Files Panel", systemImage: "sidebar.left", hue: .teal,
+                      button: model.directoryBrowser.visible ? "Hide" : "Show",
                       disabled: model.selectedSession == nil) {
         model.directoryBrowser.visible.toggle()
       })
-      rows.append(Row(title: "Navigate Up", systemImage: "arrow.up.to.line",
+      rows.append(Row(title: "Navigate Up", systemImage: "arrow.up.to.line", hue: .teal, button: "Go Up",
                       disabled: model.selectedSession == nil || !model.directoryBrowser.canNavigateUp) {
         model.directoryBrowser.navigateUp()
       })
     }
     if flags.isEnabled(.ssh) {
-      rows.append(Row(title: "Copy SSH Public Key", systemImage: "key") {
+      rows.append(Row(title: "SSH Public Key", systemImage: "key", hue: .brown, button: "Copy") {
         model.copyPublicKey()
       })
     }
     if flags.isEnabled(.authorizedKeys) {
-      rows.append(Row(title: "Authorized Keys", systemImage: "key.2.on.ring") {
+      rows.append(Row(title: "Authorized Keys", systemImage: "key.2.on.ring", hue: .brown, button: "Show") {
         model.openLocalAuthorizedKeys()
       })
     }
@@ -252,28 +217,13 @@ private struct SettingsActionsCard: View {
   }
 
   var body: some View {
-    VStack(spacing: 0) {
-      ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-        if index > 0 { Divider() }
-        actionRow(row.title, systemImage: row.systemImage, disabled: row.disabled, action: row.action)
+    FormCard {
+      ForEach(rows) { row in
+        FormRow(row.title, systemImage: row.systemImage, hue: row.hue) {
+          Button(row.button, action: row.action).buttonStyle(.kit)
+        }
+        .disabled(row.disabled)
       }
     }
-  }
-
-  private func actionRow(
-    _ title: String,
-    systemImage: String,
-    disabled: Bool = false,
-    action: @escaping () -> Void
-  ) -> some View {
-    Button(action: action) {
-      Label(title, systemImage: systemImage)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 8)
-        .contentShape(Rectangle())
-    }
-    .buttonStyle(.plain)
-    .disabled(disabled)
-    .foregroundStyle(disabled ? Color.secondary : Color.primary)
   }
 }

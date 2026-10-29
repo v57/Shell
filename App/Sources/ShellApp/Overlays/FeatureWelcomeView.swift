@@ -7,6 +7,7 @@ import SwiftUI
 /// `FeatureFlagsStore.needsFirstLaunchSelection` is true.
 struct FeatureWelcomeView: View {
   @Environment(\.kitDismiss) private var dismiss
+  @Environment(\.kitIdiom) private var idiom
   private let store: FeatureFlagsStore
 
   init(store: FeatureFlagsStore? = nil) {
@@ -36,6 +37,7 @@ struct FeatureWelcomeView: View {
       .keyboardShortcut(.defaultAction)
     }
     .padding(24)
-    .frame(minWidth: 440, idealHeight: 520)
+    // 440 points wide, but never wider than an iPhone's screen.
+    .frame(minWidth: idiom == .phone ? nil : 440, idealHeight: 520)
   }
 }
