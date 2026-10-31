@@ -250,6 +250,17 @@ private struct ActionRunRow: View {
         SessionStatusLine(session: session)
       }
     }
+    .kitHelp(
+      spec?.action.name ?? "Action", meta: "\(environmentLabel) · \(statusText(status))", systemImage: "play.fill",
+      hue: .purple, status: status)
+  }
+
+  private func statusText(_ status: WorkStatus) -> String {
+    switch status {
+    case .working: "Running"
+    case .failed(let message): message.map { "Failed: \($0)" } ?? "Failed"
+    default: "Finished"
+    }
   }
 }
 
@@ -278,6 +289,11 @@ private struct TextFilesSectionView: View {
                 .transition(.scale.combined(with: .opacity))
             }
           }
+          .kitHelp(
+            file.displayName,
+            meta: [(file.url.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath,
+                   file.isDirty ? "Unsaved changes" : nil].compactMap { $0 }.joined(separator: " · "),
+            systemImage: "doc.text", hue: .gray)
           .kitContextMenu {
             Button("Close", role: .destructive) {
               model.closeOpenedFile(file.id)
@@ -328,10 +344,15 @@ struct FilteredMove {
 /// A session row in the sidebar: its name, its live status line (the n-th
 /// non-empty terminal line from the bottom, or the line pinned by clicking its
 /// last character) and its state dot. Rename… turns the title into a field in
-/// place (`.kitRename`): Return applies, Escape cancels.
+/// place (`.kitRename`): Return applies, Escape cancels. Its tooltip says where
+/// it runs and its state.
 struct SessionRow: View {
   var session: TerminalSession
   let defaultLabel: String
+  /// Where it runs, for the tooltip ("On this Mac", "On atlas-web-1").
+  let place: String
+  /// Its section's hue, for the tooltip's icon.
+  let hue: Hue
   @Binding var isRenaming: Bool
   let onRename: (String) -> Void
 
@@ -347,8 +368,23 @@ struct SessionRow: View {
       }
     }
     .subtitle { SessionStatusLine(session: session) }
+    .kitHelp(
+      session.customName ?? defaultLabel, meta: "\(place) · \(stateText)", systemImage: "terminal", hue: hue,
+      status: session.linkStatus)
     .kitRename(isRenaming: $isRenaming) { onRename($0) }
     .animation(.kit, value: stateDotHue)
+  }
+
+  /// The tooltip's state: what the dot and the live icon show, in words.
+  private var stateText: String {
+    switch session.connectionState {
+    case .starting: "Starting"
+    case .connecting: "Connecting…"
+    case .reconnecting(let attempt): attempt > 1 ? "Reconnecting, attempt \(attempt)…" : "Reconnecting…"
+    case .connected: session.hasActivity ? "Active" : "Idle"
+    case .failed(let message): message
+    case .closed: "Shell ended"
+    }
   }
 
   /// The dot for what the live icon doesn't show: green while the session

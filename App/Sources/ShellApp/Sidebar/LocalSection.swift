@@ -59,6 +59,10 @@ struct LocalSectionView: View {
             SidebarRow(value: AppModel.Selection.history(record.id), record.title, systemImage: "clock") {
               Text(record.activityDate, style: .relative)
             }
+            .kitHelp(
+              record.title,
+              meta: "Last command \(record.activityDate.formatted(.relative(presentation: .named)))",
+              systemImage: "clock", hue: .orange)
           }
           .transition(.blurReplace)
         } else {
@@ -85,6 +89,7 @@ struct LocalSectionView: View {
       SessionRow(
         session: session,
         defaultLabel: model.displayName(for: session),
+        place: "On this \(KitDevice.nameInSentence)", hue: .green,
         isRenaming: state.isRenamingSession(session.id),
         onRename: { model.renameSession(session.id, to: $0) }
       )
@@ -296,6 +301,11 @@ private struct ScreenSessionRow: View {
       }
     }
     .kitRename(isRenaming: $isRenaming) { onRename($0) }
+    .kitHelp(
+      info.shortName,
+      meta: [helpText, info.state, info.remoteOrigin.map { "On \($0.displayName)" }].compactMap { $0 }
+        .joined(separator: " · "),
+      systemImage: info.isProtected ? "lock.fill" : "shield.fill", hue: info.isAttached ? .green : .gray)
   }
 }
 #endif
