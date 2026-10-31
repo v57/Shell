@@ -36,54 +36,38 @@ struct CommandInsertView: View {
   }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      HStack {
-        Text("Insert into Terminal")
-          .font(.headline)
-        Spacer()
-        Text("→ \(sessionName)")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-      }
-
+    KitSheet(
+      title: "Insert into Terminal", meta: "→ \(sessionName)", systemImage: "text.insert", hue: .green, width: 480
+    ) {
       TextEditor(text: $text)
-        .font(.system(.body, design: .monospaced))
-        .frame(minWidth: 420, minHeight: 180)
-        .overlay(
-          RoundedRectangle(cornerRadius: 6)
-            .stroke(Color.secondary.opacity(0.25))
-        )
+        .kitFont(.mono)
+        .scrollContentBackground(.hidden)
+        .frame(minHeight: 180)
+        .padding(6)
+        .kitSurface(.field)
         .focused($editorFocused)
-
-      if isMultiline {
-        Toggle("Send as separate commands", isOn: $sendAsSeparateCommands)
-#if os(macOS) || os(Windows) || os(Linux)
-          .toggleStyle(.checkbox)
-#else
-          .toggleStyle(.switch)
-#endif
-          .font(.caption)
-        Text(sendAsSeparateCommands
-          ? "Each line is sent as Enter, so multi-line text runs line-by-line in the shell."
-          : "Newlines are sent as-is, so multi-line text is pasted verbatim.")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-      } else {
-        Text("Each line is sent as Enter, so multi-line text runs line-by-line in the shell.")
-          .font(.caption)
-          .foregroundStyle(.secondary)
+        .padding(.horizontal, KitMetrics.gutter)
+      FormCard(
+        footer: isMultiline && !sendAsSeparateCommands
+          ? "Newlines are sent as-is, so multi-line text is pasted verbatim."
+          : "Each line is sent as Enter, so multi-line text runs line-by-line in the shell."
+      ) {
+        if isMultiline {
+          FormRow("Send as separate commands", systemImage: "return", hue: .green) {
+            Toggle("Send as separate commands", isOn: $sendAsSeparateCommands)
+              .toggleStyle(.kitSwitch)
+              .kitLabelsHidden()
+          }
+        }
       }
-
-      HStack {
-        Spacer()
-        Button("Cancel") { dismiss() }
-          .keyboardShortcut(.cancelAction)
-        Button("Apply") { apply() }
-          .keyboardShortcut(.defaultAction)
-          .disabled(!canApply)
-      }
+    } footer: {
+      Button("Cancel") { dismiss() }
+        .keyboardShortcut(.cancelAction)
+      Button("Apply") { apply() }
+        .buttonStyle(.kitPrimary)
+        .keyboardShortcut(.defaultAction)
+        .disabled(!canApply)
     }
-    .padding(16)
     .onAppear {
       DispatchQueue.main.async { editorFocused = true }
     }

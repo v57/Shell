@@ -101,126 +101,101 @@ struct NewActionView: View {
   }
 
   var body: some View {
-    VStack(spacing: 0) {
-      Text(editing == nil ? "New Action" : "Edit Action")
-        .font(.headline)
-        .padding(.top, 16)
-        .padding(.bottom, 8)
+    KitSheet(
+      title: editing == nil ? "New Action" : "Edit Action", meta: editing?.name,
+      systemImage: "bolt", hue: .purple, width: 480
+    ) {
+      FormCard("Action") {
+        FormRow("Name", systemImage: "character.cursor.ibeam", hue: .purple, field: TextField("Name", text: $name))
+        FormRow(
+          "Category", help: "Optional", systemImage: "folder", hue: .purple,
+          field: TextField("Category (optional)", text: $category))
+      }
 
-      Form {
-        Section("Action") {
-          TextField("Name", text: $name)
-          TextField("Category (optional)", text: $category)
+      FormCard("Where to display", footer: "Future sessions applies to SSH connections you save after this action.") {
+        FormRow("Local", systemImage: "terminal", hue: .green) {
+          toggle("Local", isOn: $appliesToLocal)
         }
-
-        Section {
-          Toggle("Local", isOn: $appliesToLocal)
-          ForEach(model.connections) { config in
-            Toggle(config.displayName, isOn: binding(for: config.id))
-          }
-          Toggle("Apply to future sessions", isOn: $appliesToFutureSSHConnections)
-        } header: {
-          Text("Where to display")
-        } footer: {
-          Text("Future sessions applies to SSH connections you save after this action.")
-        }
-
-        Section {
-          Toggle("Focus window when run", isOn: $focusWindow)
-          Toggle("Keep after completion", isOn: $keepAfterCompletion)
-        } header: {
-          Text("Behavior")
-        } footer: {
-          Text("Off: the action runs in the background — watch it in the sidebar's Running section.")
-        }
-
-        Section {
-          TextEditor(text: $commands)
-            .font(.body.monospaced())
-            .frame(minHeight: 140)
-        } header: {
-          Text("Commands")
-        } footer: {
-          Text("Runs in a new terminal with zsh locally, or your shell on the remote host.")
-        }
-
-        Section {
-          TextField("Address (optional)", text: $webAddress)
-            .textContentType(.URL)
-        } header: {
-          Text("Web")
-        } footer: {
-          if webAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            Text("Optional: the command starts a web server; this opens it in a focused web view.")
-          } else {
-            Text("Opens \(resolvedWebAddress) when the action runs.")
+        ForEach(model.connections) { config in
+          FormRow(config.displayName, systemImage: "network", hue: .blue) {
+            toggle(config.displayName, isOn: binding(for: config.id))
           }
         }
-
-        Section {
-          if !selectedDependencyActions.isEmpty {
-            ForEach(selectedDependencyActions) { dep in
-              HStack {
-                Image(systemName: "checkmark.circle.fill")
-                  .foregroundStyle(.blue)
-                Text(dep.name)
-                Spacer()
-                Button {
-                  dependencies.remove(dep.id)
-                } label: {
-                  Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .help("Remove dependency")
-              }
-            }
-          }
-          if availableDependencies.isEmpty {
-            Text(selectedDependencyActions.isEmpty
-                 ? "No other actions yet — create one first."
-                 : "No more actions can be added (all remaining would recurse).")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-          } else {
-            ForEach(availableDependencies) { dep in
-              HStack {
-                Button {
-                  dependencies.insert(dep.id)
-                } label: {
-                  Image(systemName: "plus.circle")
-                    .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .help("Add as a dependency")
-                Text(dep.name)
-                Spacer()
-                if !dep.dependencies.isEmpty {
-                  Text("\(dep.dependencies.count) dep.\(dep.dependencies.count == 1 ? "" : "s")")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                }
-              }
-            }
-          }
-        } header: {
-          Text("Dependencies")
-        } footer: {
-          Text("All of this action's dependencies start at once, and this action starts 1 second after its dependencies have started — so it is running, not necessarily finished.")
+        FormRow("Apply to future sessions", systemImage: "clock.arrow.circlepath", hue: .blue) {
+          toggle("Apply to future sessions", isOn: $appliesToFutureSSHConnections)
         }
       }
-      .formStyle(.grouped)
 
-      HStack {
-        Spacer()
-        Button("Cancel") { dismiss() }
-        Button(editing == nil ? "Create" : "Save") { save() }
-          .keyboardShortcut(.defaultAction)
-          .disabled(!canCreate)
+      FormCard(
+        "Behavior", footer: "Off: the action runs in the background — watch it in the sidebar's Running section."
+      ) {
+        FormRow("Focus window when run", systemImage: "macwindow", hue: .gray) {
+          toggle("Focus window when run", isOn: $focusWindow)
+        }
+        FormRow("Keep after completion", systemImage: "pin", hue: .gray) {
+          toggle("Keep after completion", isOn: $keepAfterCompletion)
+        }
       }
-      .padding()
+
+      FormCard("Commands", footer: "Runs in a new terminal with zsh locally, or your shell on the remote host.") {
+        TextEditor(text: $commands)
+          .kitFont(.mono)
+          .scrollContentBackground(.hidden)
+          .frame(minHeight: 140)
+          .padding(6)
+          .kitSurface(.field)
+          .padding(6)
+      }
+
+      FormCard(
+        "Web",
+        footer: webAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+          ? "Optional: the command starts a web server; this opens it in a focused web view."
+          : "Opens \(resolvedWebAddress) when the action runs."
+      ) {
+        FormRow(
+          "Address", help: "Optional", systemImage: "globe", hue: .teal,
+          field: TextField("Address (optional)", text: $webAddress).textContentType(.URL))
+      }
+
+      FormCard(
+        "Dependencies",
+        footer: availableDependencies.isEmpty
+          ? (selectedDependencyActions.isEmpty
+            ? "No other actions yet — create one first."
+            : "No more actions can be added (all remaining would recurse).")
+          : "All of this action's dependencies start at once, and this action starts 1 second after its dependencies have started — so it is running, not necessarily finished."
+      ) {
+        ForEach(selectedDependencyActions) { dep in
+          FormRow(dep.name, systemImage: "checkmark", hue: .blue) {
+            Button("Remove dependency", systemImage: "xmark") { dependencies.remove(dep.id) }
+              .buttonStyle(.kitIcon)
+              .labelStyle(.iconOnly)
+              .help("Remove dependency")
+          }
+        }
+        ForEach(availableDependencies) { dep in
+          FormRow(
+            dep.name,
+            help: dep.dependencies.isEmpty
+              ? nil : "\(dep.dependencies.count) dep.\(dep.dependencies.count == 1 ? "" : "s")",
+            systemImage: "bolt", hue: .gray
+          ) {
+            Button("Add as a dependency", systemImage: "plus") { dependencies.insert(dep.id) }
+              .buttonStyle(.kitIcon)
+              .labelStyle(.iconOnly)
+              .help("Add as a dependency")
+          }
+        }
+      }
+    } footer: {
+      Button("Cancel") { dismiss() }
+        .keyboardShortcut(.cancelAction)
+      Button(editing == nil ? "Create" : "Save") { save() }
+        .buttonStyle(.kitPrimary)
+        .keyboardShortcut(.defaultAction)
+        .disabled(!canCreate)
     }
-    .frame(width: 440, height: 560)
     .onAppear {
       // Connections created after a future-enabled action was saved apply
       // implicitly; show their toggles as selected when editing.
@@ -234,6 +209,13 @@ struct NewActionView: View {
     // The commands TextEditor dies with this sheet; drop the edits it left on
     // the window's undo stack so a later ⌘Z cannot message the freed editor.
     .onDisappear { UndoHygiene.discardStaleTextUndo() }
+  }
+
+  /// A form row's switch (its label is the row's).
+  private func toggle(_ title: String, isOn: Binding<Bool>) -> some View {
+    Toggle(title, isOn: isOn)
+      .toggleStyle(.kitSwitch)
+      .kitLabelsHidden()
   }
 
   private func binding(for id: UUID) -> Binding<Bool> {

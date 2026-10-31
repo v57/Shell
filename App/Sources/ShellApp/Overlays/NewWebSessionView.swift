@@ -40,14 +40,10 @@ struct NewWebSessionView: View {
       }
       FormCard(footer: sshConfigID == nil ? nil : "The host's localhost is tunnelled to the page.") {
         FormRow("SSH Host", systemImage: "network", hue: .blue) {
-          Picker("SSH host", selection: $sshConfigID) {
-            Text("None (open directly)").tag(nil as UUID?)
-            ForEach(model.connections) { config in
-              Text(config.displayName).tag(config.id as UUID?)
-            }
-          }
-          .labelsHidden()
-          .fixedSize()
+          KitPicker(
+            "SSH host", selection: $sshConfigID,
+            options: [("None (open directly)", nil as UUID?)] + model.connections.map { ($0.displayName, $0.id as UUID?) })
+            .fixedSize()
         }
       }
     } footer: {

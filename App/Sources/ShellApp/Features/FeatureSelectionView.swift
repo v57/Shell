@@ -30,7 +30,7 @@ struct FeatureSelectionView: View {
           // disabled set).
           Toggle(feature.label, isOn: Binding(
             get: { store.isEnabled(feature) },
-            set: { newValue in withAnimation { store.setEnabled(newValue, for: feature) } }
+            set: { newValue in withKitAnimation { store.setEnabled(newValue, for: feature) } }
           ))
           .toggleStyle(.kitSwitch)
           .kitLabelsHidden()

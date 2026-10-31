@@ -51,7 +51,7 @@ private struct TerminalPrompts: ViewModifier {
   }
 }
 
-/// A host key's fingerprint under its label, monospaced and selectable.
+/// A host key's fingerprint under its label, in the kit's code block (monospaced, selectable).
 private struct FingerprintLine: View {
   let label: String
   let fingerprint: String
@@ -59,10 +59,7 @@ private struct FingerprintLine: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 2) {
       Text(label).kitFont(.caption)
-      Text(fingerprint)
-        .font(.caption.monospaced())
-        .textSelection(.enabled)
-        .fixedSize(horizontal: false, vertical: true)
+      KitCodeBlock(fingerprint, font: .monoSmall)
     }
     .frame(maxWidth: .infinity, alignment: .leading)
   }
@@ -87,7 +84,7 @@ private struct PasswordPromptSheet: View {
           "Password", systemImage: "ellipsis.rectangle", hue: .blue,
           field: SecureField("Password", text: $password).textContentType(.password).onSubmit(submit))
         FormRow("Save in Keychain", systemImage: "key", hue: .blue) {
-          Toggle("Save in Keychain", isOn: $save).labelsHidden()
+          Toggle("Save in Keychain", isOn: $save).toggleStyle(.kitSwitch).kitLabelsHidden()
         }
       }
     } footer: {

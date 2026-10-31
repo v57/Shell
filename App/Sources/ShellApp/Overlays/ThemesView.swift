@@ -9,34 +9,25 @@ struct ThemesView: View {
 
   var body: some View {
     @Bindable var model = model
-    VStack(alignment: .leading, spacing: 14) {
-      Text("Themes")
-        .font(.headline)
-
-      Text("Color Scheme")
-        .font(.caption)
-        .foregroundStyle(.secondary)
-      KitSegmented(selection: $model.appearanceMode, options: AppearanceMode.allCases.map { ($0.label, $0) })
-
-      Toggle("Disable Background Colors", isOn: $model.disableTerminalBackgrounds)
-#if os(macOS) || os(Windows) || os(Linux)
-        .toggleStyle(.checkbox)
-#else
-        .toggleStyle(.switch)
-#endif
-
-      Text("When enabled, terminals stop drawing character backgrounds and low-contrast text colors are replaced with the default text color.")
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .fixedSize(horizontal: false, vertical: true)
-
-      HStack {
-        Spacer()
-        Button("Done") { dismiss() }
-          .keyboardShortcut(.defaultAction)
+    KitSheet(title: "Themes", systemImage: "paintpalette", hue: .pink, width: 420) {
+      FormCard {
+        FormRow("Color Scheme", systemImage: "circle.lefthalf.filled", hue: .gray) {
+          KitSegmented(selection: $model.appearanceMode, options: AppearanceMode.allCases.map { ($0.label, $0) })
+        }
+        FormRow(
+          "Disable Background Colors",
+          help: "When enabled, terminals stop drawing character backgrounds and low-contrast text colors are replaced with the default text color.",
+          systemImage: "rectangle.slash", hue: .gray
+        ) {
+          Toggle("Disable Background Colors", isOn: $model.disableTerminalBackgrounds)
+            .toggleStyle(.kitSwitch)
+            .kitLabelsHidden()
+        }
       }
+    } footer: {
+      Button("Done") { dismiss() }
+        .buttonStyle(.kitPrimary)
+        .keyboardShortcut(.defaultAction)
     }
-    .padding(20)
-    .frame(width: 380)
   }
 }

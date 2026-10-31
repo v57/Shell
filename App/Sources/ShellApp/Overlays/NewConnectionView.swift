@@ -58,20 +58,15 @@ struct NewConnectionView: View {
       }
       FormCard("Authentication") {
         FormRow("Method", systemImage: "key", hue: .indigo) {
-          Picker("Method", selection: $authMethod) {
-            ForEach(SSHConfig.AuthMethod.allCases) { method in
-              Text(method.label).tag(method)
-            }
-          }
-          .labelsHidden()
-          .fixedSize()
+          KitPicker("Method", selection: $authMethod, options: SSHConfig.AuthMethod.allCases.map { ($0.label, $0) })
+            .fixedSize()
         }
         if authMethod == .password {
           FormRow("Password", systemImage: "ellipsis.rectangle", hue: .indigo,
                   field: SecureField(editing?.authMethod == .password ? "Unchanged" : "Password", text: $password)
                     .textContentType(.password))
           FormRow("Save in Keychain", systemImage: "lock", hue: .indigo) {
-            Toggle("Save in Keychain", isOn: $savePassword).labelsHidden()
+            Toggle("Save in Keychain", isOn: $savePassword).toggleStyle(.kitSwitch).kitLabelsHidden()
           }
         }
       }

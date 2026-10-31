@@ -7,7 +7,6 @@ import SwiftUI
 /// `FeatureFlagsStore.needsFirstLaunchSelection` is true.
 struct FeatureWelcomeView: View {
   @Environment(\.kitDismiss) private var dismiss
-  @Environment(\.kitIdiom) private var idiom
   private let store: FeatureFlagsStore
 
   init(store: FeatureFlagsStore? = nil) {
@@ -15,29 +14,19 @@ struct FeatureWelcomeView: View {
   }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 20) {
-      VStack(alignment: .leading, spacing: 6) {
-        Text("Choose your features")
-          .font(.title)
-        Text("Turn off anything you don't need. Disabled features are hidden and stop their background work, but your data is kept.")
-          .font(.subheadline)
-          .foregroundStyle(.secondary)
-      }
-      ScrollView {
-        FeatureSelectionView(store: store)
-      }
-      Button {
+    KitSheet(
+      title: "Choose your features",
+      meta: "Turn off anything you don't need. Disabled features are hidden and stop their background work, but your data is kept.",
+      systemImage: "square.grid.2x2", hue: .blue, width: 480
+    ) {
+      FeatureSelectionView(store: store)
+    } footer: {
+      Button("Continue") {
         store.markConfigured()
         dismiss()
-      } label: {
-        Text("Continue")
-          .frame(maxWidth: .infinity)
       }
-      .buttonStyle(.borderedProminent)
+      .buttonStyle(.kitPrimary)
       .keyboardShortcut(.defaultAction)
     }
-    .padding(24)
-    // 440 points wide, but never wider than an iPhone's screen.
-    .frame(minWidth: idiom == .phone ? nil : 440, idealHeight: 520)
   }
 }

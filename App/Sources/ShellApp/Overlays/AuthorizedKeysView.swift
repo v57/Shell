@@ -12,6 +12,7 @@ import ShellKit
 /// can be added — one click each. "+" adds a pasted public key.
 struct AuthorizedKeysView: View {
   @Environment(AppModel.self) private var model
+  @Environment(\.kitDismiss) private var dismiss
   let target: AuthorizedKeysManager.Target
 
   @State private var manager: AuthorizedKeysManager?
@@ -31,63 +32,45 @@ struct AuthorizedKeysView: View {
   }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      HStack {
-        Label("Authorized Keys", systemImage: "key.2.on.ring")
-          .font(.headline)
-        Text("· \(targetTitle)")
-          .foregroundStyle(.secondary)
-        Spacer()
-        Button {
-          showingAddKey = true
-        } label: {
-          Image(systemName: "plus")
-        }
-        .disabled(isLoading || manager == nil)
-        .help("Add Key…")
-        Button {
-          Task { await load() }
-        } label: {
-          Image(systemName: "arrow.clockwise")
-        }
-        .disabled(isLoading)
-        .help("Reload")
-      }
-
-      if let errorMessage {
-        Label(errorMessage, systemImage: "exclamationmark.triangle")
-          .foregroundStyle(.red)
-          .font(.callout)
-      }
-
-      if isLoading {
-        HStack(spacing: 8) {
-          ProgressView()
-          Text("Connecting…")
-            .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, alignment: .center)
-        .padding(.vertical, 24)
+    KitSheet(
+      title: "Authorized Keys", meta: targetTitle, systemImage: "key.2.on.ring", hue: .indigo,
+      status: isLoading ? .working : .idle, width: 520
+    ) {
+      if isLoading && entries.isEmpty {
+        EmptyState(systemImage: "key.2.on.ring", title: "Connecting…", status: .working)
+          .frame(height: 200)
       } else {
-        List {
-          if entries.isEmpty {
-            Text("No keys. Add this device's key to get started.")
-              .foregroundStyle(.secondary)
-          }
+        FormCard(footer: entries.isEmpty ? "No keys. Add this device's key to get started." : nil) {
           ForEach(entries) { entry in
             KeyRow(
               entry: entry,
               isBusy: busyKeyIDs.contains(entry.id),
               onToggle: { await toggle(entry) }
             )
-            .contextMenu { menu(for: entry) }
+            .kitContextMenu { menu(for: entry) }
           }
         }
-        .listStyle(.inset)
       }
+    } footer: {
+      if let errorMessage {
+        SheetStatus(errorMessage, systemImage: "exclamationmark.triangle", hue: .red, status: .failed(errorMessage))
+      } else if isLoading {
+        SheetStatus("Connecting…", systemImage: "network", status: .working)
+      }
+      Button("Reload", systemImage: "arrow.clockwise") {
+        Task { await load() }
+      }
+      .disabled(isLoading)
+      .help("Reload")
+      Button("Add Key…", systemImage: "plus") {
+        showingAddKey = true
+      }
+      .disabled(isLoading || manager == nil)
+      .help("Add a pasted public key")
+      Button("Done") { dismiss() }
+        .buttonStyle(.kitPrimary)
+        .keyboardShortcut(.defaultAction)
     }
-    .padding(16)
-    .frame(minWidth: 420, minHeight: 340)
     .task { await load() }
     .kitSheet(isPresented: $showingAddKey) {
       AddKeySheet { line, name, saveToICloud in
@@ -274,32 +257,25 @@ private struct KeyRow: View {
   let onToggle: () async -> Void
 
   var body: some View {
-    HStack(spacing: 10) {
-      Image(systemName: symbol)
-        .foregroundStyle(entry.source == .device ? Color.accentColor : entry.source == .file ? Color.secondary : Color.blue)
-        .frame(width: 18)
-        .help(sourceHelp)
-      VStack(alignment: .leading, spacing: 2) {
-        Text(entry.displayName)
-          .font(.callout)
-        Text(entry.fingerprint)
-          .font(.caption.monospaced())
-          .foregroundStyle(.secondary)
-          .lineLimit(1)
-          .truncationMode(.middle)
+    FormRow(entry.displayName, help: entry.fingerprint, systemImage: symbol, hue: hue) {
+      HStack(spacing: 8) {
+        Chip(entry.added ? "Added" : "Not added", hue: entry.added ? nil : .orange)
+        Button(entry.added ? "Remove" : "Add", role: entry.added ? .destructive : nil) {
+          Task { await onToggle() }
+        }
+        .buttonStyle(.kit)
+        .disabled(isBusy)
       }
-      Spacer()
-      Text(entry.added ? "Added" : "Not added")
-        .font(.caption)
-        .foregroundStyle(entry.added ? Color.secondary : Color.orange)
-      Button(entry.added ? "Remove" : "Add") {
-        Task { await onToggle() }
-      }
-      .disabled(isBusy)
-      .buttonStyle(.bordered)
-      .tint(entry.added ? .red : .blue)
     }
-    .padding(.vertical, 2)
+    .help(sourceHelp)
+  }
+
+  private var hue: Hue {
+    switch entry.source {
+    case .device: return .accent
+    case .file: return .gray
+    case .icloud, .custom: return .blue
+    }
   }
 
   private var symbol: String {
@@ -339,48 +315,54 @@ private struct AddKeySheet: View {
   private var isValid: Bool { AuthorizedKeysManager.isPlainKeyLine(trimmedLine) }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      Text("Add Key")
-        .font(.headline)
-      TextField("Public key", text: $line, prompt: Text("ssh-ed25519 AAAA… user@host"), axis: .vertical)
-        .font(.callout.monospaced())
-        .lineLimit(3...6)
-        .textFieldStyle(.roundedBorder)
-        .autocorrectionDisabled()
-        #if os(iOS)
-        .textInputAutocapitalization(.never)
-        #endif
-        .onChange(of: line) { _, newValue in
-          // Fill the name from the pasted key's comment.
-          if name.isEmpty, let comment = DeviceKeyStore.comment(of: newValue.trimmingCharacters(in: .whitespacesAndNewlines)) {
-            name = comment
-          }
+    KitSheet(
+      title: "Add Key", meta: "A public key for this machine's authorized_keys", systemImage: "key", hue: .indigo,
+      width: 480
+    ) {
+      FormCard {
+        FormRow(
+          "Public key", systemImage: "key", hue: .indigo,
+          error: !trimmedLine.isEmpty && !isValid
+            ? "Paste one public key line, e.g. the contents of ~/.ssh/id_ed25519.pub." : nil,
+          field: keyField)
+        FormRow(
+          "Name", help: "Optional", systemImage: "character.cursor.ibeam", hue: .indigo,
+          field: TextField("Name (optional)", text: $name))
+        FormRow("Save to iCloud", help: "For other machines", systemImage: "icloud", hue: .blue) {
+          Toggle("Save to iCloud for other machines", isOn: $saveToICloud)
+            .labelsHidden()
+            .toggleStyle(.kitSwitch)
         }
-      TextField("Name", text: $name, prompt: Text("Name (optional)"))
-        .textFieldStyle(.roundedBorder)
-      Toggle("Save to iCloud for other machines", isOn: $saveToICloud)
+      }
+    } footer: {
       if let errorMessage {
-        Label(errorMessage, systemImage: "exclamationmark.triangle")
-          .foregroundStyle(.red)
-          .font(.callout)
-      } else if !trimmedLine.isEmpty && !isValid {
-        Text("Paste one public key line, e.g. the contents of ~/.ssh/id_ed25519.pub.")
-          .foregroundStyle(.secondary)
-          .font(.callout)
+        SheetStatus(errorMessage, systemImage: "exclamationmark.triangle", hue: .red, status: .failed(errorMessage))
       }
-      HStack {
-        Spacer()
-        Button("Cancel", role: .cancel) { dismiss() }
-          .keyboardShortcut(.cancelAction)
-        Button("Add") {
-          Task { await add() }
-        }
-        .keyboardShortcut(.defaultAction)
-        .disabled(!isValid || isAdding)
+      Button("Cancel") { dismiss() }
+        .keyboardShortcut(.cancelAction)
+      Button("Add") {
+        Task { await add() }
       }
+      .buttonStyle(.kitPrimary)
+      .keyboardShortcut(.defaultAction)
+      .disabled(!isValid || isAdding)
     }
-    .padding(16)
-    .frame(minWidth: 420)
+  }
+
+  private var keyField: some View {
+    TextField("Public key", text: $line, prompt: Text("ssh-ed25519 AAAA… user@host"), axis: .vertical)
+      .kitFont(.mono)
+      .lineLimit(3...6)
+      .autocorrectionDisabled()
+      #if os(iOS)
+      .textInputAutocapitalization(.never)
+      #endif
+      .onChange(of: line) { _, newValue in
+        // Fill the name from the pasted key's comment.
+        if name.isEmpty, let comment = DeviceKeyStore.comment(of: newValue.trimmingCharacters(in: .whitespacesAndNewlines)) {
+          name = comment
+        }
+      }
   }
 
   private func add() async {

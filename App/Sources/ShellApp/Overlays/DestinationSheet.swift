@@ -26,20 +26,29 @@ struct DestinationSheet: View {
   }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 14) {
-      Text(mode == .move ? "Move to…" : "Copy to…").font(.headline)
-      TextField("Destination path", text: $text).textFieldStyle(.roundedBorder).font(
-        .body.monospaced()
-      ).onAppear { text = defaultPath }
-      KitSegmented(selection: $mode, options: [("Move", .move), ("Copy", .copy)])
-      HStack {
-        Button("Cancel", role: .cancel) { dismiss() }
-        Spacer()
-        Button(mode == .move ? "Move" : "Copy") {
-          onConfirm(text, mode)
-          dismiss()
-        }.disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    KitSheet(
+      title: mode == .move ? "Move to…" : "Copy to…", systemImage: mode == .move ? "folder" : "doc.on.doc",
+      hue: .blue, width: 420
+    ) {
+      FormCard {
+        FormRow("Mode", systemImage: "arrow.left.arrow.right", hue: .blue) {
+          KitSegmented(selection: $mode, options: [("Move", .move), ("Copy", .copy)])
+        }
+        FormRow(
+          "Destination", systemImage: "folder", hue: .blue,
+          field: TextField("Destination path", text: $text).kitFont(.mono))
       }
-    }.padding().frame(minWidth: 340)
+    } footer: {
+      Button("Cancel") { dismiss() }
+        .keyboardShortcut(.cancelAction)
+      Button(mode == .move ? "Move" : "Copy") {
+        onConfirm(text, mode)
+        dismiss()
+      }
+      .buttonStyle(.kitPrimary)
+      .keyboardShortcut(.defaultAction)
+      .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    }
+    .onAppear { text = defaultPath }
   }
 }
