@@ -305,8 +305,16 @@ struct ContentView: View {
   /// connection's overview, a table or collection, a Redis key space or a
   /// query tab.
   private var databaseDetail: some View {
-    DetailView(window: model.databaseWindow)
-      .transition(detailTransition)
+    Group {
+      #if os(iOS)
+      // Database's own stack: on iPhone an item pushes its screen (a split
+      // view's detail column has none).
+      NavigationStack { DetailView(window: model.databaseWindow) }
+      #else
+      DetailView(window: model.databaseWindow)
+      #endif
+    }
+    .transition(detailTransition)
   }
 
   /// The detail pane for a live session: a `.web` session renders its page,
