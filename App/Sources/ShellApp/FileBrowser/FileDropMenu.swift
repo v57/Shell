@@ -120,14 +120,7 @@ private struct FileDropMenu: View {
     Divider()
     KitMenuFooter(
       model.fileDropSubject(for: request), subtitle: "Dropped on \(model.fileDropTargetName(for: request))",
-      systemImage: headerSymbol)
-    if let message = model.fileDropMessage(for: request) {
-      Text(message)
-        .kitFont(.caption)
-        .foregroundStyle(.kitSecondary)
-        .fixedSize(horizontal: false, vertical: true)
-        .padding(EdgeInsets(top: 0, leading: 42, bottom: 6, trailing: 8))
-    }
+      message: model.fileDropMessage(for: request), systemImage: headerSymbol)
   }
 
   private var headerSymbol: String {
