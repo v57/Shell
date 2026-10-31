@@ -261,15 +261,8 @@ struct AuthorizedKeysView: View {
     profile.isComplete ? profile.keyComment(device: deviceName) : "Shell (\(NSUserName())@\(deviceName))"
   }
 
-  private static var deviceName: String {
-    #if os(macOS)
-    Host.current().localizedName ?? "Mac"
-    #elseif os(iOS)
-    UIDevice.current.name
-    #else
-    ProcessInfo.processInfo.hostName
-    #endif
-  }
+  /// The name the user gave this device in the vault, else the system's.
+  private static var deviceName: String { VaultDevice.name }
 }
 
 // MARK: - Row
