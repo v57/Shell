@@ -12,6 +12,8 @@ import ShellKit
 ///   --run <command>           typed into the first terminal
 ///   --note <name>             shows a demo note
 ///   --actions / --settings    opens that overlay
+///   --themes / --insert / --new-action  opens the Themes, Insert into Terminal or New Action sheet
+///   --files                   shows the Files panel for the terminal
 ///   --new-database            opens the New Database Connection sheet
 ///   --new-connection          opens the New Connection (SSH) sheet
 ///   --run-action <name>       runs that demo action and shows its run
@@ -175,6 +177,10 @@ enum ScreenshotDemo {
     }
     if flag("--actions", in: arguments) { model.showingActions = true }
     if flag("--settings", in: arguments) { model.showingSettings = true }
+    if flag("--themes", in: arguments) { model.showingThemes = true }
+    if flag("--insert", in: arguments) { model.showingCommandInsert = true }
+    if flag("--new-action", in: arguments) { model.createAction() }
+    model.directoryBrowser.visible = flag("--files", in: arguments)
     if flag("--new-database", in: arguments) { model.newDatabaseConnection() }
     if flag("--new-connection", in: arguments) { model.showingNewConnection = true }
     if let address = value("--web", in: arguments) { model.openWebSession(WebSession(url: address)) }
