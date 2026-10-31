@@ -26,13 +26,13 @@ typealias DroppedFiles = [URL]
 /// - **Error** — `errorMessage` is non-nil (an `EmptyState` with Retry).
 /// - **Loading** — `isLoading` is true and there are no rows yet (a working `EmptyState`).
 /// - **Empty** — no rows and no error (an `EmptyState`).
-/// - **Success** — the `Table` (macOS) or `KitList` (iOS) of rows.
+/// - **Success** — the `KitGrid` (macOS) or `KitList` (iOS) of rows.
 ///
-/// On macOS the listing is a sortable `Table` with Name / Type / Size / Modified
-/// columns: it stays SwiftUI's because the kit's `KitGrid` can't yet drag a
-/// selection of rows out (one `ShellFile` per row, to Finder or a terminal),
-/// take drops on a directory row, or open on a double click while Return
-/// renames. On iOS it is a `KitList` of the same row model.
+/// On macOS the listing is the kit's `KitGrid` as a list of files
+/// (`.interaction(.rows)`) with sortable Name / Type / Size / Modified columns:
+/// a double click opens, Return renames in place, a row (or the selection)
+/// drags out as `ShellFile`s and a directory row takes Shell's own rows. On
+/// iOS it is a `KitList` of the same row model.
 struct DirectoryBrowserView: View {
   /// The parsed entries of the current directory, in the order the listing
   /// returned them. Sorting is applied by the view from `sortOrder`.
@@ -41,34 +41,18 @@ struct DirectoryBrowserView: View {
   let path: String
   /// Selected entry names (the `.id` of a `FileRow` is its name).
   @Binding var selection: Set<String>
-  /// The active column sort order, driven by the sortable `Table` columns.
+  /// The active column sort order, driven by the grid's sortable columns.
   @Binding var sortOrder: [KeyPathComparator<FileRow>]
   /// Whether a refresh is in flight. Shown as a working `EmptyState` only while the
   /// initial listing is still pending (rows empty), so a refresh that already
-  /// has a table on screen doesn't flash it away.
+  /// has a grid on screen doesn't flash it away.
   let isLoading: Bool
-  /// A non-nil value replaces the table with an error state + Retry.
+  /// A non-nil value replaces the grid with an error state + Retry.
   let errorMessage: String?
   /// The SSH config of the directory being browsed, when its runner is remote
   /// (`.ssh`). Drives the drag payload's `remote` so a dragged row can be
   /// materialized (downloaded) before drag-out. Nil for local listings.
   let sshConfig: SSHConfig?
-
-  /// The name of the row currently being renamed, or nil when not editing.
-  /// A row is in rename mode when `renamingName == row.name`.
-  @State private var renamingName: String?
-  /// The in-progress text of the rename field, seeded from the row name when
-  /// rename mode begins. Only one row is ever in rename mode.
-  @State private var renameText = ""
-  /// Focus for the rename `TextField`, keyed by the row name so the field is
-  /// focused the moment rename mode begins.
-  @FocusState private var renameFieldFocused: String?
-  /// A short suppression window so a Return that just committed a rename
-  /// (the focused TextField's `.onSubmit`) cannot be re-interpreted by the
-  /// table's `.onKeyPress(.return)` in the same event pass and immediately
-  /// re-open the editor. Cleared on commit/cancel; a human Return press
-  /// never lands inside this window except the commit itself.
-  @State private var suppressRenameUntil = Date.distantPast
 
   /// Double-clicking a directory emits `navigate(into:)`.
   var onNavigate: (FileRow) -> Void
@@ -84,7 +68,7 @@ struct DirectoryBrowserView: View {
   var onMove: (Set<String>, String) -> Void
   /// Copy the selected entries to a destination (context-menu op).
   var onCopy: (Set<String>) -> Void
-  /// Copy files dropped onto the table (from Finder, or another Files listing) into the current directory.
+  /// Copy files dropped onto the browser (from Finder, or another Files listing) into the current directory.
   var onDrop: (DroppedFiles) -> Void
   /// Rename a single entry from `from` to `to`. The view enters rename mode on
   /// Return and commits via this callback; the model reuses its move/copy path
@@ -135,16 +119,6 @@ struct DirectoryBrowserView: View {
       Divider()
       content
     }.frame(minWidth: 480)
-    #if os(macOS)
-      // Blur cancels rename mode: when the focused field loses focus for any
-      // reason other than the field's own Return/Esc (whose handlers clear
-      // focus first), exit rename mode without issuing a rename.
-      .onChange(of: renameFieldFocused) {
-        if let renaming = renamingName, renameFieldFocused != renaming {
-          cancelRenameLocal()
-        }
-      }
-    #endif
   }
 
   // MARK: - Content states
@@ -174,93 +148,88 @@ struct DirectoryBrowserView: View {
     return rows.sorted(using: sortOrder)
   }
 
-  // MARK: - macOS Table
+  // MARK: - macOS grid
 
   #if os(macOS)
     private var fileTable: some View {
-      Table(of: FileRow.self, selection: $selection, sortOrder: $sortOrder) {
-        TableColumn("Name", sortUsing: KeyPathComparator(\FileRow.name)) { row in
-          if renamingName == row.name {
-            TextField("", text: $renameText)
-              .kitField()
-              .focused($renameFieldFocused, equals: row.name)
-              .onSubmit { commitRename() }
-              .onExitCommand { cancelRename() }
-          } else {
-            iconAndName(row)
-              .accessibilityIdentifier("file-row-\(row.name)")
-              .frame(maxWidth: .infinity, alignment: .leading)
-          }
-        }
-        TableColumn("Type", sortUsing: KeyPathComparator(\FileRow.sortableType)) { row in
-          Text(row.sortableType)
-        }
-        TableColumn("Size", sortUsing: KeyPathComparator(\FileRow.sortableSize)) { row in
-          Text(Self.formattedSize(row.size)).monospacedDigit()
-        }
-        TableColumn("Modified", sortUsing: KeyPathComparator(\FileRow.sortableModified)) { row in
-          Text(Self.formattedDate(row.modified))
-        }
-      } rows: {
-        ForEach(sortedRows) { row in
-          let tableRow = TableRow(row)
-            .draggable(dragPayload(for: row))
-          if row.isDirectory {
-            // A directory row is a drop target for an INTERNAL drag: dropping
-            // one or more (selected) rows here moves/copies them into it. This
-            // uses the dedicated internal payload type so it never captures the
-            // Finder (URL) drops handled by the table-level fileDrop.
-            tableRow.dropDestination(for: ShellFile.self) { payloads in
-              handleRowDrop(payloads, onto: row)
+      KitGrid(
+        sortedRows,
+        columns: [
+          KitGridColumn<FileRow>(
+            "Name", width: 280, value: { $0.name },
+            edit: { row, name in
+              let to = name.trimmingCharacters(in: .whitespacesAndNewlines)
+              if !to.isEmpty && to != row.name { onRename(row.name, to) }
             }
-          } else {
-            tableRow
+          ) { row in
+            iconAndName(row).accessibilityIdentifier("file-row-\(row.name)")
+          },
+          KitGridColumn<FileRow>("Type", width: 120) { $0.sortableType },
+          KitGridColumn<FileRow>("Size", width: 90, alignment: .trailing) { row in
+            Text(Self.formattedSize(row.size)).monospacedDigit()
+          },
+          KitGridColumn<FileRow>("Modified", width: 160) { Self.formattedDate($0.modified) },
+        ],
+        selection: $selection, sort: gridSort,
+        // A double click or ⌘↓ opens the selection: a folder navigates into it, a file opens.
+        primaryAction: { names in
+          for name in names {
+            guard let row = rows.first(where: { $0.name == name }) else { continue }
+            activate(row)
           }
         }
+      )
+      // A list of files: a click selects the row, Return renames it (the Name column's edit).
+      .interaction(.rows)
+      // A row drags out as a `ShellFile` (to Finder, a terminal or a session); a selected row drags the selection.
+      .rowDrag { name in rows.first { $0.name == name }.map(dragPayload) }
+      // A directory row takes an INTERNAL drag (Shell's own rows) and moves them into it. Finder (URL) drops don't
+      // reach it: the rows pass them on to the drop around the grid.
+      .rowDropDestination(for: ShellFile.self, isEnabled: \.isDirectory) { files, row in
+        handleRowDrop(files, onto: row)
       }
-      // Right-click → context-menu actions; double-click (or Return) → primary
-      // action. Both are driven by the row selection, so a right-click on an
-      // unselected row selects it first (matching the toolbar semantics that
-      // used to live above the table).
-      .contextMenu(forSelectionType: String.self) { names in
-        rowContextMenu(names: names)
-      } primaryAction: { names in
-        for name in names {
-          guard let row = rows.first(where: { $0.name == name }) else { continue }
-          activate(row)
-        }
-      }
-      // Accept files dropped onto the browser (from Finder, or a dragged row)
-      // and copy them into the current dir. `fileDrop` reads the drag
-      // pasteboard: a Finder file's original path, or a row's own description
-      // (with its host, when it comes from a remote listing).
-      .fileDrop { files in onDrop(files) }
-      // Return on a single selected row enters rename mode. When already in
-      // rename mode, the TextField's own `.onSubmit` (Return) commits — so this
-      // key handler is only active in the non-editing state.
-      .onKeyPress(.return, phases: .down) { _ in
-        beginRenameIfSingleSelection()
-        return .handled
-      }
+      // Right-click → the file operations, on the selection when the clicked row is in it.
+      .rowContextMenu { names in rowContextMenu(names: names) }
+      // Files dropped on the browser (from Finder, or a dragged row) are copied into the current dir. `FileDrop`
+      // reads the drag pasteboard: a Finder file's original path, or a row's own description (with its host, when
+      // it comes from a remote listing).
+      .kitDropDestination(of: FileDrop.contentTypes) { _ in FileDrop.perform(onDrop) }
     }
 
-    /// The rename field's OnSubmit was already handled by the contained
-    /// `TextField`, so this covers the path where Return reaches the table.
-    private func beginRenameIfSingleSelection() {
-      guard renamingName == nil, renameFieldFocused == nil, selection.count == 1,
-        let name = selection.first
-      else { return }
-      guard Date() >= suppressRenameUntil else { return }
-      guard rows.contains(where: { $0.name == name }) else { return }
-      renamingName = name
-      renameText = name
-      renameFieldFocused = name
+    /// The grid's sort, read from and written to `sortOrder` (the model keeps the comparators).
+    private var gridSort: Binding<KitGridSort?> {
+      Binding(
+        get: {
+          guard let first = sortOrder.first,
+            let column = Self.sortColumns.first(where: { $0.keyPath == first.keyPath })
+          else { return nil }
+          return KitGridSort(column.id, ascending: first.order == .forward)
+        },
+        set: { sort in
+          guard let sort, let column = Self.sortColumns.first(where: { $0.id == sort.column }) else {
+            sortOrder = []
+            return
+          }
+          sortOrder = [column.comparator(sort.ascending ? .forward : .reverse)]
+        })
+    }
+
+    /// Each column's id, the key path it sorts by, and the comparator for an order.
+    private static var sortColumns:
+      [(id: String, keyPath: PartialKeyPath<FileRow>, comparator: (SortOrder) -> KeyPathComparator<FileRow>)]
+    {
+      [
+        ("Name", \FileRow.name, { KeyPathComparator(\FileRow.name, order: $0) }),
+        ("Type", \FileRow.sortableType, { KeyPathComparator(\FileRow.sortableType, order: $0) }),
+        ("Size", \FileRow.sortableSize, { KeyPathComparator(\FileRow.sortableSize, order: $0) }),
+        ("Modified", \FileRow.sortableModified, { KeyPathComparator(\FileRow.sortableModified, order: $0) }),
+      ]
     }
 
     /// The drag payload for a row. A local row carries its own file URL; a row
     /// in an SSH listing also carries the connection config so `download()` can
     /// fetch the file before it's delivered to Finder or a session cell. When a
-    /// selection is dragged, `Table` emits one `ShellFile` per selected row.
+    /// selection is dragged, the grid emits one `ShellFile` per selected row.
     private func dragPayload(for row: FileRow) -> ShellFile {
       return ShellFile(
         url: URL(fileURLWithPath: absolutePath(for: row)),
@@ -274,9 +243,9 @@ struct DirectoryBrowserView: View {
     /// directory moved into itself) and the source==destination guard still
     /// apply. The target directory is excluded up front so a selection that
     /// already contains it (or the target dragged onto itself) never attempts a
-    /// self-move. `Table` delivers one `ShellFile` per dragged (selected) row,
+    /// self-move. The grid delivers one `ShellFile` per dragged (selected) row,
     /// so the names come from each payload's file URL, not a bundle. Finder (URL)
-    /// drops never reach here — they use the table-level `fileDrop`.
+    /// drops never reach here — they use the drop around the grid.
     private func handleRowDrop(_ payloads: [ShellFile], onto target: FileRow) {
       guard target.isDirectory else { return }
       // Only rows of THIS listing move by name: a row of another folder or host would move its namesake here.
@@ -286,28 +255,6 @@ struct DirectoryBrowserView: View {
       let names = Set(here.map { $0.url.lastPathComponent }).subtracting([target.name])
       guard !names.isEmpty else { return }
       onMoveCopyIntoDirectory(names, absolutePath(for: target), .move)
-    }
-
-    /// Commits the rename: fires `onRename(from:to:)` when the text changed,
-    /// then always exits rename mode (the model re-lists on success).
-    private func commitRename() {
-      guard let name = renamingName else { return }
-      let to = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
-      if !to.isEmpty && to != name { onRename(name, to) }
-      suppressRenameUntil = Date().addingTimeInterval(0.25)
-      cancelRenameLocal()
-    }
-
-    /// Cancels rename mode without issuing any rename.
-    private func cancelRename() {
-      suppressRenameUntil = Date().addingTimeInterval(0.25)
-      cancelRenameLocal()
-    }
-
-    private func cancelRenameLocal() {
-      renamingName = nil
-      renameText = ""
-      renameFieldFocused = nil
     }
 
     private func iconAndName(_ row: FileRow) -> some View {
@@ -353,8 +300,8 @@ struct DirectoryBrowserView: View {
   }
 
   /// The file-operation context menu, replacing the old selection toolbar.
-  /// Shared by the macOS table (`.contextMenu(forSelectionType:)`) and the iOS
-  /// list (per-row `.contextMenu`).
+  /// Shared by the macOS grid (`rowContextMenu`) and the iOS list (per-row
+  /// `kitContextMenu`).
   @ViewBuilder private func rowContextMenu(names: Set<String>) -> some View {
     if names.count == 1, let name = names.first,
       let row = rows.first(where: { $0.name == name })
@@ -426,7 +373,7 @@ struct DirectoryBrowserView: View {
   }
 }
 
-/// Comparable derived sort keys for the `Table` columns. `FileRow` stores size
+/// Comparable derived sort keys for the grid's columns. `FileRow` stores size
 /// and modified as optional, which are not `Comparable`; these computed values
 /// give the sortable columns a stable, comparable key for each entry.
 extension FileRow {
