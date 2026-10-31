@@ -51,7 +51,7 @@ struct NotesSectionView: View {
         Button("New Note", systemImage: "plus") {
           model.newNote()
         }
-        .help("New note")
+        .kitHelp("New note")
       }
       // Text files dropped on the section: copied into encrypted notes, or linked.
       .notesFileDrop()

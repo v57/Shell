@@ -41,7 +41,7 @@ struct NoteEncryptButton: View {
     Button(isEncrypted ? "Decrypt Note" : "Encrypt Note", systemImage: isEncrypted ? "lock.fill" : "lock.open") {
       model.notes.setEncrypted(!isEncrypted, for: noteID)
     }
-    .help(
+    .kitHelp(
       isEncrypted
         ? "Keep this note as a plain Markdown file in Markdown's notes folder"
         : "Keep this note's file encrypted, readable only by the v57 apps")

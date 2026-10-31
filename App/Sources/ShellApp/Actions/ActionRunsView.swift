@@ -88,6 +88,6 @@ struct ActionTerminalToggle: View {
     ) {
       showsTerminal.toggle()
     }
-    .help(showsTerminal ? "Show the run's output" : "Show the run's terminal, to type into it")
+    .kitHelp(showsTerminal ? "Show the run's output" : "Show the run's terminal, to type into it")
   }
 }

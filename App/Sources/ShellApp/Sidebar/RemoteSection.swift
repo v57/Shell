@@ -78,7 +78,7 @@ struct RemoteSectionView: View {
         Button("New SSH Connection", systemImage: "plus") {
           model.showingNewConnection = true
         }
-        .help("New SSH connection")
+        .kitHelp("New SSH connection")
       }
     } // end if (ssh section gate)
   }
@@ -243,7 +243,7 @@ private struct SSHConfigRow: View {
             }
           }
           .buttonStyle(.kitIcon)
-          .help("New session for this host")
+          .kitHelp("New session for this host")
           .transition(.scale.combined(with: .opacity))
         }
       }

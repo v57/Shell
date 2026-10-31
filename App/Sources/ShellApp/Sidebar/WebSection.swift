@@ -28,7 +28,7 @@ struct WebSectionView: View {
         MetaLine(open > 0 ? "\(open) open" : "", pages.count == 1 ? "1 page" : "\(pages.count) pages")
       } accessory: {
         Button("New Web Session", systemImage: "plus") { model.openEmptyWebSession() }
-          .help("New web session")
+          .kitHelp("New web session")
       }
     }
   }
