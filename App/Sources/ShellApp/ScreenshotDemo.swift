@@ -15,7 +15,8 @@ import ShellKit
 ///   --themes / --insert / --new-action  opens the Themes, Insert into Terminal or New Action sheet
 ///   --files                   shows the Files panel for the terminal
 ///   --new-database            opens the New Database Connection sheet
-///   --new-connection          opens the New Connection (SSH) sheet
+///   --new-ssh-connection      opens the New Connection (SSH) sheet (not `--new-connection`: Database's
+///                             `DebugDriver` opens its own New Connection sheet for that)
 ///   --run-action <name>       runs that demo action and shows its run
 ///   --web <url>               opens a web session on that page
 ///   --database-link <link>    adds a database connection from a link (`sqlite:///path/shop.db`, a server's URL)
@@ -142,7 +143,7 @@ enum ScreenshotDemo {
 
   /// A scene, from its arguments: the first one's at launch, the later ones' in place. Closes what the scene before
   /// opened and clears the command it typed, then selects the terminal, types `--run`'s command, shows `--note`'s note
-  /// and opens `--actions`, `--settings`, `--new-database` or `--new-connection`.
+  /// and opens `--actions`, `--settings`, `--new-database` or `--new-ssh-connection`.
   @MainActor static func open(_ arguments: [String], in model: AppModel) async {
     // The same scene again (its other appearance) is already on screen.
     guard arguments != shown else { return }
@@ -182,7 +183,7 @@ enum ScreenshotDemo {
     if flag("--new-action", in: arguments) { model.createAction() }
     model.directoryBrowser.visible = flag("--files", in: arguments)
     if flag("--new-database", in: arguments) { model.newDatabaseConnection() }
-    if flag("--new-connection", in: arguments) { model.showingNewConnection = true }
+    if flag("--new-ssh-connection", in: arguments) { model.showingNewConnection = true }
     if let address = value("--web", in: arguments) { model.openWebSession(WebSession(url: address)) }
     if let name = value("--run-action", in: arguments), let action = model.actions.all.first(where: { $0.name == name }) {
       model.runAction(action)
