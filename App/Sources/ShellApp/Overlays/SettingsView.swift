@@ -3,11 +3,9 @@ import ShellIntegrations
 import SwiftUI
 import VaultUI
 
-/// Settings: the kit's settings (`KitSettings`, the panes in its sidebar, each a column of form cards, as in every v57
-/// app). On the Mac it is the standard Settings window (ShellApp's `Settings` scene, `.windowStyle(.hiddenTitleBar)`:
-/// the sidebar and the pane's title run up under the window's buttons). Elsewhere it is the kit's overlay over the
-/// main window (`kitSheet` in ContentView), never a system sheet: a click on the dim or Esc closes it; on iPhone the
-/// panes are rows that push, with Done in the bar.
+/// The Settings panel: the kit's settings (`KitSettings`, the panes in its sidebar, each a column of form cards, as in
+/// every v57 app) in the kit's overlay over the main window (`kitSheet` in ContentView), never a separate window or a
+/// system sheet. A click on the dim or Esc closes it; on iPhone the panes are rows that push, with Done in the bar.
 ///
 /// Panes:
 /// - **Sessions** (desktop) — how new terminals start (`SessionsSettings`).
@@ -16,8 +14,7 @@ import VaultUI
 /// - **Accounts** — the v57 accounts, the same pane in every app (`VaultAccountsSettings`; the account picker's
 ///   Manage Accounts… opens it).
 ///
-/// On macOS the app menu's Settings…/⌘, opens the window, and `AppModel.showingSettings` asks ContentView to open it
-/// (Manage Accounts…); elsewhere the Shell menu's Settings… or iOS's sidebar gear button sets it to show the overlay.
+/// On macOS the Shell menu's Settings…/⌘, sets `AppModel.showingSettings`; on iOS the sidebar gear button does the same.
 struct SettingsView: View {
   /// The pane shown, kept for the next time Settings opens.
   static let paneKey = "settings.pane"
@@ -42,25 +39,11 @@ struct SettingsView: View {
         settings
       }
     }
-    #if os(macOS)
-    // The window's size; it adds its 32pt title bar.
-    .frame(width: 680, height: 500)
-    #else
     .frame(maxWidth: idiom == .phone ? .infinity : 680, maxHeight: idiom == .phone ? .infinity : 500)
-    #endif
-  }
-
-  /// The Mac's Settings window runs the settings up under its hidden title bar; the overlay starts them under its top.
-  private static var window: KitSettingsWindow {
-    #if os(macOS)
-    .hiddenTitleBar
-    #else
-    .titled
-    #endif
   }
 
   private var settings: some View {
-    KitSettings(selection: $pane, window: Self.window) {
+    KitSettings(selection: $pane, window: .titled) {
       #if os(macOS) || os(Windows) || os(Linux)
       SettingsPane("Sessions", systemImage: "terminal", hue: .gray, id: "sessions") { SessionsSettings() }
       #endif

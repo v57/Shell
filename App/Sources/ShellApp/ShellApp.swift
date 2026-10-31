@@ -72,20 +72,10 @@ public struct ShellApp: App {
     .handlesExternalEvents(matching: [])
     #endif
 
-    // Settings: on the Mac the standard Settings window (the app menu's
-    // Settings…, ⌘,), the kit's sidebar and pane title running up under its
-    // buttons; elsewhere an overlay over the main window, reached from the
-    // Shell menu's Settings… item (⌘,) or, on iOS, the sidebar gear button,
-    // which set AppModel.showingSettings.
-    #if os(macOS)
-    Settings {
-      SettingsView()
-        .environment(AppModel.shared)
-        .kitColorScheme(AppModel.shared.appearanceMode.colorScheme)
-        .componentKit(accent: .accentColor)
-    }
-    .windowStyle(.hiddenTitleBar)
-    #endif
+    // Settings is an in-window overlay (not a separate window/scene), so it
+    // opens over the main window like the Actions overlay. On macOS it is
+    // reached from the Shell menu's Settings… item (⌘,) which sets
+    // AppModel.showingSettings; on iOS from the sidebar gear button.
 
     // A detached session/note lives in its own value-keyed window (macOS) or
     // scene (iPad), created by `openWindow(id: "detach", value: id)`; it is
@@ -224,9 +214,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       // windows close normally. Local monitors always fire on the main thread,
       // so this is safe to assume as the MainActor.
       let handled = MainActor.assumeIsolated {
-        // The in-window Actions overlay is non-modal; don't close a session
-        // beneath it. Swallow the key as a no-op (Esc dismisses it).
-        if AppModel.shared.showingActions { return true }
+        // In-window overlays (Actions/Settings) are non-modal; don't close a
+        // session beneath one. Swallow the key as a no-op (Esc dismisses them).
+        if AppModel.shared.showingActions || AppModel.shared.showingSettings { return true }
         if let main = AppModel.shared.mainWindow, window !== main { return false }
         AppModel.shared.closeSelectedSessionAndSelectNeighbor()
         return true
@@ -385,14 +375,12 @@ struct ShellCommands: Commands {
 
       Divider()
 
-      #if !os(macOS)
-      // Settings… is an overlay here (the Mac has the Settings window and
-      // its app-menu item) — open it like the Actions overlay.
+      // Settings… is an overlay (not a separate window) — open it like the
+      // Actions overlay. Replaces the system Settings scene's ⌘, binding.
       Button("Settings…") {
         AppModel.shared.showingSettings = true
       }
       .keyboardShortcut(",", modifiers: .command)
-      #endif
     }
   }
   
