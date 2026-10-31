@@ -75,7 +75,7 @@ struct SidebarView: View {
       #if os(macOS) || os(Windows) || os(Linux)
       if FeatureFlagsStore.shared.isEnabled(.sessions) {
         Button("New Terminal", systemImage: "terminal") { model.newTerminal() }
-          .help("New terminal")
+          .kitHelp("New terminal")
       }
       #else
       Button("Settings", systemImage: "gearshape") { model.showingSettings = true }
@@ -448,6 +448,7 @@ struct DatabaseConnectionRow: View {
             .transition(.scale.combined(with: .opacity))
         }
       }
+      .kitRename(isRenaming: state.isRenamingDatabase(connection.id)) { model.renameDatabaseConnection(connection, to: $0) }
       .kitHelp(connection.displayName, meta: address, systemImage: connection.engine.systemImage, hue: .indigo)
       .kitContextMenu { DatabaseConnectionActions(connection: connection, state: state) }
       .animation(.kit, value: isOpen)
@@ -489,7 +490,7 @@ struct DatabaseConnectionActions: View {
       connection: model.databases.connection(for: connection.id), window: model.databaseWindow,
       onDelete: { state.deletingDatabaseConnection = connection }
     ) {
-      Button("Rename…", systemImage: "character.cursor.ibeam") { state.beginRenameDatabase(connection) }
+      Button("Rename…", systemImage: "character.cursor.ibeam") { state.renamingDatabaseID = connection.id }
     }
   }
 }
@@ -594,7 +595,7 @@ struct DetachReturnBadge: View {
         }
         .labelStyle(.iconOnly)
         .buttonStyle(.kitIcon)
-        .help("Return to main window")
+        .kitHelp("Return to main window")
         .transition(.scale.combined(with: .opacity))
       }
     }

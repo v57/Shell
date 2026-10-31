@@ -2,13 +2,16 @@
 #if os(macOS)
 import AppKit
 #endif
+import ComponentKit
 import Foundation
 import ShellIntegrations
+import SwiftUI
 import UniformTypeIdentifiers
 
 /// App-side launcher for the "Open With" control: resolves the real
 /// application (by bundle id), its icon, and how to open a project directory
-/// in it. Everything here needs AppKit, so it lives in the app target while
+/// in it. The kit's `KitDesktop` looks apps up and opens them (the app's own
+/// location, for its icon, is still AppKit's), so it lives in the app target while
 /// the pure kind-resolution stays in `TerminalIntegrations` (`OpenWithResolver`).
 enum ProjectOpener {
   /// The display name for a kind (also the menu-item title).
@@ -38,31 +41,27 @@ enum ProjectOpener {
     }
   }
 
-  static func appURL(for kind: OpenWithKind) -> URL? {
-    NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID(for: kind))
-  }
-
   /// Whether the app for `kind` is installed (only installed apps are shown).
-  static func isInstalled(_ kind: OpenWithKind) -> Bool {
-    appURL(for: kind) != nil
+  @MainActor static func isInstalled(_ kind: OpenWithKind) -> Bool {
+    KitDesktop.isAppInstalled(bundleID(for: kind))
   }
 
-  /// The app's real icon, or a generic application icon when it isn't installed.
-  static func icon(for kind: OpenWithKind, fallback: NSImage = NSWorkspace.shared.icon(for: .application)) -> NSImage {
-    guard let url = appURL(for: kind) else { return fallback }
-    return NSWorkspace.shared.icon(forFile: url.path)
+  /// The app's real icon, or a generic application symbol when it isn't installed.
+  @MainActor static func icon(for kind: OpenWithKind) -> Image {
+    guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID(for: kind)),
+      let icon = KitDesktop.icon(forFile: url.path)
+    else { return Image(systemName: "app") }
+    return icon
   }
 
   /// Opens `directory` (or its project file) in the app for `kind`.
-  static func open(_ kind: OpenWithKind, in directory: URL) {
+  @MainActor static func open(_ kind: OpenWithKind, in directory: URL) {
     switch kind {
     case .finder:
       // Finder is the default handler for folders — plain `open`.
-      NSWorkspace.shared.open(directory)
+      KitDesktop.open(directory)
     case .xcode, .code, .zed, .vscode, .markdown, .git, .dev:
-      guard let app = appURL(for: kind) else { return }
-      let target = targetURL(for: kind, in: directory)
-      try? NSWorkspace.shared.open([target], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration())
+      KitDesktop.open([targetURL(for: kind, in: directory)], withApp: bundleID(for: kind))
     }
   }
 

@@ -11,12 +11,6 @@ import AppKit
 struct ContentView: View {
   @Environment(AppModel.self) private var model
   @Environment(\.scenePhase) private var scenePhase
-  /// Local Esc monitor while the actions overlay is open (the overlay is
-  /// non-modal and never gets keyboard focus, so onExitCommand won't fire).
-  /// macOS only — iOS dismisses the overlay by tapping the backdrop.
-  #if os(macOS) || os(Windows) || os(Linux)
-  @State private var escMonitor: Any?
-  #endif
   /// The launch-time `.active` scene change fires while the SwiftData store
   /// is still bootstrapping; a fetch in that window can trap inside
   /// SwiftData (observed as a launch crash in reload()). Init already
@@ -88,13 +82,13 @@ struct ContentView: View {
         .background { Rectangle().fill(.kitWindow).ignoresSafeArea() }
         // Switching pages cross-fades the outgoing page into the incoming
         // one (each page carries `detailTransition`).
-        .animation(animates ? .smooth(duration: 0.25) : nil, value: model.selection)
+        .animation(animates ? .kit : nil, value: model.selection)
         // The kit's toolbar, on the column rather than on each page, so it
         // stays put while the pages cross-fade under it: the page's title and
         // its tools, compacting to icons and then into "…" as room runs out.
         // Database's pages bring their own (the table's title, its filters,
         // modes and inspector), so the column's steps aside for them.
-        .modifier(PageToolbar(isOn: !showsDatabase, title: pageTitle, tools: pageTools))
+        .kitToolbar(pageTitle.title, isPresented: !showsDatabase, title: { pageTitle.view }, tools: { pageTools })
         // The Data menu acts on the database the detail pane shows.
         .focusedSceneValue(\.databaseWindow, showsDatabase ? model.databaseWindow : nil)
         .kitSidebarToggle(columnVisibility: $columnVisibility)
@@ -159,7 +153,7 @@ struct ContentView: View {
         }
       }
       .fileDropMenu(showsErrors: true)
-      .noticeSheet(
+      .kitNotice(
         "Encrypted Storage Error",
         isPresented: Binding(
           get: { model.notes.storageError != nil || model.history.storageError != nil },
@@ -172,23 +166,12 @@ struct ContentView: View {
         SettingsView()
       }
 
-      // The actions list as an in-window overlay (not a sheet) so it
-      // appears/closes instantly, over the kit's scrim, which dims the window
-      // as the board does. Backdrop click, Esc, and ⌘R close it.
-      if model.showingActions {
-        Rectangle()
-          .fill(.kitScrim)
-          .ignoresSafeArea()
-          .contentShape(Rectangle())
-          .onTapGesture { model.showingActions = false }
-          .accessibilityAddTraits(.isButton)
-          .accessibilityLabel("Close")
-          .transition(.opacity)
+      // The actions list: the kit's palette over the window (its scrim, a
+      // click on the dim, Esc and ⌘R close it).
+      .kitPaletteOverlay(isPresented: $model.showingActions) {
         ActionsOverlayView()
-          .transition(.opacity.combined(with: .scale(scale: 0.97)))
       }
     }
-    .animation(.easeOut(duration: 0.15), value: model.showingActions)
     .kitColorScheme(model.appearanceMode.colorScheme)
     // Database's interface: the tree rows in the sidebar, the detail pages and
     // the connection sheets read the model.
@@ -232,12 +215,6 @@ struct ContentView: View {
         // on visibility, so a remote panel is stale until it appears.
         Task { await model.directoryBrowser.refresh() }
       }
-    }
-    .onChange(of: model.showingActions) { _, _ in
-      // The Esc monitor closes the actions overlay; it is armed while it shows.
-      #if os(macOS)
-      updateEscMonitor()
-      #endif
     }
   }
   
@@ -508,7 +485,7 @@ struct ContentView: View {
       if session.canReconnect, !isLive(session) {
         ToolGroup {
           Button("Reconnect", systemImage: "arrow.clockwise") { session.reconnectNow() }
-            .help("Reconnect now")
+            .kitHelp("Reconnect now", systemImage: "arrow.clockwise")
         }
       }
       #if os(macOS) || os(Windows) || os(Linux)
@@ -520,19 +497,19 @@ struct ContentView: View {
         // Files, then the apps that open the directory, in one card.
         ToolbarSlot(priority: 0) {
           ToolGroup(iconOnly: true) {
-            filesButton
+            filesButton(inMenu: false)
             #if os(macOS)
             if let directory = model.smartActionDirectory {
-              OpenWithMenu(directory: directory, kinds: model.openWithKinds)
+              OpenWithMenu(directory: directory, kinds: model.openWithKinds, inMenu: false)
             }
             #endif
           }
         } menu: {
-          filesButton
+          filesButton(inMenu: true)
           #if os(macOS)
           if let directory = model.smartActionDirectory {
             KitSubmenu("Open With", systemImage: "arrow.up.forward.app") {
-              OpenWithMenu(directory: directory, kinds: model.openWithKinds)
+              OpenWithMenu(directory: directory, kinds: model.openWithKinds, inMenu: true)
             }
           }
           #endif
@@ -548,15 +525,15 @@ struct ContentView: View {
       Button("Delete History", systemImage: "trash", role: .destructive) {
         model.deleteHistorySession(historySession.id)
       }
-      .help("Delete History")
+      .kitHelp("Delete History")
       Button("Replay Commands", systemImage: "play") {
         model.replayHistorySession(historySession)
       }
-      .help("Replay Commands")
+      .kitHelp("Replay Commands")
       Button("Create Action", systemImage: "command") {
         model.createAction(from: historySession)
       }
-      .help("Create Action")
+      .kitHelp("Create Action")
     }
   }
 
@@ -619,10 +596,10 @@ struct ContentView: View {
           KitMenuButton(scheme.name, systemImage: "scope", style: .button) {
             schemeOptions(scheme)
           }
-          .help("Select scheme")
+          .kitHelp("Select scheme", meta: scheme.name)
         }
         ForEach(SmartActionButton.kinds.filter { scheme.terminalCommand(for: $0) != nil }, id: \.self) { kind in
-          SmartActionButton(kind: kind, scheme: scheme, directory: directory)
+          SmartActionButton(kind: kind, scheme: scheme, directory: directory, inMenu: false)
         }
         let distribution = ActionKind.allCases.filter { $0.isDistribution && $0.isOfferedHere && scheme.supports($0) }
         if !distribution.isEmpty {
@@ -649,7 +626,7 @@ struct ContentView: View {
         KitSubmenu("Scheme", systemImage: "scope") { schemeOptions(scheme) }
       }
       ForEach(SmartActionButton.kinds.filter { scheme.terminalCommand(for: $0) != nil }, id: \.self) { kind in
-        SmartActionButton(kind: kind, scheme: scheme, directory: directory)
+        SmartActionButton(kind: kind, scheme: scheme, directory: directory, inMenu: true)
       }
       let distribution = ActionKind.allCases.filter { $0.isDistribution && $0.isOfferedHere && scheme.supports($0) }
       if !distribution.isEmpty {
@@ -697,37 +674,16 @@ struct ContentView: View {
   /// `terminal.fill` (back to the terminal) while Files is shown. The Files
   /// panel is part of the Files feature; the button hides while it is off.
   @ViewBuilder
-  private var filesButton: some View {
+  private func filesButton(inMenu: Bool) -> some View {
     if flags.isEnabled(.files) {
       Button(
         "Files & Terminal", systemImage: model.directoryBrowser.visible ? "terminal.fill" : "folder.fill"
       ) {
         model.directoryBrowser.visible.toggle()
       }
-      .help(model.directoryBrowser.visible ? "Show Terminal" : "Show Files")
+      .toolbarHelp(model.directoryBrowser.visible ? "Show Terminal" : "Show Files", shortcut: "⇧⌘F", inMenu: inMenu)
     }
   }
-
-  #if os(macOS)
-  /// Arms the local Esc key monitor while the Actions overlay shows, and
-  /// removes it once it closes (Settings is a kit sheet, which handles Esc).
-  private func updateEscMonitor() {
-    if model.showingActions {
-      if escMonitor == nil {
-        escMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-          if event.keyCode == 53 {   // Esc
-            AppModel.shared.showingActions = false
-            return nil
-          }
-          return event
-        }
-      }
-    } else if let escMonitor {
-      NSEvent.removeMonitor(escMonitor)
-      self.escMonitor = nil
-    }
-  }
-  #endif
 
   /// The live session the main window presents, if the selection names one —
   /// nil while a saved row (`ssh` / `screen` / `web` / `database`) is still
@@ -825,7 +781,7 @@ struct ContentView: View {
     KitMenuButton(currentWebSSHTunnelLabel(for: web), systemImage: "network", style: .button) {
       webSSHTunnelOptions(web)
     }
-    .help("SSH tunnel")
+    .kitHelp("SSH tunnel", meta: currentWebSSHTunnelLabel(for: web), systemImage: "network")
   }
 
   /// The saved SSH hosts a web page can tunnel through, and none, as menu
@@ -860,6 +816,8 @@ private struct SmartActionButton: View {
   let kind: ActionKind
   let scheme: ActionScheme
   let directory: URL
+  /// In the toolbar's "…" menu (plain help there; the kit's tooltip in the bar).
+  var inMenu = false
   @Environment(AppModel.self) private var model
 
   var body: some View {
@@ -871,7 +829,7 @@ private struct SmartActionButton: View {
         model.runSmartAction(kind, scheme: scheme, in: directory)
       }
     }
-    .help(running ? "Stop" : "\(kind.title) \(scheme.name)")
+    .toolbarHelp(running ? "Stop" : "\(kind.title) \(scheme.name)", inMenu: inMenu)
   }
 
   private var icon: String {
@@ -955,6 +913,8 @@ extension ConnectionKind {
 private struct OpenWithMenu: View {
   let directory: URL
   let kinds: [OpenWithKind]
+  /// In the toolbar's "…" menu (plain help there; the kit's tooltip in the bar).
+  var inMenu = false
 
   /// Only the kinds whose app is actually installed on this machine.
   private var installedKinds: [OpenWithKind] {
@@ -969,11 +929,12 @@ private struct OpenWithMenu: View {
         Label {
           Text(ProjectOpener.displayName(for: kind))
         } icon: {
-          Image(nsImage: ProjectOpener.icon(for: kind))
+          ProjectOpener.icon(for: kind)
             .resizable()
             .frame(width: 24, height: 24)
         }
-      }.help("Open in \(ProjectOpener.displayName(for: kind))")
+      }
+      .toolbarHelp("Open in \(ProjectOpener.displayName(for: kind))", inMenu: inMenu)
     }
   }
 }
@@ -999,17 +960,15 @@ struct PageTitle {
   var view: KitTitle { KitTitle(title, meta: meta, systemImage: systemImage, hue: hue, status: status) }
 }
 
-/// The column's kit toolbar while `isOn` (pages without a toolbar of their own).
-private struct PageToolbar: ViewModifier {
-  let isOn: Bool
-  let title: PageTitle
-  let tools: [ToolbarSlot]
-
-  func body(content: Content) -> some View {
-    if isOn {
-      content.kitToolbar(title.title, title: { title.view }, tools: { tools })
+extension View {
+  /// A toolbar button's tooltip: the kit's in the bar, plain help once the button has folded into the bar's "…"
+  /// menu (the kit's tooltip doesn't draw inside a kit menu).
+  @ViewBuilder
+  func toolbarHelp(_ title: String, shortcut: String? = nil, inMenu: Bool) -> some View {
+    if inMenu {
+      help(title)
     } else {
-      content
+      kitHelp(title, shortcut: shortcut)
     }
   }
 }

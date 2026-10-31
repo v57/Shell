@@ -34,11 +34,23 @@ final class SidebarState {
       })
   }
 
-  /// The database connection being renamed (drives the rename sheet), and the
-  /// text field's draft value, pre-filled with the connection's display name.
-  /// SHARED: database rows render in both the Local and the Remote section.
-  var renamingDatabaseConnection: DatabaseConnection?
-  var databaseRenameText = ""
+  /// The database connection being renamed in place (its row's title becomes a field). SHARED: database rows
+  /// render in both the Local and the Remote section.
+  var renamingDatabaseID: UUID?
+
+  /// Whether the database connection `id` is being renamed, as the binding `.kitRename` takes.
+  func isRenamingDatabase(_ id: UUID) -> Binding<Bool> {
+    Binding(
+      get: { self.renamingDatabaseID == id },
+      set: { renaming in
+        if renaming {
+          self.renamingDatabaseID = id
+        } else if self.renamingDatabaseID == id {
+          self.renamingDatabaseID = nil
+        }
+      })
+  }
+
   /// The database connection whose Delete… awaits confirmation.
   var deletingDatabaseConnection: DatabaseConnection?
 
@@ -56,20 +68,6 @@ final class SidebarState {
   /// The stats graphs sheet, opened by clicking the Local section header.
   var showingStatsGraphs = false
   #endif
-
-  /// Opens the database rename sheet pre-filled with the connection's current
-  /// name (or its display name fallback).
-  func beginRenameDatabase(_ connection: DatabaseConnection) {
-    databaseRenameText = connection.displayName
-    renamingDatabaseConnection = connection
-  }
-
-  /// Applies a database rename (empty input resets to the engine display name)
-  /// and dismisses the sheet.
-  func commitRenameDatabase(_ connection: DatabaseConnection, in model: AppModel) {
-    model.renameDatabaseConnection(connection, to: databaseRenameText)
-    renamingDatabaseConnection = nil
-  }
 }
 
 /// What the sidebar DOES around its sections, as ONE modifier:
@@ -105,11 +103,11 @@ struct SidebarChrome: ViewModifier {
       // (both branches carry .transition(.blurReplace)).
       .animation(.kit, value: model.historyMode)
       #if os(macOS) || os(Windows) || os(Linux)
-      .noticeSheet(
+      .kitNotice(
         model.screenMonitor.actionError?.title ?? "",
         isPresented: Binding(
           get: { model.screenMonitor.actionError != nil }, set: { if !$0 { model.screenMonitor.actionError = nil } }),
-        message: model.screenMonitor.actionError?.message ?? "")
+        message: model.screenMonitor.actionError?.message)
       #endif
       // The authorized-keys panel (key.2.on.ring in the Local/Remote
       // headers); opens for this Mac or the selected SSH connection.
@@ -124,18 +122,6 @@ struct SidebarChrome: ViewModifier {
       .kitSheet(item: $model.editingWebSession) { web in
         NewWebSessionView(web: web)
       }
-      // The Rename… action on a database connection: a small sheet with a
-      // TextField pre-filled with the connection's current name/display name.
-      // Empty input resets to the engine display name.
-      .kitSheet(item: $state.renamingDatabaseConnection) { connection in
-        DatabaseRenameSheet(
-          connection: connection,
-          text: $state.databaseRenameText,
-          onCommit: { state.commitRenameDatabase(connection, in: model) },
-          onCancel: { state.renamingDatabaseConnection = nil }
-        )
-        .environment(model)
-      }
       .kitConfirmation(
         "Delete “\(state.deletingDatabaseConnection?.displayName ?? "")”?",
         isPresented: Binding(
@@ -146,11 +132,7 @@ struct SidebarChrome: ViewModifier {
         if let connection = state.deletingDatabaseConnection { model.deleteDatabaseConnection(connection) }
         state.deletingDatabaseConnection = nil
       }
-      .noticeSheet(
-        "Authorized Keys",
-        isPresented: Binding(
-          get: { model.authorizedKeysError != nil }, set: { if !$0 { model.authorizedKeysError = nil } }),
-        message: model.authorizedKeysError ?? "", systemImage: "key.2.on.ring")
+      .kitNotice("Authorized Keys", message: $model.authorizedKeysError, systemImage: "key.2.on.ring")
       #if os(macOS) || os(Windows) || os(Linux)
       #if os(macOS)
       .background {

@@ -64,15 +64,6 @@ struct ActionsOverlayView: View {
       openWith
       #endif
     }
-    .frame(width: 560)
-    // Under the toolbar, like the board's palette, rather than mid-window.
-    .frame(maxHeight: .infinity, alignment: .top)
-    .padding(.top, 56)
-    .onAppear {
-      #if os(macOS)
-      Task { @MainActor in claimFocus() }
-      #endif
-    }
   }
 
   // MARK: Scope
@@ -178,13 +169,10 @@ struct ActionsOverlayView: View {
     }
   }
 
-  /// Runs an action, then hands focus back to the search line (the palette
-  /// stays open), so the next query can be typed immediately.
+  /// Runs an action; the palette stays open with focus on its search line (the kit's overlay keeps focus in its
+  /// card), so the next query can be typed immediately.
   private func run(_ action: Action) {
     model.runAction(action)
-    #if os(macOS)
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { claimFocus() }
-    #endif
   }
 
   #if os(macOS) || os(Windows) || os(Linux)
@@ -280,7 +268,7 @@ struct ActionsOverlayView: View {
             Label {
               Text(ProjectOpener.displayName(for: kind))
             } icon: {
-              Image(nsImage: ProjectOpener.icon(for: kind))
+              ProjectOpener.icon(for: kind)
                 .resizable()
                 .frame(width: 20, height: 20)
             }
@@ -293,26 +281,6 @@ struct ActionsOverlayView: View {
     }
   }
 
-  /// AppKit fallback for "always focused": SwiftUI's FocusState requests
-  /// are dropped for transition-inserted overlay views (verified
-  /// empirically — the first responder stayed on the window's hosting
-  /// view), so walk the key window's view hierarchy and make the search
-  /// field's NSTextField the first responder directly. No-op when the
-  /// field is gone (overlay closed) or already focused.
-  private func claimFocus() {
-    guard let window = NSApp.keyWindow,
-          let field = Self.findTextField(in: window.contentView) else { return }
-    _ = window.makeFirstResponder(field)
-  }
-
-  private static func findTextField(in view: NSView?) -> NSTextField? {
-    guard let view else { return nil }
-    if let field = view as? NSTextField { return field }
-    for subview in view.subviews {
-      if let found = findTextField(in: subview) { return found }
-    }
-    return nil
-  }
   #endif
 }
 

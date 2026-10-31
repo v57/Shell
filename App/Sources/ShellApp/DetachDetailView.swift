@@ -43,7 +43,7 @@ struct DetachDetailView: View {
       }
       // The kit's toolbar, as in the main window: the item's title and tools,
       // and Always on Top on the Mac. Database's pages have their own.
-      .modifier(DetachToolbar(isOn: !isDatabase, title: title, tools: tools))
+      .kitToolbar(title.title, isPresented: !isDatabase, title: { title.view }, tools: { tools })
       .onDisappear {
         // Closing the detached window/scene returns the item to the main
         // window (and deletes it if it was an empty note). Only runs on a
@@ -139,7 +139,7 @@ struct DetachDetailView: View {
       toggleAlwaysOnTop()
     }
     .kitToolOn(isAlwaysOnTop)
-    .help(isAlwaysOnTop ? "Keep window above other apps (on)" : "Keep window above other apps")
+    .kitHelp("Keep window above other apps", meta: isAlwaysOnTop ? "On" : nil)
   }
 
   private func toggleAlwaysOnTop() {
@@ -193,21 +193,6 @@ private struct DetachWindowAccessor: NSViewRepresentable {
   }
 }
 #endif
-
-/// The window's kit toolbar while `isOn`.
-private struct DetachToolbar: ViewModifier {
-  let isOn: Bool
-  let title: PageTitle
-  let tools: [ToolbarSlot]
-
-  func body(content: Content) -> some View {
-    if isOn {
-      content.kitToolbar(title.title, title: { title.view }, tools: { tools })
-    } else {
-      content
-    }
-  }
-}
 
 /// A detached database: its tree in the window's own sidebar, beside Database's page for the row picked in it, with
 /// a navigation of its own.
