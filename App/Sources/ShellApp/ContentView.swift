@@ -11,6 +11,10 @@ import AppKit
 struct ContentView: View {
   @Environment(AppModel.self) private var model
   @Environment(\.scenePhase) private var scenePhase
+  #if os(macOS)
+  /// Opens the Settings window (`AppModel.showingSettings` asks for it).
+  @Environment(\.openSettings) private var openSettings
+  #endif
   /// The launch-time `.active` scene change fires while the SwiftData store
   /// is still bootstrapping; a fetch in that window can trap inside
   /// SwiftData (observed as a launch crash in reload()). Init already
@@ -160,11 +164,21 @@ struct ContentView: View {
           set: { if !$0 { model.notes.storageError = nil; model.history.storageError = nil } }
         ),
         message: model.notes.storageError ?? model.history.storageError ?? "Unknown encrypted storage error.")
+      #if os(macOS)
+      // Settings is the standard Settings window on the Mac: a request for it
+      // (Manage Accounts…, the screenshot demo's --settings) opens the window.
+      .onChange(of: model.showingSettings, initial: true) { _, showing in
+        guard showing else { return }
+        model.showingSettings = false
+        openSettings()
+      }
+      #else
       // Settings, as the kit's sheet over the window (Escape, a click on the
       // dim, its close button and ⌘, close it).
       .kitSheet(isPresented: $model.showingSettings) {
         SettingsView()
       }
+      #endif
 
       // The actions list: the kit's palette over the window (its scrim, a
       // click on the dim, Esc and ⌘R close it).
