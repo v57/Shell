@@ -23,13 +23,16 @@ typealias DroppedFiles = [URL]
 /// when to list, navigate, open, or run file operations.
 ///
 /// Rendered states, in priority order:
-/// - **Error** — `errorMessage` is non-nil (`ContentUnavailableView` + Retry).
+/// - **Error** — `errorMessage` is non-nil (an `EmptyState` with Retry).
 /// - **Loading** — `isLoading` is true and there are no rows yet (a working `EmptyState`).
-/// - **Empty** — no rows and no error (`ContentUnavailableView`).
-/// - **Success** — the `Table` (macOS) or `List` (iOS) of rows.
+/// - **Empty** — no rows and no error (an `EmptyState`).
+/// - **Success** — the `Table` (macOS) or `KitList` (iOS) of rows.
 ///
-/// On macOS the listing is sortable `Table` with Name / Type / Size / Modified
-/// columns. On iOS it falls back to a `List` layout rendering the same row model.
+/// On macOS the listing is a sortable `Table` with Name / Type / Size / Modified
+/// columns: it stays SwiftUI's because the kit's `KitGrid` can't yet drag a
+/// selection of rows out (one `ShellFile` per row, to Finder or a terminal),
+/// take drops on a directory row, or open on a double click while Return
+/// renames. On iOS it is a `KitList` of the same row model.
 struct DirectoryBrowserView: View {
   /// The parsed entries of the current directory, in the order the listing
   /// returned them. Sorting is applied by the view from `sortOrder`.
@@ -148,11 +151,13 @@ struct DirectoryBrowserView: View {
 
   @ViewBuilder private var content: some View {
     if let errorMessage {
-      ErrorStateView(message: errorMessage, onRetry: onRetry)
+      EmptyState(systemImage: "exclamationmark.triangle", title: "Couldn't Load Folder", message: errorMessage) {
+        Button("Retry", action: onRetry).buttonStyle(.kit)
+      }
     } else if isLoading && rows.isEmpty {
       EmptyState(systemImage: "folder", title: "Loading…", status: .working)
     } else if rows.isEmpty {
-      EmptyStateView()
+      EmptyState(systemImage: "folder", title: "Empty Folder", message: "This folder contains no files.")
     } else {
       fileTable
     }
@@ -177,8 +182,7 @@ struct DirectoryBrowserView: View {
         TableColumn("Name", sortUsing: KeyPathComparator(\FileRow.name)) { row in
           if renamingName == row.name {
             TextField("", text: $renameText)
-              .textFieldStyle(.roundedBorder)
-              .font(.body)
+              .kitField()
               .focused($renameFieldFocused, equals: row.name)
               .onSubmit { commitRename() }
               .onExitCommand { cancelRename() }
@@ -308,7 +312,9 @@ struct DirectoryBrowserView: View {
 
     private func iconAndName(_ row: FileRow) -> some View {
       HStack(spacing: 8) {
-        Image(systemName: iconName(for: row)).foregroundStyle(iconColor(for: row)).frame(width: 16)
+        Image(systemName: iconName(for: row))
+          .foregroundStyle(iconHue(for: row).map { AnyShapeStyle($0.fill) } ?? AnyShapeStyle(.kitSecondary))
+          .frame(width: 16)
         Text(row.name).lineLimit(1).truncationMode(.middle)
       }
     }
@@ -318,20 +324,22 @@ struct DirectoryBrowserView: View {
     // MARK: - iOS list
 
     private var fileTable: some View {
-      List(selection: $selection) {
+      KitList(
+        selection: Binding<String?>(
+          get: { selection.first }, set: { selection = $0.map { [$0] } ?? [] })
+      ) {
         ForEach(sortedRows) { row in
-          HStack(spacing: 12) {
-            Image(systemName: iconName(for: row)).foregroundStyle(iconColor(for: row)).frame(
-              width: 22)
-            Text(row.name).lineLimit(1).truncationMode(.middle)
-            Spacer()
-            Text(Self.formattedSize(row.size)).foregroundStyle(.secondary).font(.callout)
-            Text(Self.formattedDate(row.modified)).foregroundStyle(.secondary).font(.callout)
-          }.contentShape(Rectangle()).onTapGesture(count: 2) { activate(row) }.tag(row.name)
-            .contextMenu {
-              rowContextMenu(names: [row.name])
-            }
+          SidebarRow(
+            value: row.name, row.name, subtitle: Self.formattedDate(row.modified), systemImage: iconName(for: row),
+            hue: iconHue(for: row)
+          ) {
+            Text(Self.formattedSize(row.size))
+          }
+          .kitContextMenu { rowContextMenu(names: [row.name]) }
         }
+      }
+      .primaryAction { (name: String) in
+        if let row = rows.first(where: { $0.name == name }) { activate(row) }
       }
     }
 
@@ -395,11 +403,11 @@ struct DirectoryBrowserView: View {
     return "doc"
   }
 
-  /// Tint per row kind: folders blue, symlinks purple, files secondary.
-  private func iconColor(for row: FileRow) -> Color {
+  /// Tint per row kind: folders blue, symlinks purple, files the quiet colour.
+  private func iconHue(for row: FileRow) -> Hue? {
     if row.symlinkTarget != nil { return .purple }
     if row.isDirectory { return .blue }
-    return .secondary
+    return nil
   }
 
   // MARK: - Formatting helpers
@@ -438,9 +446,8 @@ extension FileRow {
   fileprivate var sortableModified: Date { modified ?? .distantPast }
 }
 
-/// The top bar: an "up" button plus the path rendered as a breadcrumb. The home
-/// directory is shortened to `~` (the same rule `ContentView.refreshLocalDirectory`
-/// applies to the window subtitle).
+/// The top bar: an "up" button plus the path as the kit's path bar. The home directory is shortened to `~` (the same
+/// rule `ContentView.refreshLocalDirectory` applies to the window subtitle).
 private struct BreadcrumbBar: View {
   let path: String
   let canNavigateUp: Bool
@@ -448,24 +455,26 @@ private struct BreadcrumbBar: View {
 
   var body: some View {
     HStack(spacing: 6) {
-      Button(action: onNavigateUp) { Image(systemName: "chevron.up").frame(width: 16) }.buttonStyle(
-        .borderless
-      ).disabled(!canNavigateUp).help("Up")
+      Button("Up", systemImage: "chevron.up", action: onNavigateUp)
+        .buttonStyle(.kitIcon)
+        .labelStyle(.iconOnly)
+        .disabled(!canNavigateUp)
+        .kitHelp("Up", shortcut: "⇧⌘U")
 
       let segments = pathSegments
       if segments.isEmpty {
-        Text("Path not set").foregroundStyle(.secondary)
+        Text("Path not set").kitFont(.callout).foregroundStyle(.kitSecondary)
       } else {
-        ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
-          if index > 0 {
-            Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.secondary)
-          }
-          Text(segment).lineLimit(1).truncationMode(.middle)
-        }
+        KitPathBar(
+          components: segments.enumerated().map { index, segment in
+            KitPathItem(segment, systemImage: index == 0 ? (segment == "~" ? "house" : "internaldrive") : nil)
+          })
       }
 
       Spacer(minLength: 0)
-    }.padding(.horizontal, 12).padding(.vertical, 8).background(.bar)
+    }
+    .padding(.horizontal, 12)
+    .padding(.vertical, 6)
   }
 
   /// The breadcrumb components, with the home-directory prefix collapsed to `~`.
@@ -484,29 +493,5 @@ private struct BreadcrumbBar: View {
     let parts = display.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
     if display.hasPrefix("/") { return ["/"] + parts }
     return parts
-  }
-}
-
-/// Shown when the current directory has no entries.
-private struct EmptyStateView: View {
-  var body: some View {
-    ContentUnavailableView(
-      "Empty Folder", systemImage: "folder", description: Text("This folder contains no files."))
-  }
-}
-
-/// Shown when the listing for the current directory failed.
-private struct ErrorStateView: View {
-  let message: String
-  let onRetry: () -> Void
-
-  var body: some View {
-    ContentUnavailableView {
-      Label("Couldn't Load Folder", systemImage: "exclamationmark.triangle")
-    } description: {
-      Text(message)
-    } actions: {
-      Button("Retry", action: onRetry)
-    }
   }
 }

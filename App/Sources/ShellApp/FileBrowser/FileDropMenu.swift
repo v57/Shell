@@ -37,7 +37,6 @@ private struct FileDropMenuPresenter: ViewModifier {
   let showsErrors: Bool
 
   #if os(macOS)
-  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   /// The window root's AppKit view: which window this is, and where a screen point falls in it.
   @State private var anchor = WindowAnchor()
 
@@ -47,37 +46,30 @@ private struct FileDropMenuPresenter: ViewModifier {
     if let number = request.windowNumber { return number == window.windowNumber ? request : nil }
     return window.isKeyWindow ? request : nil
   }
-
-  private var animates: Bool { FeatureFlagsStore.shared.isEnabled(.animations) && !reduceMotion }
   #endif
 
   func body(content: Content) -> some View {
     #if os(macOS)
     content
-      .overlay {
-        ZStack(alignment: .topLeading) {
-          WindowAnchorView(anchor: anchor)
-            .allowsHitTesting(false)
-          if let request, let point = anchor.point(fromScreen: request.location) {
-            // A click anywhere outside the menu cancels it, as outside a menu.
-            Color.clear
-              .contentShape(Rectangle())
-              .onTapGesture { model.fileDropRequest = nil }
-            FileDropMenuPlacement(pointer: point) {
-              FileDropMenu(request: request)
-            }
-            .transition(.opacity.combined(with: .offset(y: 6)))
-          }
-        }
-        .animation(animates ? .smooth(duration: 0.25) : nil, value: request?.id)
+      .background {
+        WindowAnchorView(anchor: anchor)
+          .allowsHitTesting(false)
       }
-      .noticeSheet(
+      // The drop's choices as the kit's menu at the pointer: the first is highlighted (Return runs it), 1–9 run a
+      // row, Escape or a click outside cancels.
+      .kitMenu(
+        isPresented: Binding(get: { request != nil }, set: { if !$0 { model.fileDropRequest = nil } }),
+        at: request.flatMap { anchor.point(fromScreen: $0.location) } ?? .zero
+      ) {
+        if let request { FileDropMenu(request: request) }
+      }
+      .kitNotice(
         "Couldn't Drop Files",
         isPresented: Binding(
           get: { showsErrors && model.fileDropError != nil },
           set: { if !$0 { model.fileDropError = nil } }
         ),
-        message: model.fileDropError ?? "", systemImage: "doc.badge.ellipsis")
+        message: model.fileDropError, systemImage: "doc.badge.ellipsis")
     #else
     content
     #endif
@@ -111,189 +103,36 @@ private struct WindowAnchorView: NSViewRepresentable {
   }
 }
 
-/// Places the menu centered under the pointer, its actions just below the arrow, kept inside the window: above
-/// the pointer when there is no room below it.
-private struct FileDropMenuPlacement<Content: View>: View {
-  let pointer: CGPoint
-  @ViewBuilder let content: Content
-
-  /// The menu's height, once laid out (the flip needs it).
-  @State private var height: CGFloat = 0
-
-  /// The pointer arrow's height: the menu starts below it, so the arrow never covers the first action.
-  private static var arrowHeight: CGFloat { 22 }
-  private static var margin: CGFloat { 8 }
-
-  var body: some View {
-    GeometryReader { proxy in
-      let size = proxy.size
-      let x = min(max(pointer.x - FileDropMenu.width / 2, Self.margin), size.width - FileDropMenu.width - Self.margin)
-      let below = pointer.y + Self.arrowHeight
-      let y = below + height + Self.margin <= size.height ? below : max(pointer.y - height - Self.margin, Self.margin)
-      content
-        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
-        .offset(x: x, y: y)
-    }
-  }
-}
-
-/// The drop menu (designed on the "Shell Drop Menu" canvas): the choices first, nearest the pointer, then what was
-/// dropped where. Hover or ↑/↓ picks a row, Return or a click runs it, 1–9 run a row directly, and Esc or a click
-/// outside cancels.
+/// The drop menu's rows (designed on the "Shell Drop Menu" canvas): the choices first, nearest the pointer, each
+/// with its number key, then what was dropped where.
 private struct FileDropMenu: View {
-  static let width: CGFloat = 244
-
   @Environment(AppModel.self) private var model
-  @Environment(\.colorScheme) private var colorScheme
   let request: FileDropRequest
 
-  @State private var selected = 0
-  /// The key monitor while the menu is open (see `handle`).
-  @State private var keyMonitor: Any?
-
-  private var actions: [FileDropAction] { model.fileDropActions(for: request) }
-
   var body: some View {
-    VStack(alignment: .leading, spacing: 1) {
-      ForEach(Array(actions.enumerated()), id: \.element) { index, action in
-        FileDropMenuRow(
-          title: model.fileDropTitle(of: action, for: request),
-          systemImage: action.systemImage,
-          hint: index == selected ? "↩" : (index < 9 ? "\(index + 1)" : nil),
-          isSelected: index == selected
-        ) {
-          perform(action)
-        }
-        .onHover { if $0 { selected = index } }
+    let actions = model.fileDropActions(for: request)
+    ForEach(Array(actions.enumerated()), id: \.element) { index, action in
+      Button(model.fileDropTitle(of: action, for: request), systemImage: action.systemImage) {
+        model.performFileDrop(action, for: request)
       }
-      Divider()
-        .padding(.horizontal, 6)
-        .padding(.top, 4)
-      header
+      .kitMenuHint(index < 9 ? "\(index + 1)" : nil)
     }
-    .padding(5)
-    .frame(width: Self.width, alignment: .leading)
-    .background(
-      RoundedRectangle(cornerRadius: 10, style: .continuous)
-        .fill(colorScheme == .dark ? Color(white: 0.165) : Color.white)
-    )
-    .overlay(
-      RoundedRectangle(cornerRadius: 10, style: .continuous)
-        .strokeBorder(Color.primary.opacity(0.16), lineWidth: 0.5)
-    )
-    .shadow(color: .black.opacity(colorScheme == .dark ? 0.5 : 0.16), radius: 14, y: 10)
-    .shadow(color: .black.opacity(colorScheme == .dark ? 0.3 : 0.08), radius: 3, y: 2)
-    .accessibilityElement(children: .contain)
-    .accessibilityLabel(model.fileDropTitle(for: request))
-    .onAppear {
-      keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-        handle(event) ? nil : event
-      }
+    Divider()
+    KitMenuFooter(
+      model.fileDropSubject(for: request), subtitle: "Dropped on \(model.fileDropTargetName(for: request))",
+      systemImage: headerSymbol)
+    if let message = model.fileDropMessage(for: request) {
+      Text(message)
+        .kitFont(.caption)
+        .foregroundStyle(.kitSecondary)
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(EdgeInsets(top: 0, leading: 42, bottom: 6, trailing: 8))
     }
-    .onDisappear {
-      if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
-      keyMonitor = nil
-    }
-  }
-
-  /// The menu's keys. Like a menu it never takes keyboard focus, so the terminal keeps it once the menu closes;
-  /// while it is open it takes every key but ⌘ shortcuts.
-  private func handle(_ event: NSEvent) -> Bool {
-    if event.modifierFlags.contains(.command) { return false }
-    switch event.keyCode {
-    case 126:  // ↑
-      selected = max(selected - 1, 0)
-    case 125:  // ↓
-      selected = min(selected + 1, actions.count - 1)
-    case 36, 76:  // Return, Enter
-      if actions.indices.contains(selected) { perform(actions[selected]) }
-    case 53:  // Esc
-      model.fileDropRequest = nil
-    default:
-      if let number = event.charactersIgnoringModifiers.flatMap(Int.init), actions.indices.contains(number - 1) {
-        perform(actions[number - 1])
-      }
-    }
-    return true
-  }
-
-  /// What was dropped where, under the choices.
-  private var header: some View {
-    HStack(alignment: .top, spacing: 8) {
-      Image(systemName: headerSymbol)
-        .font(.system(size: 12))
-        .foregroundStyle(.secondary)
-        .frame(width: 26, height: 26)
-        .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-      VStack(alignment: .leading, spacing: 2) {
-        Text(model.fileDropSubject(for: request))
-          .font(.system(size: 13, weight: .semibold))
-          .lineLimit(1)
-          .truncationMode(.middle)
-        Text("Dropped on \(model.fileDropTargetName(for: request))")
-          .font(.system(size: 11))
-          .foregroundStyle(.secondary)
-          .lineLimit(1)
-          .truncationMode(.middle)
-        if let message = model.fileDropMessage(for: request) {
-          Text(message)
-            .font(.system(size: 11))
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.top, 2)
-        }
-      }
-    }
-    .padding(.horizontal, 8)
-    .padding(.top, 8)
-    .padding(.bottom, 6)
   }
 
   private var headerSymbol: String {
     guard request.files.count == 1 else { return "doc.on.doc" }
     return request.files[0].isDirectory ? "folder" : "doc"
-  }
-
-  private func perform(_ action: FileDropAction) {
-    model.performFileDrop(action, for: request)
-  }
-}
-
-private struct FileDropMenuRow: View {
-  let title: String
-  let systemImage: String
-  /// ↩ on the selected row, the row's number key on the others.
-  let hint: String?
-  let isSelected: Bool
-  let action: () -> Void
-
-  var body: some View {
-    Button(action: action) {
-      HStack(spacing: 8) {
-        Image(systemName: systemImage)
-          .frame(width: 16)
-          .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
-        Text(title)
-          .lineLimit(1)
-          .truncationMode(.middle)
-        Spacer(minLength: 8)
-        if let hint {
-          Text(hint)
-            .font(.system(size: 12))
-            .foregroundStyle(isSelected ? AnyShapeStyle(.white.opacity(0.8)) : AnyShapeStyle(.tertiary))
-        }
-      }
-      .font(.system(size: 13))
-      .padding(.horizontal, 8)
-      .frame(height: 26)
-      .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
-      .background(
-        RoundedRectangle(cornerRadius: 6, style: .continuous)
-          .fill(isSelected ? Color.accentColor : Color.clear)
-      )
-      .contentShape(Rectangle())
-    }
-    .buttonStyle(.plain)
   }
 }
 
