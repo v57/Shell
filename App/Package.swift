@@ -20,9 +20,9 @@ let package = Package(
   products: [.library(name: "ShellApp", targets: ["ShellApp"])],
   dependencies: [
     .package(path: ".."),
-    // Database's tunnels and byte streams, the vault, Markdown's notes, the shared design, in-app updates and
-    // screenshot scenes (Platform's web view is added below, everywhere but Windows).
-    v57("Database"), v57("Vault"), v57("Markdown"), v57("Component"), v57("UpdateKit"), v57("Dev"),
+    // Database's tunnels and byte streams, the vault, Markdown's notes, the shared design, in-app updates,
+    // screenshot scenes and Code's action sheets (Platform's web view is added below, everywhere but Windows).
+    v57("Database"), v57("Vault"), v57("Markdown"), v57("Component"), v57("UpdateKit"), v57("Dev"), v57("Code"),
   ],
   targets: [
     // The app, all of it but its entry point (Sources/Shell/ShellMain.swift): Shell.xcodeproj builds that file into
@@ -38,6 +38,8 @@ let package = Package(
         .product(name: "VaultKit", package: "Vault"), .product(name: "VaultUI", package: "Vault"),
         .product(name: "MarkdownKit", package: "Markdown"), .product(name: "ComponentKit", package: "Component"),
         .product(name: "DevScreenshots", package: "Dev"),
+        // The Notarization sheet, shared with Code.
+        .product(name: "CodeActionsUI", package: "Code"),
         // Updates from GitHub Releases outside the App Store (the iOS app updates through the App Store).
         .product(name: "UpdateKit", package: "UpdateKit", condition: .when(platforms: [.macOS, .linux, .windows])),
       ],

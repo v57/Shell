@@ -120,7 +120,7 @@ struct ContentView: View {
       }
 #if os(macOS) || os(Windows) || os(Linux)
       .kitSheet(item: $model.notarizationSetup) { request in
-        NotarizationSetupView(request: request)
+        NotarizationSheet(request: request)
       }
 #endif
       // First-launch "choose your features" welcome (FeatureSelectionView as a
