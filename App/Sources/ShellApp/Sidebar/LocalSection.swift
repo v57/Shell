@@ -182,7 +182,8 @@ struct LocalSectionView: View {
         .monospacedDigit()
         .transaction { $0.animation = nil }
       }
-      .buttonStyle(.plain)
+      // The kit's hover and press wash, so the line reads as the button it is.
+      .buttonStyle(KitRowButtonStyle(cornerRadius: KitMetrics.radiusXS))
       .kitHelp("CPU · GPU · System power draw", meta: "Click for graphs")
     } else {
       let count = localSessions.count
