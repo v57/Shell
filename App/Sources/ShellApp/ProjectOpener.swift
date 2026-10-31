@@ -1,7 +1,4 @@
 #if os(macOS)
-#if os(macOS)
-import AppKit
-#endif
 import ComponentKit
 import Foundation
 import ShellIntegrations
@@ -10,9 +7,9 @@ import UniformTypeIdentifiers
 
 /// App-side launcher for the "Open With" control: resolves the real
 /// application (by bundle id), its icon, and how to open a project directory
-/// in it. The kit's `KitDesktop` looks apps up and opens them (the app's own
-/// location, for its icon, is still AppKit's), so it lives in the app target while
-/// the pure kind-resolution stays in `TerminalIntegrations` (`OpenWithResolver`).
+/// in it. The kit's `KitDesktop` looks apps up, draws their icons and opens
+/// them; the pure kind-resolution stays in `TerminalIntegrations`
+/// (`OpenWithResolver`).
 enum ProjectOpener {
   /// The display name for a kind (also the menu-item title).
   static func displayName(for kind: OpenWithKind) -> String {
@@ -48,10 +45,7 @@ enum ProjectOpener {
 
   /// The app's real icon, or a generic application symbol when it isn't installed.
   @MainActor static func icon(for kind: OpenWithKind) -> Image {
-    guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID(for: kind)),
-      let icon = KitDesktop.icon(forFile: url.path)
-    else { return Image(systemName: "app") }
-    return icon
+    KitDesktop.appIcon(bundleID(for: kind)) ?? Image(systemName: "app")
   }
 
   /// Opens `directory` (or its project file) in the app for `kind`.
