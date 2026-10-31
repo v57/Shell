@@ -1,6 +1,6 @@
 #if os(macOS) || os(Windows) || os(Linux)
+import ComponentKit
 import SwiftUI
-import Charts
 import ShellMonitoring
 
 /// The stats graphs sheet, opened by clicking the Local section header in
@@ -8,145 +8,69 @@ import ShellMonitoring
 /// the full 600-slot ring buffer, oldest at the left, newest ("now") at
 /// the right edge.
 ///
-/// Each metric is a leading-aligned title row above its chart; the three
-/// charts fill the container width (no horizontal scrolling) so the whole
-/// 600-sample window is always visible without panning. Live: SwiftUI
-/// re-renders each tick through `@Observable`.
+/// The newest values lead as the kit's stat cards; under them each metric's
+/// graph (`KitSparkline`, a fixed 600-slot window filling from the right) fills
+/// the sheet's width, so the whole window is always visible without panning.
+/// Live: SwiftUI re-renders each tick through `@Observable`.
 struct StatsGraphView: View {
   /// The sidebar's shared monitor — same instance the header reads.
   let monitor: SystemStatsMonitor
+  @Environment(\.kitDismiss) private var dismiss
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 16) {
-      StatTitle(title: "CPU", unit: "%", value: monitor.latestCPU)
-      StatChart(
-        color: .blue,
-        samples: monitor.cpuHistory,
-        updatesCount: monitor.updatesCount,
-        yRange: 0...100
-      )
-      StatTitle(title: "GPU", unit: "%", value: monitor.latestGPU)
-      StatChart(
-        color: .purple,
-        samples: monitor.gpuHistory,
-        updatesCount: monitor.updatesCount,
-        yRange: 0...100
-      )
-      StatTitle(title: "Power", unit: "W", value: monitor.latestWatts, detail: monitor.dcInWatts.map { "DC in \($0)W" })
-      StatChart(
-        color: .orange,
-        samples: monitor.wattHistory,
-        updatesCount: monitor.updatesCount,
-        yRange: nil   // autoscale — watts aren't bounded like percentages
-      )
-    }
-    .padding(20)
-    .frame(width: 440, height: 620)
-  }
-}
-
-/// One metric's header: title plus the newest sample (absent until
-/// the first tick lands), then an optional detail after it.
-private struct StatTitle: View {
-  let title: String
-  let unit: String
-  let value: Int?
-  var detail: String?
-
-  var body: some View {
-    HStack(spacing: 6) {
-      Text(title)
-        .font(.headline)
-      if let value {
-        Text("\(value)\(unit)")
-          .font(.callout.monospacedDigit())
-          .foregroundStyle(.secondary)
+    KitSheet(
+      title: "Activity", meta: "The last 10 minutes", systemImage: "gauge.with.dots.needle.33percent", hue: .green,
+      width: 480, onClose: { dismiss() }
+    ) {
+      HStack(spacing: KitMetrics.gutter) {
+        KitStatCard("CPU", value: text(monitor.latestCPU, unit: "%"), systemImage: "cpu", hue: .blue)
+        KitStatCard("GPU", value: text(monitor.latestGPU, unit: "%"), systemImage: "square.stack.3d.up", hue: .purple)
+        KitStatCard(
+          "Power", value: text(monitor.latestWatts, unit: " W"), systemImage: "bolt", hue: .orange,
+          detail: monitor.dcInWatts.map { "DC in \($0)W" })
       }
-      if let detail {
-        Text(detail)
-          .font(.callout.monospacedDigit())
-          .foregroundStyle(.secondary)
+      .padding(.horizontal, KitMetrics.gutter)
+      VStack(alignment: .leading, spacing: 12) {
+        graph("CPU", samples: monitor.cpuHistory, hue: .blue, range: 0...100) { "\(Int($0))%" }
+        graph("GPU", samples: monitor.gpuHistory, hue: .purple, range: 0...100) { "\(Int($0))%" }
+        // Autoscaled: watts aren't bounded like percentages.
+        graph("Power", samples: monitor.wattHistory, hue: .orange, range: nil) { "\(Int($0)) W" }
       }
-    }
-  }
-}
-
-/// One metric's line chart over the full ring: all written samples mapped
-/// onto the 600-position window (0 = ten minutes ago, 599 = now), plotted
-/// across the container width. Before the first sample lands
-/// (`updatesCount == 0`) there is no data yet and the chart renders empty
-/// instead of a fake flat line; a partially filled ring occupies the right
-/// end ("now") with an empty left region.
-private struct StatChart: View {
-  let color: Color
-  let samples: [Int]
-  let updatesCount: Int
-  /// Fixed y domain for percentages; nil = autoscale to the data.
-  let yRange: ClosedRange<Int>?
-
-  private struct Point: Identifiable {
-    /// Axis position: 0 = oldest end of the window, `count-1` = now.
-    let position: Int
-    let value: Int
-    var id: Int { position }
-  }
-
-  /// The newest written samples, oldest first, mapped onto the full
-  /// window so the newest sample is always the right edge ("now").
-  private var points: [Point] {
-    guard updatesCount > 0 else { return [] }
-    let written = min(samples.count, updatesCount)
-    return (0..<written).map { age in
-      let slot = (updatesCount - 1 - age) % samples.count
-      return Point(position: samples.count - 1 - age, value: samples[slot])
+      .kitCard(padding: 12)
+      .padding(.horizontal, KitMetrics.gutter)
     }
   }
 
-  var body: some View {
-    Chart(points) { point in
-      LineMark(
-        x: .value("Position", point.position),
-        y: .value("Value", point.value)
-      )
-      .foregroundStyle(color)
-      .interpolationMethod(.catmullRom)
-      AreaMark(
-        x: .value("Position", point.position),
-        y: .value("Value", point.value)
-      )
-      .foregroundStyle(
-        .linearGradient(
-          colors: [color.opacity(0.25), color.opacity(0.02)],
-          startPoint: .top, endPoint: .bottom
-        )
-      )
-      .interpolationMethod(.catmullRom)
-    }
-    .chartXAxis {
-      
-    }
-    .chartYAxis {
-      AxisMarks(position: .trailing)
-    }
-    .chartYScale(domain: yRange.map { Double($0.lowerBound)...Double($0.upperBound) } ?? domainForPoints)
-    .chartXScale(domain: 0...Double(samples.count - 1))
-    .frame(maxWidth: .infinity)
-    .frame(height: 140)
+  private func text(_ value: Int?, unit: String) -> String {
+    value.map { "\($0)\(unit)" } ?? "—"
   }
 
-  /// Minute marks across the window plus the final "now" tick.
-  private var xMarkPositions: [Int] {
-    let last = samples.count - 1
-    let step = 60
-    var marks = Array(stride(from: 0, through: last - (last % step), by: step))
-    if marks.last != last { marks.append(last) }
-    return marks
+  /// One metric's graph under its name. Before the first sample lands there is no data and the graph is empty
+  /// instead of a fake flat line; a partly filled ring occupies the right end ("now").
+  private func graph(
+    _ title: String, samples: [Int], hue: Hue, range: ClosedRange<Double>?, label: @escaping (Double) -> String
+  ) -> some View {
+    VStack(alignment: .leading, spacing: 4) {
+      Text(title).kitFont(.caption)
+      KitSparkline(
+        values: written(samples).map(Double.init), hue: hue, range: range ?? autoscale(samples),
+        capacity: samples.count, axisLabel: label)
+        .frame(height: 100)
+    }
   }
 
-  /// Autoscale domain for unbounded metrics (watts): headroom above the
-  /// peak, floored so a flat zero line still shows a sane axis.
-  private var domainForPoints: ClosedRange<Double> {
-    let peak = Double(points.map(\.value).max() ?? 0)
+  /// The written samples, oldest first (the ring's newest write is at `(updatesCount - 1) % capacity`).
+  private func written(_ samples: [Int]) -> [Int] {
+    let count = monitor.updatesCount
+    guard count > 0, !samples.isEmpty else { return [] }
+    let written = min(samples.count, count)
+    return (0..<written).reversed().map { age in samples[(count - 1 - age) % samples.count] }
+  }
+
+  /// The scale for unbounded metrics (watts): headroom above the peak, floored so a flat zero line still shows a
+  /// sane axis.
+  private func autoscale(_ samples: [Int]) -> ClosedRange<Double> {
+    let peak = Double(written(samples).max() ?? 0)
     return 0...max(peak * 1.2, 10)
   }
 }

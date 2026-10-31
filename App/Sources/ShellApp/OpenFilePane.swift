@@ -104,7 +104,7 @@ struct OpenFilePane: View {
   /// dashes disabled so plain-text files are stored byte-for-byte verbatim.
   private var monospacedEditor: some View {
     TextEditor(text: textBinding)
-      .font(.system(size: 13, design: .monospaced))
+      .kitFont(.mono)
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       .onAppear { disableSmartQuotes() }
       .onChange(of: file.text) { _, _ in disableSmartQuotes() }
@@ -115,15 +115,11 @@ struct OpenFilePane: View {
   private func readOnlyNotice(_ notice: String) -> some View {
     VStack(alignment: .leading, spacing: 8) {
       Label(notice, systemImage: "exclamationmark.triangle")
-        .foregroundStyle(.secondary)
-        .padding()
-      ScrollView {
-        Text(file.text.isEmpty ? "No preview available." : file.text)
-          .font(.system(size: 13, design: .monospaced))
-          .textSelection(.enabled)
-          .frame(maxWidth: .infinity, alignment: .leading)
-          .padding()
-      }
+        .kitFont(.callout)
+        .foregroundStyle(.kitSecondary)
+        .padding([.horizontal, .top])
+      KitCodeBlock(file.text, maxHeight: .infinity, placeholder: "No preview available.")
+        .padding([.horizontal, .bottom], KitMetrics.gutter)
     }
   }
 

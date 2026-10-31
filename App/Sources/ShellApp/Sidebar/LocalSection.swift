@@ -183,7 +183,7 @@ struct LocalSectionView: View {
         .transaction { $0.animation = nil }
       }
       .buttonStyle(.plain)
-      .help("CPU · GPU · System power draw — click for graphs")
+      .kitHelp("CPU · GPU · System power draw", meta: "Click for graphs")
     } else {
       let count = localSessions.count
       let active = localSessions.filter(\.hasActivity).count
@@ -199,7 +199,7 @@ struct LocalSectionView: View {
       Button("Delete All History", systemImage: "trash", role: .destructive) {
         model.deleteAllHistory()
       }
-      .help("Delete all local history")
+      .kitHelp("Delete all local history")
       .transition(.blurReplace)
     }
     // Only meaningful when there is something to show; hidden while the list is
@@ -215,7 +215,7 @@ struct LocalSectionView: View {
             .foregroundStyle(model.historyMode ? AnyShapeStyle(Hue.accent.text) : AnyShapeStyle(.kitSecondary))
         }
       }
-      .help(model.historyMode ? "Show local terminals" : "Show local history")
+      .kitHelp(model.historyMode ? "Show local terminals" : "Show local history")
       .transition(.blurReplace)
     }
     if flags.isEnabled(.sessions) || flags.isEnabled(.web) || flags.isEnabled(.database) {
@@ -236,7 +236,7 @@ struct LocalSectionView: View {
           }
         }
       }
-      .help("New session")
+      .kitHelp("New session")
     }
   }
 }
@@ -250,8 +250,7 @@ private struct StatsMeter: View {
   var body: some View {
     HStack(spacing: 3) {
       Text(label)
-      MeterBar(segments: [MeterSegment(label, value: min(max(percent, 0), 100), hue: hue)], total: 100, height: 4)
-        .frame(width: 22)
+      MicroBar(value: percent / 100, hue: hue, width: 22)
       Text("\(Int(percent.rounded()))%")
     }
   }

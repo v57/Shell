@@ -43,18 +43,19 @@ struct DatabasesSectionView: View {
           DatabaseConnectionRow(group: group, state: state)
         }
         if hidesUnused, !isSearching, more > 0 {
-          ShowMoreRow(count: more, isShowing: showsMore, reason: "unused") {
-            withKitAnimation { showsMore.toggle() }
-          }
+          SidebarShowMoreRow(
+            count: more, isShowing: $showsMore, reason: "unused",
+            help: "Show \(more) connections unused for a week",
+            hideHelp: "Hide the connections the filters leave out")
         }
       } meta: {
         MetaLine(meta(groups: groups, listed: listed))
       } accessory: {
         Button("Sort and Filter", systemImage: "line.3.horizontal.decrease") { showsOptions = true }
-          .help("Sort and filter the connections")
+          .kitHelp("Sort and filter the connections")
           .kitMenu(isPresented: $showsOptions) { optionsMenu }
         Button("New Database Connection", systemImage: "plus") { model.newDatabaseConnection() }
-          .help("New database connection")
+          .kitHelp("New database connection")
       }
       .onChange(of: [hidesUnused ? "1" : "0", engineFilter]) { showsMore = false }
     }
@@ -172,29 +173,5 @@ extension AppModel {
   /// Whether a saved connection is open: its page or its tree in the sidebar.
   func isOpen(_ connection: DatabaseConnection) -> Bool {
     liveDatabaseSession(for: connection) != nil || databases.live[connection.id] != nil
-  }
-}
-
-/// The row after a list for what its filters hide: "Show 8 More · unused", or Show Fewer.
-struct ShowMoreRow: View {
-  let count: Int
-  let isShowing: Bool
-  let reason: String
-  let action: () -> Void
-  @Environment(\.kitIdiom) private var idiom
-
-  var body: some View {
-    let title = isShowing ? "Show Fewer" : "Show \(count) More"
-    SidebarRow(title) {
-      Image(systemName: isShowing ? "chevron.up" : "chevron.down")
-        .font(.system(size: 11, weight: .semibold))
-        .foregroundStyle(.kitAccent)
-        .frame(width: KitMetrics.rowTile(idiom))
-    } trailing: {
-      if !isShowing { Text(reason).lineLimit(1) }
-    }
-    .title(Text(title).foregroundStyle(.kitAccent))
-    .action(action)
-    .help(isShowing ? "Hide the connections the filters leave out" : "Show \(count) connections unused for a week")
   }
 }
