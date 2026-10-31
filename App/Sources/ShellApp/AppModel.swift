@@ -1877,15 +1877,8 @@ final class AppModel {
   func copyPublicKey() {
     do {
       let key = try SSHKeychain.loadOrCreateDefaultKey()
-      #if os(macOS)
-      let host = Host.current().localizedName ?? "Mac"
-      #elseif os(iOS)
-      let host = UIDevice.current.name
-      #else
-      let host = ProcessInfo.processInfo.hostName
-      #endif
-      let comment = "Shell (\(NSUserName())@\(host))"
-      let line = SSHKeychain.publicKeyOpenSSHLine(for: key, comment: comment)
+      let profile = Vaults.shared.profile(for: Vaults.shared.account(id: vault.accountID) ?? .personal)
+      let line = SSHKeychain.publicKeyOpenSSHLine(for: key, comment: AuthorizedKeysView.deviceKeyComment(profile))
       KitPasteboard.copy(line)
     } catch {
       publicKeyError = error.localizedDescription

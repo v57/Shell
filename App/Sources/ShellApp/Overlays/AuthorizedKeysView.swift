@@ -1,6 +1,8 @@
 import ComponentKit
 import SwiftUI
 import ShellKit
+import VaultKit
+import VaultUI
 
 /// The authorized-keys panel (opened by the `key.2.on.ring` button in the
 /// Local and Remote sidebar headers).
@@ -21,6 +23,11 @@ struct AuthorizedKeysView: View {
   @State private var errorMessage: String?
   @State private var busyKeyIDs: Set<String> = []
   @State private var showingAddKey = false
+  /// Asks for the name and email the first time this device's key is added somewhere.
+  @State private var profiles = VaultProfileRequest()
+
+  /// The window's vault account, whose name and email this device's key line carries.
+  private var account: VaultAccount { Vaults.shared.account(id: model.vault.accountID) ?? .personal }
 
   private var targetTitle: String {
     switch target {
@@ -77,6 +84,7 @@ struct AuthorizedKeysView: View {
         try await addCustomKey(line: line, name: name, saveToICloud: saveToICloud)
       }
     }
+    .vaultProfileRequests(profiles)
   }
 
   @ViewBuilder
@@ -113,8 +121,8 @@ struct AuthorizedKeysView: View {
     var deviceEntries: [AuthorizedKeysManager.KeyEntry] = []
     if let key = try? SSHKeychain.loadOrCreateDefaultKey() {
       let fingerprint = SSHKeychain.publicKeyFingerprint(for: key)
-      let comment = "Shell (\(NSUserName())@\(Self.deviceName))"
-      let line = SSHKeychain.publicKeyOpenSSHLine(for: key, comment: comment)
+      let line = SSHKeychain.publicKeyOpenSSHLine(
+        for: key, comment: Self.deviceKeyComment(Vaults.shared.profile(for: account)))
       deviceEntries.append(AuthorizedKeysManager.KeyEntry(
         keyMaterial: String(line.split(separator: " ").prefix(2).joined(separator: " ")),
         fullLine: line,
@@ -188,6 +196,15 @@ struct AuthorizedKeysView: View {
     do {
       if entry.added {
         try await manager.remove(keyMaterials: [entry.keyMaterial])
+      } else if entry.source == .device {
+        // This device's key says whose it is: asked once, the first time it's added anywhere.
+        guard
+          let profile = await profiles.profile(
+            for: account, reason: "This device's key carries them, so the server shows whose key it is."),
+          let key = try? SSHKeychain.loadOrCreateDefaultKey()
+        else { return }
+        try await manager.append(
+          keyLine: SSHKeychain.publicKeyOpenSSHLine(for: key, comment: Self.deviceKeyComment(profile)))
       } else {
         try await manager.append(keyLine: entry.fullLine)
       }
@@ -236,6 +253,12 @@ struct AuthorizedKeysView: View {
     } catch {
       errorMessage = error.localizedDescription
     }
+  }
+
+  /// The comment of this device's key line: `Name <email> (Device)` once the account's Your Name is set, else
+  /// `Shell (user@Device)`.
+  static func deviceKeyComment(_ profile: VaultProfile) -> String {
+    profile.isComplete ? profile.keyComment(device: deviceName) : "Shell (\(NSUserName())@\(deviceName))"
   }
 
   private static var deviceName: String {
