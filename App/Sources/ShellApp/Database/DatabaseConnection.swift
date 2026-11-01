@@ -147,14 +147,15 @@ struct DatabaseConnection: Identifiable, Codable, Hashable {
   }
 
   /// Where the SSH tunnel connects on the far side: the SSH host's own
-  /// loopback when the database runs there (its address is local, or the
+  /// loopback when the database runs there (its address is local, or one of the
   /// host's), else the database's address as the SSH host reaches it (a
   /// server behind a bastion). Nil when no tunnel is needed.
   func tunnelTarget(through config: SSHConfig) -> (host: String, port: Int)? {
     guard requiresTunnel else { return nil }
     let address = host.lowercased()
     let onHost =
-      ["", "localhost", "127.0.0.1", "::1"].contains(address) || address == config.host.lowercased()
+      ["", "localhost", "127.0.0.1", "::1"].contains(address)
+      || config.addresses.contains { $0.lowercased() == address }
       || (!config.name.isEmpty && address == config.name.lowercased())
     return (onHost ? "127.0.0.1" : host, Int(port))
   }

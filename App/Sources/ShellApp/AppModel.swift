@@ -1649,6 +1649,12 @@ final class AppModel {
     connectionStore.save(config)
   }
 
+  /// What the vault tries after a connection's own addresses, when it reaches one of the user's devices (the
+  /// connection editor shows them read-only).
+  func automaticAddresses(for config: SSHConfig) -> [AutomaticAddress] {
+    connectionStore.automaticAddresses(for: config)
+  }
+
   // MARK: - Accounts
 
   /// Shows an account's hosts, database connections and notes (the window's `VaultAccountScope`). The account shown

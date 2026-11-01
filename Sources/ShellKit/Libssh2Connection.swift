@@ -366,7 +366,7 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
     running = true
 
     do {
-      let fd = try openSocket(host: config.host, port: config.port, timeout: 20)
+      let fd = try openSocket(hosts: config.addresses, port: config.port, timeout: 20)
       socketFD = fd
       guard let sess = libssh2_session_init_ex(nil, nil, nil, nil) else {
         throw EngineError.libssh2(-1, "libssh2_session_init_ex returned NULL")
@@ -427,7 +427,7 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
 
   // MARK: Socket
 
-  /// Opens a non-blocking TCP socket to `host:port`, honoring TCP_NODELAY and a
+  /// Opens a non-blocking TCP socket to the host's `port`, honoring TCP_NODELAY and a
   /// 20s connect timeout (the same timeout the NIO engine used).
   ///
   /// TCP keepalive: probe an idle link every 5s after 10s of quiet and give up
@@ -435,18 +435,37 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
   /// loss, VM reset) turns into a socket error in ~25s instead of the kernel's
   /// multi-minute retransmit timeout. Covers every connection kind, including
   /// forwarding-only ones that carry no SSH keepalives.
-  private func openSocket(host: String, port: Int, timeout: Int) throws -> SocketHandle {
-    do {
-      return try Sockets.connect(
-        host: host, port: port, timeout: TimeInterval(timeout),
-        keepAlive: Sockets.KeepAlive(idle: 10, interval: 5, count: 3))
-    } catch {
-      switch error {
-      case .hostNotFound(let message): throw EngineError.hostNotFound(message)
-      case .timedOut: throw EngineError.connectTimedOut
-      case .failed(let code, let message): throw EngineError.socket(code, "Could not connect: \(message)")
+  ///
+  /// `hosts` are the machine's addresses in order (`SSHConfig.addresses`: the host, then its fallbacks); each is
+  /// tried in turn, one that doesn't answer getting a share of the time (5 s at most) so the others still get theirs.
+  /// The host key check is the same whichever answers (`config.host`'s). With every address failing, the error says
+  /// why for each, and counts as a lost connection (to dial again) when any of them only didn't answer.
+  private func openSocket(hosts: [String], port: Int, timeout: Int) throws -> SocketHandle {
+    let hosts = hosts.isEmpty ? [config.host] : hosts
+    var failures: [(host: String, error: EngineError, reason: String)] = []
+    for (index, host) in hosts.enumerated() {
+      let isLast = index == hosts.count - 1
+      do {
+        return try Sockets.connect(
+          host: host, port: port, timeout: TimeInterval(isLast ? timeout : min(timeout, 5)),
+          keepAlive: Sockets.KeepAlive(idle: 10, interval: 5, count: 3))
+      } catch {
+        switch error {
+        case .hostNotFound(let message): failures.append((host, .hostNotFound(message), "not found"))
+        case .timedOut: failures.append((host, .connectTimedOut, "no answer"))
+        case .failed(let code, let message):
+          failures.append((host, .socket(code, "Could not connect: \(message)"), message))
+        }
       }
     }
+    if failures.count == 1 { throw failures[0].error }
+    let message = failures.map { "\($0.host): \($0.reason)" }.joined(separator: "; ")
+    if let lost = failures.first(where: { Self.isConnectionLoss($0.error) }) {
+      var code: Int32 = -1
+      if case .socket(let errno, _) = lost.error { code = errno }
+      throw EngineError.socket(code, "Could not connect. \(message)")
+    }
+    throw EngineError.hostNotFound(message)
   }
 
   /// Maps libssh2's block-directions bitmask to a poll() event mask.

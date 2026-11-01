@@ -15,6 +15,8 @@ struct NewConnectionView: View {
   
   @State private var name: String
   @State private var host: String
+  /// The fallback addresses, a row each (`SSHConfig.fallbacks`).
+  @State private var fallbacks: [FallbackAddress]
   @State private var user: String
   @State private var port: Int
   @State private var authMethod: SSHConfig.AuthMethod
@@ -26,6 +28,7 @@ struct NewConnectionView: View {
     editing = config
     _name = State(initialValue: config?.name ?? "")
     _host = State(initialValue: config?.host ?? "")
+    _fallbacks = State(initialValue: FallbackAddresses.rows(config?.fallbacks ?? []))
     _user = State(initialValue: config?.user ?? NSUserName())
     _port = State(initialValue: config?.port ?? 22)
     _authMethod = State(initialValue: config?.authMethod ?? .keychainKey)
@@ -55,6 +58,10 @@ struct NewConnectionView: View {
         FormRow("Name", help: "Shown in the sidebar", systemImage: "character.cursor.ibeam", hue: .blue,
                 field: TextField(host.isEmpty ? "Optional" : host, text: $name))
         FormRow("Port", systemImage: "number", hue: .blue, field: TextField("22", value: $port, format: .number))
+      }
+      FormCard {
+        FallbackAddressRows(
+          rows: $fallbacks, host: host, automatic: model.automaticAddresses(for: draft), hue: .blue)
       }
       FormCard("Authentication") {
         FormRow("Method", systemImage: "key", hue: .indigo) {
@@ -113,16 +120,26 @@ struct NewConnectionView: View {
     #endif
   }
 
-  private func submit() {
-    let config = SSHConfig(
+  /// The connection as edited so far.
+  private var draft: SSHConfig {
+    let host = host.trimmingCharacters(in: .whitespaces)
+    return SSHConfig(
       id: editing?.id ?? UUID(),
       name: name.trimmingCharacters(in: .whitespaces),
-      host: host.trimmingCharacters(in: .whitespaces),
+      host: host,
+      fallbacks: FallbackAddresses.addresses(fallbacks, host: host),
       user: user.trimmingCharacters(in: .whitespaces),
       port: port,
       authMethod: authMethod,
-      savePassword: savePassword
+      savePassword: savePassword,
+      recordID: editing?.recordID
     )
+  }
+
+  private func submit() {
+    var config = draft
+    // A new connection dials at once: with the ways the vault knows to the device too.
+    config.automaticFallbacks = model.automaticAddresses(for: config).map(\.address)
     // Password lifecycle: a typed password saves or clears per the toggle;
     // editing without retyping leaves the stored password untouched; the
     // toggle turned off without a new password deletes it.

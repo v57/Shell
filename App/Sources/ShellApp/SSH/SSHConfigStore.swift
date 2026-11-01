@@ -95,16 +95,37 @@ final class SSHConfigStore {
 
   // MARK: - Mapping
 
-  static func config(from host: VaultHost) -> SSHConfig {
-    SSHConfig(
-      id: UUID(uuidString: host.id) ?? stableUUID(host.id), name: host.name, host: host.hostname, user: host.user,
+  /// The config for a shared host; with `vault`, it carries the other ways to the machine the vault knows (a device's
+  /// Bonjour name and Hub Network address: `Vault.fallbackAddresses(of:)`) after the user's own fallbacks.
+  static func config(from host: VaultHost, vault: Vault? = nil) -> SSHConfig {
+    let automatic = vault.map { Self.automaticFallbacks(of: host, in: $0) } ?? []
+    return SSHConfig(
+      id: UUID(uuidString: host.id) ?? stableUUID(host.id), name: host.name, host: host.hostname,
+      fallbacks: host.fallbacks, automaticFallbacks: automatic, user: host.user,
       port: host.port, authMethod: host.auth == .password ? .password : .keychainKey,
       savePassword: host.savePassword, recordID: UUID(uuidString: host.id)?.uuidString == host.id ? nil : host.id)
+  }
+
+  /// The addresses the vault adds to a host's own (`Vault.fallbackAddresses(of:)` without the user's fallbacks):
+  /// for one of the user's devices, the name it published and its Hub Network address. The hosts are Personal's.
+  static func automaticFallbacks(of host: VaultHost, in vault: Vault) -> [String] {
+    let typed = Set(([host.hostname] + host.fallbacks).map { $0.lowercased() })
+    return vault.personalVault.fallbackAddresses(of: host).filter { !typed.contains($0.lowercased()) }
+  }
+
+  /// The addresses the vault adds for the host a config is, as the user edits its address and fallbacks (the
+  /// connection editor's read-only list).
+  func automaticAddresses(for config: SSHConfig) -> [AutomaticAddress] {
+    var host = vault.hosts.first { $0.id == config.vaultID } ?? VaultHost(id: config.vaultID, hostname: config.host)
+    host.hostname = config.host
+    host.fallbacks = config.fallbacks
+    return AutomaticAddress.list(for: host, in: vault)
   }
 
   static func copy(_ config: SSHConfig, into host: inout VaultHost) {
     host.name = config.name
     host.hostname = config.host
+    host.fallbacks = config.fallbacks
     host.user = config.user
     host.port = config.port
     // A host that signs in with a key imported into Database keeps it; Shell uses this device's key.
@@ -118,7 +139,7 @@ final class SSHConfigStore {
   private func reload() {
     // Not this Mac itself: the Hub lists it, and the host it published is for the other devices.
     let addresses = VaultDevice.addresses
-    all = vault.hosts.filter { !vault.isThisDevice($0, addresses: addresses) }.map(Self.config(from:))
+    all = vault.hosts.filter { !vault.isThisDevice($0, addresses: addresses) }.map { Self.config(from: $0, vault: vault) }
   }
 
   /// The shared record a listed config is: a Hub device's host has an id that isn't a UUID.
