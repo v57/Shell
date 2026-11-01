@@ -75,6 +75,10 @@ struct SettingsView: View {
       SettingsPane("Accounts", systemImage: "person.2", hue: .indigo, section: "v57", id: Self.accountsPane) {
         VaultAccountsSettings()
       }
+      #if os(macOS)
+        // Your iPhone and iPad sign in to this Mac over SSH: which of them can, and the other keys.
+        SettingsPane("Remote", systemImage: "network", hue: .teal, section: "v57", id: "remote") { VaultRemoteSettings() }
+      #endif
     }
     .toggleStyle(.kitSwitch)
   }
