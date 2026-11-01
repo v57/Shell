@@ -6,6 +6,7 @@ import ShellKit
 import ShellIntegrations
 import ShellMonitoring
 import UniformTypeIdentifiers
+import VaultKit
 import VaultUI
 
 /// The sidebar: ComponentKit's `KitSidebar` with ONE VIEW PER SECTION, each a
@@ -34,6 +35,10 @@ struct SidebarView: View {
   /// What the sections and the chrome share: the rename state, the database
   /// rename sheet, the search text and the stats monitor (see `SidebarState`).
   @State private var state = SidebarState()
+  /// Folders and database files dropped on the sidebar: what the vault doesn't have, offered (databases join the
+  /// Databases section, projects the other apps).
+  @State private var importOffer: VaultImportOffer?
+  @State private var isDropTargeted = false
 
   var body: some View {
     @Bindable var model = model
@@ -92,6 +97,13 @@ struct SidebarView: View {
     // Everything the sidebar does around its rows — selection routing, the
     // shared sheets/alerts, the stats monitor's lifetime (SidebarChrome.swift).
     .sidebarChrome(state)
+    #if os(macOS)
+    .kitDropTarget(isDropTargeted, cornerRadius: KitMetrics.radiusCard)
+    .kitFileDrop(isTargeted: $isDropTargeted) { urls in
+      Task { importOffer = await VaultImportOffer.scan(urls, store: model.vault.store) }
+    }
+    .kitSheet(item: $importOffer) { offer in VaultImportSheet(offer, vault: model.vault, app: "Shell") }
+    #endif
   }
 
   /// The identities of every row the sections render, in order: a change here
