@@ -237,7 +237,7 @@ private struct DetachedDatabaseSplit: View {
         }
       }
       .toolbar(removing: .sidebarToggle)
-      .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 360)
+      .kitSidebarColumn()
     } detail: {
       DetailView(window: window)
         .kitSidebarToggle(columnVisibility: $columnVisibility)
