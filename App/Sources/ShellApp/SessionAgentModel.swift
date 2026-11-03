@@ -16,6 +16,10 @@ final class SessionAgentModel {
   private(set) var isWorking = false
   /// The last install/start/remove failure, cleared by the next change.
   private(set) var errorMessage: String?
+  /// The `session` tool itself is downloading (`installTool`).
+  private(set) var isInstallingTool = false
+  /// Why the last `installTool` failed.
+  private(set) var toolErrorMessage: String?
 
   private static let tipDismissedKey = "sessionAgentTipDismissed"
   /// The terminal banner was dismissed; Settings still shows the row.
@@ -36,6 +40,43 @@ final class SessionAgentModel {
   var sessionsEndWithShell: Bool { status != nil && status != .running }
 
   func refresh() { perform { _ in } }
+
+  /// Installs the `session` tool to ~/.local/bin with its official installer. Only on the user's click: it downloads
+  /// the latest release from GitHub. `done` runs once it's there.
+  func installTool(done: @escaping @MainActor () -> Void) {
+    isInstallingTool = true
+    toolErrorMessage = nil
+    queue.async { [weak self] in
+      let message = Self.runToolInstaller()
+      DispatchQueue.main.async {
+        guard let self else { return }
+        self.isInstallingTool = false
+        self.toolErrorMessage = message
+        self.refresh()
+        done()
+      }
+    }
+  }
+
+  /// Runs the installer; returns what it reported when it failed.
+  private nonisolated static func runToolInstaller() -> String? {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/bin/bash")
+    process.arguments = ["-c", "set -o pipefail; curl -fsSL https://raw.githubusercontent.com/v57/session/main/install/session.sh | bash"]
+    let errors = Pipe()
+    process.standardError = errors
+    process.standardOutput = FileHandle.nullDevice
+    do {
+      try process.run()
+    } catch {
+      return error.localizedDescription
+    }
+    let output = errors.fileHandleForReading.readDataToEndOfFile()
+    process.waitUntilExit()
+    guard process.terminationStatus != 0 else { return nil }
+    let text = String(decoding: output, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+    return text.isEmpty ? "The installer stopped with status \(process.terminationStatus)" : text
+  }
 
   func install() {
     perform { agent in

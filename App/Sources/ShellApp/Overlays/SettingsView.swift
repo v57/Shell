@@ -130,7 +130,11 @@ private struct SessionAgentRow: View {
   private var agent: SessionAgentModel { model.sessionAgent }
 
   var body: some View {
-    keepRunningRow
+    if agent.isAvailable {
+      keepRunningRow
+    } else {
+      installToolRow
+    }
     if agent.daemonIsRunning {
       FormRow(
         "Session Daemon", help: "Running. Stopping it ends every persistent session", systemImage: "stop.circle",
@@ -145,6 +149,20 @@ private struct SessionAgentRow: View {
         message: "Every persistent session running now ends. The daemon starts again with the next one.",
         systemImage: "stop.circle", confirm: "Stop"
       ) { agent.stopDaemon { model.screenMonitor.refresh() } }
+    }
+  }
+
+  private var installToolRow: some View {
+    FormRow(
+      "Session Tool", help: "Keeps terminals running, without tmux or screen. Downloads it to ~/.local/bin",
+      systemImage: "arrow.down.circle", hue: .indigo, error: agent.toolErrorMessage
+    ) {
+      if agent.isInstallingTool {
+        LiveIcon(systemImage: "arrow.down.circle", hue: .indigo, status: .working, size: 20)
+      } else {
+        Button("Install") { agent.installTool { model.screenMonitor.refresh() } }
+          .buttonStyle(.kit)
+      }
     }
   }
 
@@ -168,7 +186,6 @@ private struct SessionAgentRow: View {
   }
 
   private var caption: String {
-    guard agent.isAvailable else { return "Needs the session tool (v57.dev/install/session)" }
     switch agent.status {
     case nil: return "Checking…"
     case .notInstalled: return "Sessions end when Shell quits; a login item keeps the session daemon running"

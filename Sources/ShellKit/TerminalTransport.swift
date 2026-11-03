@@ -613,11 +613,11 @@ public extension LocalPTYTransport {
   /// probe mirrors tmuxExecutablePath() — GUI launches inherit a minimal PATH
   /// that omits ~/.local/bin and the Homebrew dirs, so the common install
   /// locations are checked first.
-  /// Resolved once and cached: an executable's install path can't change
-  /// mid-run, so the ScreenSessions monitor's 5s refresh (and the attach
-  /// path) reuse the first answer instead of re-probing the filesystem
-  /// every tick.
-  private static let sessionExecutable: String? = {
+  /// Cached once found: an executable's install path can't change mid-run, so
+  /// the ScreenSessions monitor's refreshes (and the attach path) reuse the
+  /// answer instead of re-probing the filesystem. While it's missing it's looked
+  /// for each time: Settings can install it.
+  private static func findSessionExecutable() -> String? {
     let home = FileManager.default.homeDirectoryForCurrentUser.path
     for candidate in ["\(home)/.local/bin/session", "\(home)/.cargo/bin/session",
                       "/usr/local/bin/session", "/opt/homebrew/bin/session"] {
@@ -633,7 +633,14 @@ public extension LocalPTYTransport {
       }
     }
     return nil
-  }()
-  static func sessionExecutablePath() -> String? { sessionExecutable }
+  }
+  private static let sessionExecutableLock = NSLock()
+  private nonisolated(unsafe) static var sessionExecutable: String?
+  static func sessionExecutablePath() -> String? {
+    sessionExecutableLock.withLock {
+      if sessionExecutable == nil { sessionExecutable = findSessionExecutable() }
+      return sessionExecutable
+    }
+  }
 }
 #endif // os(macOS)
