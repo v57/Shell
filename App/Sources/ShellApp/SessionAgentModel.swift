@@ -11,6 +11,8 @@ import ShellKit
 final class SessionAgentModel {
   /// nil until the first check, and while `session` isn't installed.
   private(set) var status: SessionAgent.Status?
+  /// Whether a `session` daemon runs, whoever started it.
+  private(set) var daemonIsRunning = false
   private(set) var isWorking = false
   /// The last install/start/remove failure, cleared by the next change.
   private(set) var errorMessage: String?
@@ -47,6 +49,9 @@ final class SessionAgentModel {
 
   func remove() { perform { try $0.remove() } }
 
+  /// Ends the daemon and every persistent session in it. `done` runs once the daemon is gone.
+  func stopDaemon(done: @escaping @MainActor () -> Void) { perform({ try $0.stopDaemons() }, done: done) }
+
   func openLoginItems() { SessionAgent.openLoginItems() }
 
   /// Before a `session` terminal starts: a stopped agent starts first, so the terminal finds the agent's daemon
@@ -55,9 +60,12 @@ final class SessionAgentModel {
     try? agent?.startIfStopped()
   }
 
-  private func perform(_ work: @escaping @Sendable (SessionAgent) throws -> Void) {
+  private func perform(
+    _ work: @escaping @Sendable (SessionAgent) throws -> Void, done: (@MainActor () -> Void)? = nil
+  ) {
     guard let agent = Self.agent else {
       status = nil
+      daemonIsRunning = false
       return
     }
     isWorking = true
@@ -65,11 +73,14 @@ final class SessionAgentModel {
       var message: String?
       do { try work(agent) } catch { message = error.localizedDescription }
       let status = agent.status()
+      let daemonIsRunning = agent.isDaemonRunning()
       DispatchQueue.main.async {
         guard let self else { return }
         self.status = status
+        self.daemonIsRunning = daemonIsRunning
         self.errorMessage = message
         self.isWorking = false
+        done?()
       }
     }
   }

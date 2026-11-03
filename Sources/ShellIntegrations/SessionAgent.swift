@@ -159,6 +159,25 @@ public struct SessionAgent: Sendable {
     try startIfStopped()
   }
 
+  /// Whether any `session` daemon runs, the agent's or one a terminal started.
+  public func isDaemonRunning() -> Bool {
+    !otherDaemons(agentPID: nil).isEmpty
+  }
+
+  /// Ends every `session` daemon and the sessions in them. The agent unloads first, or launchd would start its daemon
+  /// again; its plist stays, so it comes back at login, with Start or with the next `session` terminal.
+  public func stopDaemons() throws {
+    _ = Self.launchctl(["bootout", service])
+    let daemons = otherDaemons(agentPID: nil)
+    for pid in daemons { kill(pid, SIGTERM) }
+    for _ in 0..<60 where daemons.contains(where: { kill($0, 0) == 0 }) {
+      Thread.sleep(forTimeInterval: 0.05)
+    }
+    if daemons.contains(where: { kill($0, 0) == 0 }) {
+      throw Failure(errorDescription: "The session daemon didn't stop")
+    }
+  }
+
   /// Opens Login Items & Extensions, where the agent is switched on or off.
   public static func openLoginItems() {
     SMAppService.openSystemSettingsLoginItems()

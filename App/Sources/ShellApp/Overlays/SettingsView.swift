@@ -125,10 +125,30 @@ private struct SessionsSettings: View {
 private struct SessionAgentRow: View {
   @Environment(AppModel.self) private var model
   @State private var confirmingRemove = false
+  @State private var confirmingStop = false
 
   private var agent: SessionAgentModel { model.sessionAgent }
 
   var body: some View {
+    keepRunningRow
+    if agent.daemonIsRunning {
+      FormRow(
+        "Session Daemon", help: "Running. Stopping it ends every persistent session", systemImage: "stop.circle",
+        hue: .red
+      ) {
+        Button("Stop") { confirmingStop = true }
+          .buttonStyle(.kit)
+          .disabled(agent.isWorking)
+      }
+      .kitConfirmation(
+        "Stop the session daemon?", isPresented: $confirmingStop,
+        message: "Every persistent session running now ends. The daemon starts again with the next one.",
+        systemImage: "stop.circle", confirm: "Stop"
+      ) { agent.stopDaemon { model.screenMonitor.refresh() } }
+    }
+  }
+
+  private var keepRunningRow: some View {
     FormRow(
       "Keep Sessions Running After Quit", help: caption, systemImage: "moon.zzz", hue: .indigo,
       error: agent.errorMessage
@@ -144,6 +164,7 @@ private struct SessionAgentRow: View {
       message: "Sessions running now end, and new ones end when Shell quits.", systemImage: "person.badge.minus",
       confirm: "Remove"
     ) { agent.remove() }
+    .onAppear { agent.refresh() }
   }
 
   private var caption: String {
