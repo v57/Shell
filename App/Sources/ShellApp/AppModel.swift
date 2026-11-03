@@ -1572,6 +1572,19 @@ final class AppModel {
   }
   
   #if os(macOS) || os(Windows) || os(Linux)
+  /// Renames a local persistent session. Its open terminals stay attached, and
+  /// follow the new name: they match their sidebar row by the stored info's name.
+  func renameScreenSession(_ info: ScreenSessionInfo, to newName: String) {
+    screenMonitor.rename(info, to: newName) { [weak self] renamed in
+      guard let self else { return }
+      for session in sessions {
+        if case .screen(let attached) = kind(of: session), attached.id == info.id {
+          sessionKinds[session.id] = .screen(renamed)
+        }
+      }
+    }
+  }
+
   /// Creates a new persistent session (`session`, else tmux, else screen)
   /// whose shell starts in `directory` (nil = home) and immediately opens a
   /// terminal attached to it, so the new session is usable at once.

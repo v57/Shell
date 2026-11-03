@@ -13,6 +13,19 @@ import Testing
 struct PersistentSessionTests {
   // MARK: - tmux `ls -F` parsing
 
+  @Test func renamedKeepsTheOriginAndScreensPidPrefix() {
+    let origin = ScreenRemoteOrigin(sshConfigID: UUID(), displayName: "host")
+    let screen = ScreenSessionInfo(name: "26040.old", pid: 26040, state: "Attached", kind: .screen, remoteOrigin: origin)
+    #expect(screen.renamed(to: "new").name == "26040.new")
+    #expect(screen.renamed(to: "new").shortName == "new")
+    #expect(screen.renamed(to: "new").remoteOrigin == origin)
+    let session = ScreenSessionInfo(name: "old", pid: 1, state: "1", kind: .session, isProtected: true)
+    #expect(session.renamed(to: "new").name == "new")
+    #expect(session.renamed(to: "new").isProtected)
+    let tmux = ScreenSessionInfo(name: "old", pid: 1, state: "1", kind: .tmux)
+    #expect(tmux.renamed(to: "new").name == "new")
+  }
+
   @Test func tmuxParsesNameAndAttachedFlag() {
     let rows = ScreenSessionsParser.parseTmuxOutput("web 0\napi 1\n")
     #expect(rows.count == 2)

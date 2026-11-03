@@ -59,6 +59,17 @@ public struct ScreenSessionInfo: Identifiable, Hashable {
 
   public var isRemote: Bool { remoteOrigin != nil }
 
+  /// This session under `newName`: screen's `name` keeps its "pid." prefix,
+  /// tmux and `session` names are the name itself.
+  public func renamed(to newName: String) -> ScreenSessionInfo {
+    var name = newName
+    if kind == .screen, let dot = self.name.firstIndex(of: ".") {
+      name = String(self.name[...dot]) + newName
+    }
+    return ScreenSessionInfo(name: name, pid: pid, state: state, kind: kind,
+                             remoteOrigin: remoteOrigin, isProtected: isProtected)
+  }
+
   /// "kind:name" for local sessions; for remote ones the ssh config id is
   /// added so two hosts that each have a session named the same don't
   /// collide (a List row identity must be globally unique).

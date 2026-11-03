@@ -119,7 +119,7 @@ struct LocalSectionView: View {
         isRenaming: Binding(
           get: { renamingScreenName == info.name },
           set: { if !$0, renamingScreenName == info.name { renamingScreenName = nil } }),
-        onRename: { model.screenMonitor.rename(info, to: $0) }
+        onRename: { model.renameScreenSession(info, to: $0) }
       )
       .kitContextMenu {
         Button("Rename…") { renamingScreenName = info.name }

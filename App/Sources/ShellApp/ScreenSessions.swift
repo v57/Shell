@@ -277,8 +277,9 @@ final class ScreenSessionsMonitor {
   
   /// Renames a session via `screen -S <name> -X sessionname <new>` or
   /// `tmux rename-session -t <name> <new>`. Sets `actionError` on
-  /// failure, then refreshes the list.
-  func rename(_ info: ScreenSessionInfo, to newName: String) {
+  /// failure, calls `onRenamed` on success, then refreshes the list.
+  func rename(_ info: ScreenSessionInfo, to newName: String,
+              onRenamed: @escaping (ScreenSessionInfo) -> Void = { _ in }) {
     guard featureEnabled else { return }
     let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else {
@@ -332,15 +333,14 @@ final class ScreenSessionsMonitor {
             title: "Could not rename persistent session",
             message: message
           )
+        } else {
+          onRenamed(info.renamed(to: trimmed))
         }
         self.refresh()
       }
     }
   }
   
-  // MARK: - tmux commands
-
-  /// Creates a detached tmux session running an interactive zsh. The
   // MARK: - Working directory
 
   /// The working directory of a local persistent session, nil when it can't be
@@ -384,6 +384,9 @@ final class ScreenSessionsMonitor {
     return line.map(String.init)
   }
 
+  // MARK: - tmux commands
+
+  /// Creates a detached tmux session running an interactive zsh. The
   /// session starts in its own cwd; the shell is exec'd so the tmux
   /// process tree holds one shell per window.
   private nonisolated static func runTmuxCreate(tmux: String, name: String, directory: String?) -> String? {
