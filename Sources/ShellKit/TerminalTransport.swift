@@ -526,11 +526,12 @@ public extension LocalPTYTransport {
     LocalPTYTransport(executable: loginShell, argv: [loginShellName, "-l", "-i"])
   }
 
-  /// Interactive zsh login shell that starts in `directory` — used by
-  /// ⌘T to open a new terminal tab in the current directory. The default
-  /// `.zsh` starts in the home directory.
-  static func zsh(in directory: String) -> LocalPTYTransport {
-    LocalPTYTransport(executable: loginShell, argv: [loginShellName, "-l", "-i"], workingDirectory: directory)
+  /// Interactive zsh login shell that starts in `directory` (⌘T's new tab in
+  /// the current directory; nil is the home directory) at `startSize`, the view's
+  /// real size when it's known: a shell started wider than the grid draws its
+  /// first prompt's "%" marker and padding over several rows.
+  static func zsh(in directory: String? = nil, startSize: TerminalGridSize?) -> LocalPTYTransport {
+    LocalPTYTransport(executable: loginShell, argv: [loginShellName, "-l", "-i"], workingDirectory: directory, startSize: startSize)
   }
 
   /// Runs `commands` in a zsh login shell and exits with their status (actions).

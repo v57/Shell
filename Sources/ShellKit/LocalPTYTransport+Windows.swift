@@ -275,8 +275,8 @@ public extension LocalPTYTransport {
     LocalPTYTransport(executable: loginShell, argv: [loginShellName, "-NoLogo"])
   }
 
-  /// The interactive shell starting in `directory` (⌘T's new tab in the current directory).
-  static func zsh(in directory: String) -> LocalPTYTransport {
+  /// The interactive shell starting in `directory` (⌘T's new tab in the current directory; nil is the home directory).
+  static func zsh(in directory: String? = nil, startSize: TerminalGridSize?) -> LocalPTYTransport {
     LocalPTYTransport(executable: loginShell, argv: [loginShellName, "-NoLogo"], workingDirectory: directory)
   }
 

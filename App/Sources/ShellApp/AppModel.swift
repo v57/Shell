@@ -810,7 +810,7 @@ final class AppModel {
     }
     // `directory` (⌘T) starts the shell there instead of in the home
     // directory; nil keeps the default home-dir launch.
-    let session = TerminalSession(session: directory.map { .zsh(in: $0) } ?? .zsh)
+    let session = TerminalSession(session: .zsh(in: directory, startSize: TerminalSession.lastLaidOutGridSize))
     sessionKinds[session.id] = .local
     registerCapture(for: session, archiveLocally: true)
     sessions.append(session)
