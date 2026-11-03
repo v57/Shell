@@ -1826,9 +1826,10 @@ final class AppModel {
   /// leaving the current page (expanding its row, picking one of its tables).
   @discardableResult
   func openOrFocusDatabaseConnection(_ connection: DatabaseConnection, selects: Bool = true) -> TerminalSession {
-    if let live = liveDatabaseSession(for: connection) {
-      if selects { selection = .session(live.id) }
-      return live
+    if let open = liveDatabaseSession(for: connection) {
+      databases.connection(for: connection.id).expanded.insert(LiveConnection.rootID)
+      if selects { selection = .session(open.id) }
+      return open
     }
     let session = TerminalSession(transport: DatabaseTransport())
     sessionKinds[session.id] = .database(connection)
