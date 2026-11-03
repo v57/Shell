@@ -49,6 +49,7 @@ struct ContentView: View {
   @WindowAppearsActive private var appearsActive
   /// The split view's columns, for the sidebar's own toggle on iPad.
   @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
+  @Environment(\.kitIdiom) private var idiom
 
   /// Whether anything animates right now: the Animations feature, motion, AND
   /// the window appearing active. Feeds the terminal and the detail transition
@@ -67,36 +68,72 @@ struct ContentView: View {
     )
   }
 
-  var body: some View {
+  /// The sidebar and the page of its selection: on iPhone one stack with the list
+  /// at its root, where a collapsed split view left every row's page unreachable;
+  /// a split view elsewhere.
+  @ViewBuilder private var navigation: some View {
     @Bindable var model = model
-    ZStack {
+    if idiom == .phone {
+      KitSidebarSplit(selection: openedPage, columnVisibility: $columnVisibility) {
+        SidebarView(columnVisibility: $columnVisibility)
+      } detail: { _ in
+        detailColumn
+      } empty: {
+        EmptyView()
+      }
+    } else {
       NavigationSplitView(columnVisibility: $columnVisibility) {
         SidebarView(columnVisibility: $columnVisibility)
           .kitSidebarColumn()
       } detail: {
-        // A STABLE root for the detail column: `NavigationSplitView` swaps a
-        // new root view in without animation, so switching between kinds of
-        // page (a terminal → a note) changes branches INSIDE this container,
-        // where the pages' `detailTransition` cross-fades them.
-        ZStack {
-          detailPane
-        }
-        // The kit's window ground under every page (and its empty state): the
-        // split view's own is black on iPhone and iPad in dark mode.
-        .background { Rectangle().fill(.kitWindow).ignoresSafeArea() }
-        // Switching pages cross-fades the outgoing page into the incoming
-        // one (each page carries `detailTransition`).
-        .animation(animates ? .kit : nil, value: model.selection)
-        // The kit's toolbar, on the column rather than on each page, so it
-        // stays put while the pages cross-fade under it: the page's title and
-        // its tools, compacting to icons and then into "…" as room runs out.
-        // Database's pages bring their own (the table's title, its filters,
-        // modes and inspector), so the column's steps aside for them.
-        .kitToolbar(pageTitle.title, isPresented: !showsDatabase, title: { pageTitle.view }, tools: { pageTools })
-        // The Data menu acts on the database the detail pane shows.
-        .focusedSceneValue(\.databaseWindow, showsDatabase ? model.databaseWindow : nil)
-        .kitSidebarToggle(columnVisibility: $columnVisibility)
+        detailColumn
       }
+    }
+  }
+
+  /// The selection for the phone's stack, without the saved rows: one becomes the
+  /// page of what it opened within the same update, and pushing twice in one
+  /// frame leaves the stack without a page.
+  private var openedPage: Binding<AppModel.Selection?> {
+    Binding(
+      get: {
+        switch model.selection {
+        case .ssh, .screen, .web, .database: nil
+        default: model.selection
+        }
+      },
+      set: { model.selection = $0 })
+  }
+
+  private var detailColumn: some View {
+    // A STABLE root for the detail column: `NavigationSplitView` swaps a
+    // new root view in without animation, so switching between kinds of
+    // page (a terminal → a note) changes branches INSIDE this container,
+    // where the pages' `detailTransition` cross-fades them.
+    ZStack {
+      detailPane
+    }
+    // The kit's window ground under every page (and its empty state): the
+    // split view's own is black on iPhone and iPad in dark mode.
+    .background { Rectangle().fill(.kitWindow).ignoresSafeArea() }
+    // Switching pages cross-fades the outgoing page into the incoming
+    // one (each page carries `detailTransition`).
+    .animation(animates ? .kit : nil, value: model.selection)
+    // The kit's toolbar, on the column rather than on each page, so it
+    // stays put while the pages cross-fade under it: the page's title and
+    // its tools, compacting to icons and then into "…" as room runs out.
+    // Database's pages bring their own (the table's title, its filters,
+    // modes and inspector), so the column's steps aside for them.
+    .kitToolbar(pageTitle.title, isPresented: !showsDatabase, title: { pageTitle.view }, tools: { pageTools })
+    // The Data menu acts on the database the detail pane shows.
+    .focusedSceneValue(\.databaseWindow, showsDatabase ? model.databaseWindow : nil)
+    .kitSidebarToggle(columnVisibility: $columnVisibility)
+  }
+
+  var body: some View {
+    @Bindable var model = model
+    ZStack {
+      navigation
       .kitSheet(isPresented: $model.showingNewConnection) {
         NewConnectionView()
       }
@@ -307,9 +344,13 @@ struct ContentView: View {
   private var databaseDetail: some View {
     Group {
       #if os(iOS)
-      // Database's own stack: on iPhone an item pushes its screen (a split
-      // view's detail column has none).
-      NavigationStack { DetailView(window: model.databaseWindow) }
+      // Database's own stack on iPad: an item pushes its screen (a split view's
+      // detail column has none). The iPhone's page is on a stack already.
+      if idiom == .phone {
+        DetailView(window: model.databaseWindow)
+      } else {
+        NavigationStack { DetailView(window: model.databaseWindow) }
+      }
       #else
       DetailView(window: model.databaseWindow)
       #endif
