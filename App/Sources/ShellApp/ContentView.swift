@@ -736,6 +736,12 @@ struct ContentView: View {
       // clears it — no remote cwd to show.
       session?.refreshRemoteDirectory()
       path = session?.remoteCurrentDirectory?.path
+    #if os(macOS) || os(Windows) || os(Linux)
+    case .screen(let info)? where !info.isRemote:
+      // The terminal's child is only the attach client: ask the backend.
+      session?.refreshPersistentDirectory { ScreenSessionsMonitor.workingDirectory(of: info) }
+      path = session?.remoteCurrentDirectory?.path
+    #endif
     default:
       path = nil
     }
@@ -768,6 +774,8 @@ struct ContentView: View {
           model.refreshSmartActions(for: url)
         #endif
       }
+    } else if case .screen? = kind {
+      localDirectoryText = (path as NSString).abbreviatingWithTildeInPath
     } else {
       localDirectoryText = path
     }

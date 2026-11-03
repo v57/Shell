@@ -96,8 +96,12 @@ public final class TerminalSession: Identifiable {
   /// Cheap to call (one syscall), so a view can poll it on a timer to
   /// keep a subtitle or status line in sync.
   public var currentDirectory: URL? {
+    transport.childProcessID.flatMap(Self.currentDirectory(ofProcess:))
+  }
+
+  /// The current working directory of a local process, nil when it can't be read.
+  public nonisolated static func currentDirectory(ofProcess pid: Int32) -> URL? {
     #if os(macOS)
-    guard let pid = transport.childProcessID else { return nil }
     var info = proc_vnodepathinfo()
     let size = MemoryLayout<proc_vnodepathinfo>.size
     let status = proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &info, Int32(size))
@@ -109,8 +113,7 @@ public final class TerminalSession: Identifiable {
     }
     return path.map { URL(fileURLWithPath: $0) }
     #elseif os(Linux)
-    guard let pid = transport.childProcessID,
-          let path = try? FileManager.default.destinationOfSymbolicLink(atPath: "/proc/\(pid)/cwd")
+    guard let path = try? FileManager.default.destinationOfSymbolicLink(atPath: "/proc/\(pid)/cwd")
     else { return nil }
     return URL(fileURLWithPath: path)
     #else
@@ -163,6 +166,23 @@ public final class TerminalSession: Identifiable {
       // `Task { @MainActor in self?... }` would otherwise trip.
       MainActor.assumeIsolated {
         self?.remoteCurrentDirectory = URL(fileURLWithPath: line)
+      }
+    }
+  }
+
+  /// Publishes a persistent session's directory to `remoteCurrentDirectory`.
+  /// Its local child is only the attach client, so `resolve` asks the backend
+  /// (it runs a process, so it runs off the main thread, as throttled as `pwd`).
+  public func refreshPersistentDirectory(using resolve: @escaping @Sendable () -> String?) {
+    if let last = lastRemoteCWDReadAt,
+       Date().timeIntervalSince(last) < Self.remoteCWDThrottle { return }
+    lastRemoteCWDReadAt = Date()
+    DispatchQueue.global(qos: .utility).async { [weak self] in
+      guard let path = resolve(), path.hasPrefix("/") else { return }
+      DispatchQueue.main.async {
+        MainActor.assumeIsolated {
+          self?.remoteCurrentDirectory = URL(fileURLWithPath: path)
+        }
       }
     }
   }

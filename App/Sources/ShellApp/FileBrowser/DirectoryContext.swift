@@ -201,6 +201,17 @@ final class DirectoryContext: Identifiable {
     switch kind {
     case .local:
       return session.currentDirectory?.path
+    #if os(macOS) || os(Windows) || os(Linux)
+    case .screen(let info) where !info.isRemote:
+      // The window's tick keeps this up to date (`refreshPersistentDirectory`);
+      // until the first answer, or for a session that can't tell (a protected
+      // one), ask once and open at home rather than the app's own cwd (`/`).
+      if let published = session.remoteCurrentDirectory?.path { return published }
+      let current = AppModel.shared.kind(of: session)
+      guard case .screen(let latest) = current else { return nil }
+      let resolved = await Task.detached { ScreenSessionsMonitor.workingDirectory(of: latest) }.value
+      return resolved ?? (path.isEmpty ? NSHomeDirectory() : nil)
+    #endif
     default:
       // Prefer the live cwd already published by the session's transport
       // (follows the terminal's `cd` on the host); otherwise ask the remote

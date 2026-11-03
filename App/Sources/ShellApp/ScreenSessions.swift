@@ -341,6 +341,49 @@ final class ScreenSessionsMonitor {
   // MARK: - tmux commands
 
   /// Creates a detached tmux session running an interactive zsh. The
+  // MARK: - Working directory
+
+  /// The working directory of a local persistent session, nil when it can't be
+  /// read: a protected `session` needs its password, which only the terminal
+  /// attached to it can ask for. Runs a process, so never on the main thread.
+  nonisolated static func workingDirectory(of info: ScreenSessionInfo) -> String? {
+    switch info.kind {
+    case .session:
+      guard !info.isProtected, let session = sessionPath() else { return nil }
+      return outputLine(of: session, ["-d", info.name])
+    case .tmux:
+      guard let tmux = tmuxPath() else { return nil }
+      return outputLine(of: tmux, ["display-message", "-p", "-t", info.name, "#{pane_current_path}"])
+    case .screen:
+      // screen has no command for it: read its window's shell, a child of the
+      // pid `screen -ls` reports.
+      guard let child = outputLine(of: "/usr/bin/pgrep", ["-P", String(info.pid)]).flatMap({ Int32($0) })
+      else { return nil }
+      return TerminalSession.currentDirectory(ofProcess: child)?.path
+    }
+  }
+
+  /// The first line a command prints, nil when it fails or prints nothing.
+  private nonisolated static func outputLine(of executable: String, _ arguments: [String]) -> String? {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: executable)
+    process.arguments = arguments
+    let out = Pipe()
+    process.standardOutput = out
+    process.standardError = FileHandle.nullDevice
+    process.standardInput = FileHandle.nullDevice
+    do {
+      try process.run()
+    } catch {
+      return nil
+    }
+    let data = out.fileHandleForReading.readDataToEndOfFile()
+    process.waitUntilExit()
+    guard process.terminationStatus == 0 else { return nil }
+    let line = String(decoding: data, as: UTF8.self).split(whereSeparator: \.isNewline).first
+    return line.map(String.init)
+  }
+
   /// session starts in its own cwd; the shell is exec'd so the tmux
   /// process tree holds one shell per window.
   private nonisolated static func runTmuxCreate(tmux: String, name: String, directory: String?) -> String? {
