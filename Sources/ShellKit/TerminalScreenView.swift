@@ -134,7 +134,7 @@ public struct TerminalScreenView: View {
   private var metrics: TerminalFontMetrics { Self.metrics(ofSize: fontSize) }
 
   private static var metricsBySize: [CGFloat: TerminalFontMetrics] = [:]
-  static func metrics(ofSize size: CGFloat) -> TerminalFontMetrics {
+  public static func metrics(ofSize size: CGFloat) -> TerminalFontMetrics {
     if let cached = metricsBySize[size] { return cached }
     let metrics = fontMetrics(for: monoFont(ofSize: size))
     metricsBySize[size] = metrics
@@ -198,6 +198,7 @@ public struct TerminalScreenView: View {
   /// app via the environment) and the EFFECTIVE color scheme (after any
   /// preferredColorScheme override) that contrast decisions key on.
   @Environment(\.terminalBackgroundsDisabled) private var backgroundsDisabled
+  @Environment(\.isEnabled) private var isEnabled
   @Environment(\.colorScheme) private var colorScheme
   /// Whether the cursor glides between cells (an overlay that animates to the
   /// cursor's cell) instead of being painted into the cell's text run.
@@ -242,7 +243,8 @@ public struct TerminalScreenView: View {
             #if os(iOS)
             // Raise the on-screen keyboard as soon as the live grid is on screen
             // (session open) — independent of any SwiftUI focus involvement.
-            showKeyboard = true
+            // A disabled terminal is a preview.
+            if isEnabled { showKeyboard = true }
             #endif
             resizeIfNeeded(to: geo.size, safeArea: geo.safeAreaInsets)
           }
