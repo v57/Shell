@@ -59,6 +59,24 @@ public struct ScreenSessionInfo: Identifiable, Hashable {
 
   public var isRemote: Bool { remoteOrigin != nil }
 
+  /// A shell command that prints this session's working directory on its host.
+  /// screen has no command for it: it reads the cwd of its window's shell, the
+  /// deepest descendant of the pid `screen -ls` reports (on a Mac a `login`
+  /// sits between them), through `/proc` on Linux and `lsof` on a Mac.
+  public var directoryCommand: String {
+    let quoted = "'" + name.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    switch kind {
+    case .tmux:
+      return "tmux display-message -p -t \(quoted) '#{pane_current_path}'"
+    case .session:
+      return "session -d \(quoted)"
+    case .screen:
+      return "p=\(pid); while c=$(pgrep -P \"$p\" | head -n 1); [ -n \"$c\" ]; do p=$c; done; "
+        + "readlink \"/proc/$p/cwd\" 2>/dev/null || "
+        + "lsof -a -p \"$p\" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p'"
+    }
+  }
+
   /// This session under `newName`: screen's `name` keeps its "pid." prefix,
   /// tmux and `session` names are the name itself.
   public func renamed(to newName: String) -> ScreenSessionInfo {

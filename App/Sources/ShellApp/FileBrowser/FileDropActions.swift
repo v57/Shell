@@ -199,8 +199,10 @@ extension AppModel {
   /// that host.
   private func canReach(_ files: [ShellFile], from session: TerminalSession) -> Bool {
     switch kind(of: session) {
-    case .local, .screen:
+    case .local:
       return files.allSatisfy { $0.remote == nil }
+    case .screen:
+      return files.allSatisfy { $0.remote?.id == kind(of: session).sshConfig?.id }
     case .action(let spec):
       return files.allSatisfy { $0.remote?.id == spec.config?.id }
     case .ssh(let config):

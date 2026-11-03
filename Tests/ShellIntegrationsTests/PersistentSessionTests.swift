@@ -13,6 +13,15 @@ import Testing
 struct PersistentSessionTests {
   // MARK: - tmux `ls -F` parsing
 
+  @Test func directoryCommandAsksTheBackend() {
+    let tmux = ScreenSessionInfo(name: "it's", pid: 1, state: "1", kind: .tmux)
+    #expect(tmux.directoryCommand == "tmux display-message -p -t 'it'\\''s' '#{pane_current_path}'")
+    let session = ScreenSessionInfo(name: "work", pid: 1, state: "1", kind: .session)
+    #expect(session.directoryCommand == "session -d 'work'")
+    let screen = ScreenSessionInfo(name: "26040.old", pid: 26040, state: "Attached", kind: .screen)
+    #expect(screen.directoryCommand.hasPrefix("p=26040; "))
+  }
+
   @Test func renamedKeepsTheOriginAndScreensPidPrefix() {
     let origin = ScreenRemoteOrigin(sshConfigID: UUID(), displayName: "host")
     let screen = ScreenSessionInfo(name: "26040.old", pid: 26040, state: "Attached", kind: .screen, remoteOrigin: origin)

@@ -70,8 +70,10 @@ enum ConnectionKind: Hashable {
   /// to thread the host into a drag payload so a remote file can be downloaded.
   var sshConfig: SSHConfig? {
     switch self {
-    case .local, .screen, .web, .database:
+    case .local, .web, .database:
       return nil
+    case .screen(let info):
+      return AppModel.shared.connections.first { $0.id == info.remoteOrigin?.sshConfigID }
     case .ssh(let config):
       return config
     case .action(let spec):

@@ -32,13 +32,15 @@ final class DirectoryContext: Identifiable {
 
   /// Whether the session's directory lives on this host, so it can be listed
   /// with `FileManager`'s fast path instead of spawning a shell `ls`. This
-  /// mirrors the runner selection in `runner(for:)`: local and screen sessions
-  /// (and config-less action sessions) are local; SSH and remote-action sessions
-  /// are remote.
+  /// mirrors the runner selection in `runner(for:)`: local and local screen
+  /// sessions (and config-less action sessions) are local; SSH, remote screen
+  /// and remote-action sessions are remote.
   var isLocal: Bool {
     switch kind {
-    case .local, .screen:
+    case .local:
       return true
+    case .screen(let info):
+      return !info.isRemote
     case .action(let spec):
       return spec.config == nil
     case .ssh, .web, .database:
@@ -86,11 +88,14 @@ final class DirectoryContext: Identifiable {
 
   /// The `FileCommandExecutor` appropriate for a connection kind. Local
   /// sessions run through `LocalProcessCommandRunner`; remote sessions run
-  /// through `SSHCommandRunner` built from the kind's SSH config (action
-  /// sessions carry their own `SSHConfig`, screen sessions run locally).
+  /// through `SSHCommandRunner` built from the kind's SSH config (action and
+  /// remote screen sessions name theirs, local screen sessions run locally).
   static func runner(for kind: ConnectionKind) -> any FileCommandExecutor {
     switch kind {
-    case .local, .screen:
+    case .local:
+      return LocalProcessCommandRunner()
+    case .screen:
+      if let config = kind.sshConfig { return SSHCommandRunner(config: config) }
       return LocalProcessCommandRunner()
     case .ssh(let config):
       return SSHCommandRunner(config: config)

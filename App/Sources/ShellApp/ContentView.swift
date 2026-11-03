@@ -737,9 +737,14 @@ struct ContentView: View {
       session?.refreshRemoteDirectory()
       path = session?.remoteCurrentDirectory?.path
     #if os(macOS) || os(Windows) || os(Linux)
-    case .screen(let info)? where !info.isRemote:
-      // The terminal's child is only the attach client: ask the backend.
-      session?.refreshPersistentDirectory { ScreenSessionsMonitor.workingDirectory(of: info) }
+    case .screen(let info)?:
+      // The terminal's child is only the attach client: ask the backend, over
+      // the session's own connection when it lives on another host.
+      if info.isRemote {
+        session?.refreshRemoteDirectory(command: info.directoryCommand)
+      } else {
+        session?.refreshPersistentDirectory { ScreenSessionsMonitor.workingDirectory(of: info) }
+      }
       path = session?.remoteCurrentDirectory?.path
     #endif
     default:
@@ -774,7 +779,7 @@ struct ContentView: View {
           model.refreshSmartActions(for: url)
         #endif
       }
-    } else if case .screen? = kind {
+    } else if case .screen(let info)? = kind, !info.isRemote {
       localDirectoryText = (path as NSString).abbreviatingWithTildeInPath
     } else {
       localDirectoryText = path

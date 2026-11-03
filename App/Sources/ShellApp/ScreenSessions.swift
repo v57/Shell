@@ -355,11 +355,7 @@ final class ScreenSessionsMonitor {
       guard let tmux = tmuxPath() else { return nil }
       return outputLine(of: tmux, ["display-message", "-p", "-t", info.name, "#{pane_current_path}"])
     case .screen:
-      // screen has no command for it: read its window's shell, a child of the
-      // pid `screen -ls` reports.
-      guard let child = outputLine(of: "/usr/bin/pgrep", ["-P", String(info.pid)]).flatMap({ Int32($0) })
-      else { return nil }
-      return TerminalSession.currentDirectory(ofProcess: child)?.path
+      return outputLine(of: "/bin/sh", ["-c", info.directoryCommand])
     }
   }
 

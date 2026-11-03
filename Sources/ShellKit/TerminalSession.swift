@@ -96,12 +96,8 @@ public final class TerminalSession: Identifiable {
   /// Cheap to call (one syscall), so a view can poll it on a timer to
   /// keep a subtitle or status line in sync.
   public var currentDirectory: URL? {
-    transport.childProcessID.flatMap(Self.currentDirectory(ofProcess:))
-  }
-
-  /// The current working directory of a local process, nil when it can't be read.
-  public nonisolated static func currentDirectory(ofProcess pid: Int32) -> URL? {
     #if os(macOS)
+    guard let pid = transport.childProcessID else { return nil }
     var info = proc_vnodepathinfo()
     let size = MemoryLayout<proc_vnodepathinfo>.size
     let status = proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &info, Int32(size))
@@ -113,7 +109,8 @@ public final class TerminalSession: Identifiable {
     }
     return path.map { URL(fileURLWithPath: $0) }
     #elseif os(Linux)
-    guard let path = try? FileManager.default.destinationOfSymbolicLink(atPath: "/proc/\(pid)/cwd")
+    guard let pid = transport.childProcessID,
+          let path = try? FileManager.default.destinationOfSymbolicLink(atPath: "/proc/\(pid)/cwd")
     else { return nil }
     return URL(fileURLWithPath: path)
     #else
@@ -144,7 +141,7 @@ public final class TerminalSession: Identifiable {
   /// Re-reads the remote shell's cwd via a throttled `pwd` on the live
   /// transport and publishes it to `remoteCurrentDirectory`. No-op (and clears
   /// the value) for non-SSH sessions and while not connected.
-  public func refreshRemoteDirectory() {
+  public func refreshRemoteDirectory(command: String = "pwd") {
     guard case .connected = connectionState, let ssh = sshTransport else {
       remoteCurrentDirectory = nil
       return
@@ -152,7 +149,7 @@ public final class TerminalSession: Identifiable {
     if let last = lastRemoteCWDReadAt,
        Date().timeIntervalSince(last) < Self.remoteCWDThrottle { return }
     lastRemoteCWDReadAt = Date()
-    ssh.runCommand("pwd") { [weak self] result in
+    ssh.runCommand(command) { [weak self] result in
       guard case .success(let remote) = result, remote.exitStatus == 0 else { return }
       // `pwd` on a remote shell returns an absolute path; ignore anything else
       // (e.g. a bare "~" or an empty reply) so we never publish a bogus URL.
