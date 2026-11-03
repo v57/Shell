@@ -176,6 +176,11 @@ public struct TerminalScreenView: View {
   @State private var showKeyboard = false
   /// First visible logical line of the scroll view (nil = top).
   @State private var anchorLine: Int?
+  /// Whether the scroll view's end is in view, within a line. A scroll by hand
+  /// that reaches the bottom leaves `anchorLine` one short: the grid's top
+  /// padding leaves a sliver of the line above showing, and that's the
+  /// top-most line the scroll position reports.
+  @State private var scrolledToEnd = false
   @State private var lastGridSize = TerminalGridSize.zero
 
   /// Theme plumbing: whether character backgrounds are suppressed (set by the
@@ -274,7 +279,7 @@ public struct TerminalScreenView: View {
       // so measuring against the new snapshot would read every scroll as
       // "scrolled up" and snap.
       let shownLines = reveal.shown?.totalLines ?? session.snapshot.totalLines
-      let pinned = (anchorLine ?? 0) + session.snapshot.rows >= shownLines
+      let pinned = isPinned(toBottomOf: shownLines)
       reveal.update(to: session.snapshot, animate: animationsEnabled && pinned)
     }
     .onChange(of: animationsEnabled) { _, _ in reveal.snap(to: session.snapshot) }
@@ -303,7 +308,7 @@ public struct TerminalScreenView: View {
   ) -> some View {
     let rows = snapshot.rows
     let totalLines = snapshot.totalLines
-    let atBottom = (anchorLine ?? 0) + rows >= totalLines
+    let atBottom = isPinned(toBottomOf: totalLines)
 
     return ScrollView {
       LazyVStack(alignment: .leading, spacing: 0) {
@@ -343,7 +348,7 @@ public struct TerminalScreenView: View {
     }
     // Scrolling behavior (anchor tracking, content-offset reporting,
     // bottom-tailing) lives in ScrollModifier.
-    .modifier(ScrollModifier(session: session, anchorLine: $anchorLine, scrollOffset: $scrollOffset, topInset: topInset, containerHeight: containerHeight))
+    .modifier(ScrollModifier(session: session, anchorLine: $anchorLine, scrollOffset: $scrollOffset, scrolledToEnd: $scrolledToEnd, topInset: topInset, containerHeight: containerHeight))
   }
 
   /// The viewport height the grid's whole rows leave unused below the last one.
@@ -419,8 +424,13 @@ public struct TerminalScreenView: View {
   /// Reads `anchorLine` (@State) and `snapshot` (@Observable) so the
   /// button's visibility tracks the scroll position live.
   private var isAtBottom: Bool {
-    let snapshot = session.snapshot
-    return (anchorLine ?? 0) + snapshot.rows >= snapshot.totalLines
+    isPinned(toBottomOf: session.snapshot.totalLines)
+  }
+
+  /// Whether the viewport is at the bottom of a grid of `totalLines`: the
+  /// scroll view has reached its end, or the anchor was set to the last page.
+  private func isPinned(toBottomOf totalLines: Int) -> Bool {
+    scrolledToEnd || (anchorLine ?? 0) + session.snapshot.rows >= totalLines
   }
 
   /// The floating bottom-trailing button: `chevron.down.circle.fill` at
@@ -830,6 +840,7 @@ extension TerminalScreenView {
     @Bindable var session: TerminalSession
     @Binding var anchorLine: Int?
     @Binding var scrollOffset: CGFloat
+    @Binding var scrolledToEnd: Bool
     let topInset: CGFloat
     /// The scroll view's height (the grid's safe-area height), for the
     /// macOS 14 / iOS 17 content-offset fallback.
@@ -857,6 +868,7 @@ extension TerminalScreenView {
           session: session,
           anchorLine: anchorLine,
           scrollOffset: $scrollOffset,
+          scrolledToEnd: $scrolledToEnd,
           topInset: topInset,
           containerHeight: containerHeight
         ))
@@ -866,17 +878,20 @@ extension TerminalScreenView {
           // appended the stale anchor sits exactly `rows` above the new bottom,
           // so `anchor + rows == oldTotal < newTotal` and the guard would fail
           // on the very first new line, stopping tailing forever.
-          Self.followIfAtBottom(wasAtBottomOf: oldTotal, session: session, anchorLine: $anchorLine)
+          Self.followIfAtBottom(wasAtBottomOf: oldTotal, scrolledToEnd: scrolledToEnd, session: session, anchorLine: $anchorLine)
         }
         .onChange(of: session.snapshot.rows) { _, _ in
           // Resize reflows the grid but keeps scrollback, so totalLines changed
           // through rows alone; the current values are the correct baseline (at
           // the bottom this is an exact equality — the anchor does not move).
-          Self.followIfAtBottom(wasAtBottomOf: session.snapshot.totalLines, session: session, anchorLine: $anchorLine)
+          Self.followIfAtBottom(wasAtBottomOf: session.snapshot.totalLines, scrolledToEnd: scrolledToEnd, session: session, anchorLine: $anchorLine)
         }
         .onChange(of: anchorLine) { _, newAnchor in
           // Keep session.scrollbackOffset (used by copy/status) in sync.
-          session.scrollbackOffset = max(0, session.snapshot.maxOffset - (newAnchor ?? 0))
+          session.scrollbackOffset = scrolledToEnd ? 0 : max(0, session.snapshot.maxOffset - (newAnchor ?? 0))
+        }
+        .onChange(of: scrolledToEnd) { _, atEnd in
+          if atEnd { session.scrollbackOffset = 0 }
         }
         .onAppear {
           Self.snapToBottom(session: session, anchorLine: $anchorLine)
@@ -893,15 +908,26 @@ extension TerminalScreenView {
       let session: TerminalSession
       let anchorLine: Int?
       @Binding var scrollOffset: CGFloat
+      @Binding var scrolledToEnd: Bool
       let topInset: CGFloat
       let containerHeight: CGFloat
 
+      /// What the scroll view reports: its offset, and how far its end is below the viewport.
+      struct Position: Equatable {
+        let offset: CGFloat
+        let toEnd: CGFloat
+      }
+
       func body(content: Content) -> some View {
         if #available(macOS 15.0, iOS 18.0, *) {
-          content.onScrollGeometryChange(for: CGFloat.self) { geometry in
-            geometry.contentOffset.y
-          } action: { _, newOffset in
-            scrollOffset = -newOffset - topInset
+          content.onScrollGeometryChange(for: Position.self) { geometry in
+            Position(
+              offset: geometry.contentOffset.y,
+              toEnd: geometry.contentSize.height + geometry.contentInsets.bottom
+                - geometry.contentOffset.y - geometry.containerSize.height)
+          } action: { _, position in
+            scrollOffset = -position.offset - topInset
+            scrolledToEnd = position.toEnd < TerminalScreenView.metrics.lineHeight
           }
         } else {
           content
@@ -941,10 +967,10 @@ extension TerminalScreenView {
     /// was computed against; judging against the new total instead fails the
     /// guard the moment a line is added while at the bottom (see the
     /// totalLines onChange above).
-    static func followIfAtBottom(wasAtBottomOf previousTotalLines: Int, session: TerminalSession, anchorLine: Binding<Int?>) {
+    static func followIfAtBottom(wasAtBottomOf previousTotalLines: Int, scrolledToEnd: Bool, session: TerminalSession, anchorLine: Binding<Int?>) {
       let snapshot = session.snapshot
       let anchor = anchorLine.wrappedValue ?? 0
-      guard anchor + snapshot.rows >= previousTotalLines else { return }
+      guard scrolledToEnd || anchor + snapshot.rows >= previousTotalLines else { return }
       anchorLine.wrappedValue = max(0, snapshot.totalLines - snapshot.rows)
     }
 
