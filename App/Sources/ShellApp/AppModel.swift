@@ -204,9 +204,6 @@ final class AppModel {
     didSet { UserDefaults.standard.set(alwaysPersistentSessions, forKey: Self.alwaysPersistentSessionsKey) }
   }
 
-  /// The Themes sheet (Shell menu: Themes… ⌘⇧H).
-  var showingThemes = false
-
   /// Ids of sessions and notes currently presented in their own detached
   /// window/scene (macOS `WindowGroup` id "detach", or a separate iPad scene).
   /// Mutated by detach/reattach and published via @Observable, so
@@ -289,6 +286,12 @@ final class AppModel {
   private struct LocalHistoryDraft {
     var commands: [SubmittedCommand] = []
     var capture: TerminalHistoryCapture
+  }
+
+  /// Opens Settings › Appearance (Shell menu: Appearance… ⌘⇧H).
+  func showAppearanceSettings() {
+    UserDefaults.standard.set(SettingsView.appearancePane, forKey: SettingsView.paneKey)
+    showingSettings = true
   }
 
   /// Opens the create-action sheet (fresh form).

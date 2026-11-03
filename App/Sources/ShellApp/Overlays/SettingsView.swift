@@ -11,6 +11,7 @@ import VaultUI
 ///
 /// Panes:
 /// - **Sessions** (desktop) — how new terminals start (`SessionsSettings`).
+/// - **Appearance** — the color scheme and the terminal's background colors (`AppearanceSettings`).
 /// - **Features** — the feature flags (`FeatureSelectionView`).
 /// - **Actions** — the shell actions, reachable here on iOS (macOS reaches the same actions through the Shell menu).
 /// - **Accounts** — the v57 accounts, the same pane in every app (`VaultAccountsSettings`; the account picker's
@@ -22,6 +23,7 @@ struct SettingsView: View {
   /// The pane shown, kept for the next time Settings opens.
   static let paneKey = "settings.pane"
   static let accountsPane = "accounts"
+  static let appearancePane = "appearance"
 
   @AppStorage(SettingsView.paneKey) private var pane = ""
   @Environment(AppModel.self) private var model
@@ -64,6 +66,9 @@ struct SettingsView: View {
       #if os(macOS) || os(Windows) || os(Linux)
       SettingsPane("Sessions", systemImage: "terminal", hue: .gray, id: "sessions") { SessionsSettings() }
       #endif
+      SettingsPane("Appearance", systemImage: "paintpalette", hue: .pink, id: Self.appearancePane) {
+        AppearanceSettings()
+      }
       SettingsPane(
         "Features", systemImage: "square.grid.2x2", hue: .blue,
         value: "\(FeatureID.available.filter(flags.isEnabled).count) on", id: "features"
@@ -250,8 +255,8 @@ private struct ActionsSettings: View {
                     disabled: model.selectedSession == nil) {
       model.showingCommandInsert = true
     })
-    rows.append(Row(title: "Themes", systemImage: "paintpalette", hue: .pink, button: "Show") {
-      model.showingThemes = true
+    rows.append(Row(title: "Appearance", systemImage: "paintpalette", hue: .pink, button: "Show") {
+      model.showAppearanceSettings()
     })
     if flags.isEnabled(.files) {
       rows.append(Row(title: "Files Panel", systemImage: "sidebar.left", hue: .teal,

@@ -150,9 +150,6 @@ struct ContentView: View {
       .kitSheet(isPresented: $model.showingCommandInsert) {
         CommandInsertView()
       }
-      .kitSheet(isPresented: $model.showingThemes) {
-        ThemesView()
-      }
 #if os(macOS) || os(Windows) || os(Linux)
       .kitSheet(item: $model.notarizationSetup) { request in
         NotarizationSheet(request: request)

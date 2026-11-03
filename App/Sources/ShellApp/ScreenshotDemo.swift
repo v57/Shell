@@ -13,7 +13,8 @@ import ShellKit
 ///   --run <command>           typed into the first terminal
 ///   --note <name>             shows a demo note
 ///   --actions / --settings    opens that overlay
-///   --themes / --insert / --new-action  opens the Themes, Insert into Terminal or New Action sheet
+///   --appearance              opens Settings › Appearance
+///   --insert / --new-action  opens the Insert into Terminal or New Action sheet
 ///   --files                   shows the Files panel for the terminal
 ///   --new-database            opens the New Database Connection sheet
 ///   --new-ssh-connection      opens the New Connection (SSH) sheet (not `--new-connection`: Database's
@@ -155,7 +156,6 @@ enum ScreenshotDemo {
     model.showingNewAction = false
     model.editingAction = nil
     model.showingSettings = false
-    model.showingThemes = false
     model.showingCommandInsert = false
     model.showingNewConnection = false
     model.databaseWindow.showsNewConnection = false
@@ -180,7 +180,7 @@ enum ScreenshotDemo {
     }
     if flag("--actions", in: arguments) { model.showingActions = true }
     if flag("--settings", in: arguments) { model.showingSettings = true }
-    if flag("--themes", in: arguments) { model.showingThemes = true }
+    if flag("--appearance", in: arguments) { model.showAppearanceSettings() }
     if flag("--insert", in: arguments) { model.showingCommandInsert = true }
     if flag("--new-action", in: arguments) { model.createAction() }
     model.directoryBrowser.visible = flag("--files", in: arguments)

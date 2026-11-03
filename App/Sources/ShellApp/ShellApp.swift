@@ -333,12 +333,12 @@ struct ShellCommands: Commands {
 
       Divider()
 
-      // ⌘⇧H opens the Themes sheet. Menu key equivalents dispatch before
+      // ⌘⇧H opens Settings › Appearance. Menu key equivalents dispatch before
       // terminal keyDown, so it works while a terminal has focus (and ⌘⇧H
-      // doesn't collide with Hide/Hide Others, which are ⌘H/⌥⌘H). Themes
+      // doesn't collide with Hide/Hide Others, which are ⌘H/⌥⌘H). Appearance
       // is always enabled (no feature toggle) — the menu item is unconditional.
-      Button("Themes…") {
-        AppModel.shared.showingThemes = true
+      Button("Appearance…") {
+        AppModel.shared.showAppearanceSettings()
       }
       .keyboardShortcut("h", modifiers: [.command, .shift])
 
