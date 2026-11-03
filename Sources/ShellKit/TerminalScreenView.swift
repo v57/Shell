@@ -1395,16 +1395,16 @@ private final class TerminalKeyBarModel {
     return latched
   }
 
+  /// A key's height, and the space between the bar's rows and around them.
+  static let keyHeight: CGFloat = 38
+  static let rowSpacing: CGFloat = 6
+
   /// The accessory view's content height for the current expansion state
   /// (matches `.frame(minHeight:maxHeight:)` on the bar so the hosted view
   /// grows/shrinks with the reveal rows).
   var contentHeight: CGFloat {
-    let base: CGFloat = 30
-    let row: CGFloat = 30
-    let spacing: CGFloat = 6
-    let padding: CGFloat = 6
-    let shownRows = (showArrows ? 1 : 0) + (showFunction ? 1 : 0)
-    return padding + base + CGFloat(shownRows) * (row + spacing)
+    let rows = 1 + (showArrows ? 1 : 0) + (showFunction ? 1 : 0)
+    return CGFloat(rows) * (Self.keyHeight + 1 + Self.rowSpacing) + Self.rowSpacing
   }
 }
 
@@ -1426,108 +1426,139 @@ private struct TerminalKeyBar: View {
     (101, "F9"), (109, "F10"), (103, "F11"), (111, "F12"),
   ]
 
-  private static let arrowCodes: [(label: String, code: UInt16)] = [
-    ("\u{2191}", 126), ("\u{2193}", 125), ("\u{2190}", 123), ("\u{2192}", 124),
+  private static let arrowKeys: [(name: String, image: String, code: UInt16)] = [
+    ("Up", "arrow.up", 126), ("Down", "arrow.down", 125), ("Left", "arrow.left", 123), ("Right", "arrow.right", 124),
   ]
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 6) {
+    VStack(alignment: .leading, spacing: TerminalKeyBarModel.rowSpacing) {
       baseRow
       if model.showArrows { arrowRow }
       if model.showFunction { functionRow }
     }
-    .padding(.vertical, 3)
+    .padding(.horizontal, 8)
+    .padding(.top, TerminalKeyBarModel.rowSpacing)
     .frame(maxWidth: .infinity, minHeight: model.contentHeight, maxHeight: model.contentHeight, alignment: .top)
-    .background(TerminalPalette.windowBackground)
+    .background(.kitPanel)
     .onAppear { onHeightChange(model.contentHeight) }
     .onChange(of: model.showArrows) { _, _ in onHeightChange(model.contentHeight) }
     .onChange(of: model.showFunction) { _, _ in onHeightChange(model.contentHeight) }
   }
 
   private var baseRow: some View {
-    HStack(spacing: 4) {
-      modifierToggle("⌃", modifier: .control)
-      modifierToggle("⌥", modifier: .option)
-      modifierToggle("⇧", modifier: .shift)
-      barButton(width: 38) { keyLabel("⇥", 15, .semibold) } action: { sendKey("\t", nil, 48) }
-      barButton(width: 38) { keyLabel("esc", 12, .semibold) } action: { sendKey(nil, nil, 53) }
-      markerButton(width: 40, active: model.showArrows) {
-        Image(systemName: "arrow.up.and.down")
-          .font(.system(size: 14, weight: .medium))
-      } action: { model.showArrows.toggle() }
-      markerButton(width: 34, active: model.showFunction) {
-        keyLabel("F", 14, .semibold)
-      } action: { model.showFunction.toggle() }
+    HStack(spacing: TerminalKeyBarModel.rowSpacing) {
+      modifierToggle("⌃", "Control", modifier: .control)
+      modifierToggle("⌥", "Option", modifier: .option)
+      modifierToggle("⇧", "Shift", modifier: .shift)
+      Button("Tab", systemImage: "arrow.right.to.line") { sendKey("\t", nil, 48) }
+        .labelStyle(.iconOnly)
+        .buttonStyle(TerminalKeyStyle())
+      Button("esc") { sendKey(nil, nil, 53) }
+        .buttonStyle(TerminalKeyStyle())
+      Button("Arrows", systemImage: "arrow.up.and.down") { model.showArrows.toggle() }
+        .labelStyle(.iconOnly)
+        .buttonStyle(TerminalKeyStyle(isOn: model.showArrows))
+      Button("Function Keys") { model.showFunction.toggle() }
+        .labelStyle(.titleOnly)
+        .buttonStyle(TerminalKeyStyle(isOn: model.showFunction, title: "Fn"))
     }
   }
 
   private var arrowRow: some View {
-    HStack(spacing: 4) {
-      ForEach(Self.arrowCodes, id: \.code) { arrow in
-        barButton(width: 52) { keyLabel(arrow.label, 16, .medium) } action: {
-          sendKey(nil, nil, arrow.code)
-        }
+    HStack(spacing: TerminalKeyBarModel.rowSpacing) {
+      ForEach(Self.arrowKeys, id: \.code) { arrow in
+        Button(arrow.name, systemImage: arrow.image) { sendKey(nil, nil, arrow.code) }
+          .labelStyle(.iconOnly)
+          .buttonStyle(TerminalKeyStyle())
       }
     }
   }
 
   private var functionRow: some View {
     ScrollView(.horizontal, showsIndicators: false) {
-      HStack(spacing: 4) {
+      HStack(spacing: TerminalKeyBarModel.rowSpacing) {
         ForEach(Self.fKeyCodes, id: \.code) { fkey in
-          barButton(width: 44) { keyLabel(fkey.label, 12, .medium) } action: {
-            sendKey(nil, nil, fkey.code)
-          }
+          Button(fkey.label) { sendKey(nil, nil, fkey.code) }
+            .buttonStyle(TerminalKeyStyle())
+            .frame(width: 52)
         }
       }
     }
   }
 
-  // MARK: Buttons
-
-  private func modifierToggle(_ symbol: String, modifier: TerminalModifierFlags) -> some View {
-    let active = model.latchedModifiers.contains(modifier)
-    return barButton(width: 30, active: active) {
-      keyLabel(symbol, 15, .medium)
-    } action: {
-      model.toggle(modifier: modifier)
-    }
-  }
-
-  private func markerButton<Label: View>(
-    width: CGFloat,
-    active: Bool,
-    @ViewBuilder label: () -> Label,
-    action: @escaping () -> Void
-  ) -> some View {
-    barButton(width: width, active: active, label: label, action: action)
-  }
-
-  private func barButton<Label: View>(
-    width: CGFloat,
-    height: CGFloat = 30,
-    active: Bool = false,
-    @ViewBuilder label: () -> Label,
-    action: @escaping () -> Void
-  ) -> some View {
-    Button(action: action) {
-      label()
-        .foregroundStyle(active ? Color.white : Color(uiColor: .label))
-        .frame(width: width, height: height)
-        .background(active ? Color.accentColor : Color(uiColor: .secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-    }
-    .buttonStyle(.plain)
-  }
-
-  private func keyLabel(_ text: String, _ size: CGFloat, _ weight: Font.Weight) -> some View {
-    Text(text).font(.system(size: size, weight: weight))
+  private func modifierToggle(_ symbol: String, _ name: String, modifier: TerminalModifierFlags) -> some View {
+    Button(symbol) { model.toggle(modifier: modifier) }
+      .buttonStyle(TerminalKeyStyle(isOn: model.latchedModifiers.contains(modifier)))
+      .accessibilityLabel(name)
   }
 
   /// Inject a special key, carrying (and clearing) any latched modifiers.
   private func sendKey(_ characters: String?, _ charactersIgnoringModifiers: String?, _ keyCode: UInt16) {
     let flags = model.consumeLatched()
     inject(characters, charactersIgnoringModifiers, keyCode, flags)
+  }
+}
+
+/// The bar's accessory view. The keyboard sizes an accessory by its intrinsic height: changing the frame of an
+/// installed one leaves a row revealed later behind the keyboard.
+private final class TerminalKeyBarContainer: UIView {
+  var height: CGFloat = 0
+
+  override init(frame: CGRect) {
+    super.init(frame: frame)
+    autoresizingMask = .flexibleHeight
+  }
+
+  required init?(coder: NSCoder) {
+    super.init(coder: coder)
+    autoresizingMask = .flexibleHeight
+  }
+
+  /// With a hardware keyboard the bar sits at the window's bottom, above the home indicator.
+  override var intrinsicContentSize: CGSize {
+    CGSize(width: UIView.noIntrinsicMetric, height: height + safeAreaInsets.bottom)
+  }
+
+  override func safeAreaInsetsDidChange() {
+    super.safeAreaInsetsDidChange()
+    invalidateIntrinsicContentSize()
+  }
+}
+
+/// A key of the bar, drawn as the kit's `Keycap` (a raised cap with a bottom edge that a press sinks into) at a size a
+/// thumb can hit. `isOn`, for a latched modifier or an open row, fills it with the accent.
+private struct TerminalKeyStyle: ButtonStyle {
+  var isOn = false
+  /// Shown instead of the button's own title, which stays for accessibility.
+  var title: String?
+
+  func makeBody(configuration: Configuration) -> some View {
+    let shape = RoundedRectangle(cornerRadius: 8, style: .continuous)
+    let sink: CGFloat = configuration.isPressed ? 1 : 0
+    Group {
+      if let title {
+        Text(title).accessibilityHidden(true)
+      } else {
+        configuration.label
+      }
+    }
+    .font(.system(size: 15, weight: .medium))
+    .foregroundStyle(isOn ? AnyShapeStyle(.white) : AnyShapeStyle(.kitLabel))
+    .frame(maxWidth: .infinity)
+    .frame(height: TerminalKeyBarModel.keyHeight)
+    .background {
+      shape.fill(.kitBorder).offset(y: 1)
+      if isOn {
+        shape.fill(.kitAccent).offset(y: sink)
+      } else {
+        shape.fill(.kitRaised).offset(y: sink)
+        shape.strokeBorder(.kitBorder, lineWidth: 0.5).offset(y: sink)
+      }
+    }
+    .offset(y: sink)
+    .padding(.bottom, 1)
+    .contentShape(shape)
+    .accessibilityAddTraits(isOn ? .isSelected : [])
   }
 }
 
@@ -1548,6 +1579,7 @@ private final class TerminalKeyInput: UITextView {
   let barModel = TerminalKeyBarModel()
   /// Hosts the SwiftUI special-keys bar in the keyboard accessory view.
   private var barHost: UIHostingController<TerminalKeyBar>?
+  private var barContainer: TerminalKeyBarContainer?
 
   /// The special-keys bar, shown directly above the on-screen keyboard.
   /// SwiftUI's `.toolbar(.keyboard)` binds to a SwiftUI-focus-aware text input
@@ -1574,10 +1606,16 @@ private final class TerminalKeyInput: UITextView {
           )
         )
         host.view.backgroundColor = .clear
-        host.view.frame = CGRect(x: 0, y: 0, width: UIScreen.main.bounds.width, height: barModel.contentHeight)
+        let container = TerminalKeyBarContainer(
+          frame: CGRect(x: 0, y: 0, width: UIScreen.main.bounds.width, height: barModel.contentHeight))
+        container.height = barModel.contentHeight
+        host.view.frame = container.bounds
+        host.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        container.addSubview(host.view)
+        barContainer = container
         barHost = host
       }
-      return barHost?.view
+      return barContainer
     }
     set {
       // UIKit may set inputAccessoryView on this responder (e.g. during focus
@@ -1587,10 +1625,9 @@ private final class TerminalKeyInput: UITextView {
   }
 
   private func resizeAccessory(height: CGFloat) {
-    guard let view = barHost?.view else { return }
-    var frame = view.frame
-    frame.size.height = height
-    view.frame = frame
+    guard let barContainer, barContainer.height != height else { return }
+    barContainer.height = height
+    barContainer.invalidateIntrinsicContentSize()
   }
 
   override init(frame: CGRect, textContainer: NSTextContainer?) {
