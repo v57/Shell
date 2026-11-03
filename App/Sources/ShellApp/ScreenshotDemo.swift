@@ -20,6 +20,7 @@ import ShellKit
 ///                             `DebugDriver` opens its own New Connection sheet for that)
 ///   --run-action <name>       runs that demo action and shows its run
 ///   --web <url>               opens a web session on that page
+///   --echo-terminal           opens a terminal on an echo, for checking terminal input on iOS without a host
 ///   --database-link <link>    adds a database connection from a link (`sqlite:///path/shop.db`, a server's URL)
 ///   --ssh-host <user@host:port>  adds an SSH host (this Mac's key) named "Test host"; the link's connection goes
 ///                             through it
@@ -186,6 +187,13 @@ enum ScreenshotDemo {
     if flag("--new-database", in: arguments) { model.newDatabaseConnection() }
     if flag("--new-ssh-connection", in: arguments) { model.showingNewConnection = true }
     if let address = value("--web", in: arguments) { model.openWebSession(WebSession(url: address)) }
+    #if DEBUG
+      if flag("--echo-terminal", in: arguments) {
+        let terminal = TerminalSession(transport: EchoTransport())
+        model.sessions.append(terminal)
+        model.selection = .session(terminal.id)
+      }
+    #endif
     if let name = value("--run-action", in: arguments), let action = model.actions.all.first(where: { $0.name == name }) {
       model.runAction(action)
       // The run's session, once it has started and printed something.
@@ -244,3 +252,25 @@ enum ScreenshotDemo {
     > Roll back with `atlas deploy --previous`.
     """
 }
+
+#if DEBUG
+  /// `--echo-terminal`: a terminal whose input comes straight back.
+  final class EchoTransport: TerminalTransport {
+    var onOutput: ((Data) -> Void)?
+    var onConnected: (() -> Void)?
+    var onTerminated: ((String) -> Void)?
+    var onExit: ((Int32) -> Void)?
+
+    func start() {
+      onConnected?()
+      onOutput?(Data("echo $ ".utf8))
+    }
+
+    func write(_ data: Data) {
+      onOutput?(Data(String(decoding: data, as: UTF8.self).replacingOccurrences(of: "\r", with: "\r\necho $ ").utf8))
+    }
+
+    func resize(columns: Int, rows: Int) {}
+    func close() {}
+  }
+#endif

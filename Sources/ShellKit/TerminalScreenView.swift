@@ -249,7 +249,7 @@ public struct TerminalScreenView: View {
             // changing the size; the grid must reflow.
             resizeIfNeeded(to: geo.size, safeArea: newInsets)
           }
-          .modifier(InputModifier(session: session, focused: $focused, keyboardOn: showKeyboard, anchorLine: $anchorLine))
+          .modifier(InputModifier(session: session, focused: $focused, keyboardOn: showKeyboard, onKeyboardDismissed: { showKeyboard = false }, anchorLine: $anchorLine))
           .modifier(SelectionModifier(
             session: session,
             focused: $focused,
@@ -997,6 +997,8 @@ extension TerminalScreenView {
     /// which is what re-invokes the iOS keyboard bridge's updateUIView and lets
     /// the hidden UIKeyInput proxy become first responder.
     let keyboardOn: Bool
+    /// The system closed the keyboard (a swipe, the hide key): the next tap asks for it again.
+    let onKeyboardDismissed: () -> Void
     /// Anchor binding: Cmd+K / typing snap back to the bottom after the
     /// content height changes (see ScrollModifier.snapToBottom).
     @Binding var anchorLine: Int?
@@ -1037,7 +1039,7 @@ extension TerminalScreenView {
           // HARDWARE keystrokes). An invisible UITextView proxy becomes first
           // responder (raising the keyboard) and forwards the typed characters/
           // backspace to the session.
-          TerminalKeyboardBridge(session: session, isFocused: keyboardOn)
+          TerminalKeyboardBridge(session: session, isFocused: keyboardOn, onDismissed: onKeyboardDismissed)
             .frame(width: 1, height: 1)
             .allowsHitTesting(false)
         }
@@ -1697,6 +1699,9 @@ private final class TerminalKeyInput: UITextView {
   /// a satisfied/detached view stops polling.
   private var focusRetryWork: DispatchWorkItem?
 
+  /// The system closed the keyboard while the terminal still wanted it.
+  var onDismissed: (() -> Void)?
+
   /// Align the UIKit first responder with SwiftUI focus. Called from the
   /// bridge whenever the focus value changes.
   func applyFocus(wantFirstResponder: Bool) {
@@ -1744,6 +1749,7 @@ private final class TerminalKeyInput: UITextView {
     if ok, wantsFirstResponder {
       wantsFirstResponder = false
       focusRetryWork?.cancel()
+      onDismissed?()
     }
     return ok
   }
@@ -1758,6 +1764,7 @@ private final class TerminalKeyInput: UITextView {
 private struct TerminalKeyboardBridge: UIViewRepresentable {
   let session: TerminalSession
   let isFocused: Bool
+  let onDismissed: () -> Void
 
   func makeUIView(context: Context) -> TerminalKeyInput {
     let view = TerminalKeyInput(frame: .zero)
@@ -1767,6 +1774,7 @@ private struct TerminalKeyboardBridge: UIViewRepresentable {
 
   func updateUIView(_ uiView: TerminalKeyInput, context: Context) {
     uiView.session = session
+    uiView.onDismissed = onDismissed
     // becomeFirstResponder()/resignFirstResponder() can't be called from inside
     // a layout pass, so defer to the next runloop tick.
     DispatchQueue.main.async { uiView.applyFocus(wantFirstResponder: isFocused) }
