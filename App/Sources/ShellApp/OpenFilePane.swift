@@ -63,6 +63,7 @@ struct OpenedFile: Identifiable, Equatable {
 struct OpenFilePane: View {
   @Environment(AppModel.self) private var model
   let file: OpenedFile
+  @State private var markdownCommands = MarkdownEditorCommands()
 
   /// Recognized markdown extensions (live-preview editor).
   private var isMarkdown: Bool {
@@ -79,7 +80,8 @@ struct OpenFilePane: View {
       } else if isMarkdown {
         MarkdownEditorView(text: file.text, onChange: { newText in
           model.updateOpenedFileText(newText, for: file.id)
-        })
+        }, commands: markdownCommands)
+        .safeAreaInset(edge: .bottom, spacing: 0) { MarkdownQuickActionsBar(commands: markdownCommands) }
       } else {
         monospacedEditor
       }

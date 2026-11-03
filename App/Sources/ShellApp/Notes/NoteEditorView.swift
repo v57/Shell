@@ -14,16 +14,39 @@ import MarkdownKit
 struct NoteEditorView: View {
   @Environment(AppModel.self) private var model
   let noteID: UUID
+  @State private var commands = MarkdownEditorCommands()
 
   var body: some View {
     MarkdownEditorView(
       text: model.notes.decryptedNote(id: noteID)?.text ?? "",
-      onChange: { model.notes.updateText($0, for: noteID) }
+      onChange: { model.notes.updateText($0, for: noteID) },
+      commands: commands
     )
+    .safeAreaInset(edge: .bottom, spacing: 0) { MarkdownQuickActionsBar(commands: commands) }
     // The editor is deallocated with this view, but its text edits stay on the
     // window's undo stack — a later ⌘Z would message the freed editor.
     // (ContentView keys this view by note id, so a note switch lands here too.)
     .onDisappear { UndoHygiene.discardStaleTextUndo() }
+  }
+}
+
+/// The toggles for the selected text and lines (lists, checkboxes, code, notes) under a Markdown editor.
+struct MarkdownQuickActionsBar: View {
+  let commands: MarkdownEditorCommands
+
+  var body: some View {
+    HStack(spacing: 0) {
+      ForEach(MarkdownQuickAction.allCases) { action in
+        Button(action.title, systemImage: action.systemImage) { commands.apply(action.format) }
+          .kitHelp(action.title)
+      }
+    }
+    .labelStyle(.iconOnly)
+    .buttonStyle(.kitToolIcon)
+    .padding(.horizontal, KitMetrics.gutter)
+    .frame(height: 40)
+    .kitSurface(.floating, cornerRadius: KitMetrics.radiusCapsule)
+    .padding(.bottom, KitMetrics.gutter)
   }
 }
 
