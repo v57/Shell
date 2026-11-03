@@ -419,6 +419,12 @@ public final class TerminalSession: Identifiable {
     transport.write(data)
   }
 
+  /// The grid size a terminal view last laid out, for a session that starts
+  /// before its own view exists. Slivers from a split view's first layout
+  /// passes don't count.
+  public private(set) static var lastLaidOutGridSize: TerminalGridSize?
+  private static let smallestRememberedColumns = 20
+
   public func resize(columns: Int, rows: Int) {
     guard columns > 0, rows > 0 else { return }
 
@@ -435,6 +441,7 @@ public final class TerminalSession: Identifiable {
     // while the first prompt is still being drawn). So shrink the child
     // first, and grow the grid first.
     let size = TerminalGridSize(rows: rows, columns: columns)
+    if rows > 1, columns >= Self.smallestRememberedColumns { Self.lastLaidOutGridSize = size }
     let shrinking = size.columns < lastGridSize.columns
 
     if shrinking {

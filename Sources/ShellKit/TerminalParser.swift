@@ -608,6 +608,10 @@ struct TerminalGrid {
   
   mutating func resize(rows newRows: Int, columns newColumns: Int) {
     guard newRows > 0, newColumns > 0 else { return }
+    // A view remounting on a tab switch asks for the size the grid already
+    // has. Re-flowing then would close the gaps above the cursor and move it,
+    // out of step with the program drawing there.
+    guard newRows != rows || newColumns != columns else { return }
     let oldRows = self.rows
     let oldColumns = self.columns
     let oldCells = cells

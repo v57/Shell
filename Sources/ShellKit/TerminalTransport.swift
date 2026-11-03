@@ -188,8 +188,14 @@ public final class LocalPTYTransport: TerminalTransport {
   /// reverse-video "%" marker above the erase. The view resizes the pty
   /// and the grid together to the real size on first layout.
   static let spawnSize = TerminalGridSize(rows: 24, columns: 200)
-  public var initialGridSize: TerminalGridSize { Self.spawnSize }
+  public var initialGridSize: TerminalGridSize { startSize }
 
+  /// The size this pty spawns at: `spawnSize`, or the view's real size when
+  /// the caller knows it. The `session` client needs that: a resize reaches
+  /// the shell through the daemon, later than the grid shrinks, so a shell
+  /// started wide draws its first prompt into a narrower grid. Its "%" marker
+  /// and padding then wrap over several rows.
+  private let startSize: TerminalGridSize
   private let executable: String
   private let argv: [String]
   /// Directory the child starts in (nil = the home directory). Set by the
@@ -211,7 +217,8 @@ public final class LocalPTYTransport: TerminalTransport {
   /// Internal regression-test probe; not part of the public transport API.
   var onReadEventForTesting: (() -> Void)?
 
-  public init(executable: String, argv: [String], workingDirectory: String? = nil) {
+  public init(executable: String, argv: [String], workingDirectory: String? = nil, startSize: TerminalGridSize? = nil) {
+    self.startSize = startSize ?? Self.spawnSize
     self.executable = executable
     self.argv = argv
     self.workingDirectory = workingDirectory
@@ -246,8 +253,8 @@ public final class LocalPTYTransport: TerminalTransport {
     // strand its reverse-video "%" marker on the first screen.
     // The view resizes the pty to the real size on first layout.
     var windowSize = winsize(
-      ws_row: UInt16(Self.spawnSize.rows),
-      ws_col: UInt16(Self.spawnSize.columns),
+      ws_row: UInt16(startSize.rows),
+      ws_col: UInt16(startSize.columns),
       ws_xpixel: 0,
       ws_ypixel: 0
     )
@@ -569,10 +576,10 @@ public extension LocalPTYTransport {
   /// (SessionBinaryManager) is a separate card.
   /// `directory` starts a NEW session's shell there (the daemon starts it in
   /// its own directory otherwise); attaching to a live session ignores it.
-  static func session(_ name: String, in directory: String? = nil) -> LocalPTYTransport? {
+  static func session(_ name: String, in directory: String? = nil, startSize: TerminalGridSize? = nil) -> LocalPTYTransport? {
     guard let executable = sessionExecutablePath() else { return nil }
     let command = directory.map(sessionShellCommand(in:)) ?? []
-    return LocalPTYTransport(executable: executable, argv: ["session", name] + command)
+    return LocalPTYTransport(executable: executable, argv: ["session", name] + command, startSize: startSize)
   }
 
   /// The command for `session <name> <cmd...>` that runs a login zsh in

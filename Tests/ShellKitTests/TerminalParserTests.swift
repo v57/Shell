@@ -43,6 +43,28 @@ struct TerminalGridWrapTests {
     #expect(!s.gridWrapped[2])
   }
 
+  @Test func resizeToTheSameSizeLeavesTheGridAlone() {
+    let p = parser()
+    p.resize(columns: 5, rows: 6)
+    // A prompt below blank wrapped rows: re-flowing would close the gap.
+    p.consume(Data(("%" + String(repeating: " ", count: 15) + "\rab").utf8))
+    let before = p.snapshot()
+    #expect(before.cursor.row == 3)
+
+    p.resize(columns: 5, rows: 6)
+    let after = p.snapshot()
+    #expect(after.cursor.row == before.cursor.row)
+    #expect(after.cursor.column == before.cursor.column)
+    #expect(rowText(after, 3) == rowText(before, 3))
+  }
+
+  @Test func sessionTransportStartsAtTheGivenSize() {
+    let size = TerminalGridSize(rows: 18, columns: 65)
+    let transport = LocalPTYTransport(executable: "/usr/bin/true", argv: ["true"], startSize: size)
+    #expect(transport.initialGridSize == size)
+    #expect(LocalPTYTransport(executable: "/usr/bin/true", argv: ["true"]).initialGridSize == LocalPTYTransport.spawnSize)
+  }
+
   @Test func resizeNarrowingAgainWrapsTheLine() {
     let p = parser()
     p.resize(columns: 10, rows: 3)

@@ -295,7 +295,7 @@ public extension LocalPTYTransport {
 
   /// tmux and the `session` tool don't run on Windows.
   static func tmux(_ name: String) -> LocalPTYTransport? { nil }
-  static func session(_ name: String, in directory: String? = nil) -> LocalPTYTransport? { nil }
+  static func session(_ name: String, in directory: String? = nil, startSize: TerminalGridSize? = nil) -> LocalPTYTransport? { nil }
   nonisolated static func tmuxExecutablePath() -> String? { nil }
   nonisolated static func sessionExecutablePath() -> String? { nil }
 

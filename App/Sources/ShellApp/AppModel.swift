@@ -1015,7 +1015,7 @@ final class AppModel {
     // tmux attach when tmux is installed; otherwise screen -x (screen
     // ships with macOS). LocalPTYTransport.tmux is nil without tmux.
     let session: TerminalSession
-    if info.kind == .session, let transport = LocalPTYTransport.session(info.name, in: directory) {
+    if info.kind == .session, let transport = LocalPTYTransport.session(info.name, in: directory, startSize: TerminalSession.lastLaidOutGridSize) {
       // session-tool: `session <name>` is create-or-attach, so attaching
       // here both (re)attaches to a live session and creates a missing one.
       session = TerminalSession(session: transport)
