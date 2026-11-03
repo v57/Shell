@@ -768,7 +768,11 @@ final class AppModel {
   /// live directory; the monitor knows the rest, up to its last refresh.
   func displayName(forScreen info: ScreenSessionInfo) -> String {
     let attached = attachedSession(toScreen: info)?.remoteCurrentDirectory?.path
+    #if os(macOS) || os(Windows) || os(Linux)
     return info.displayName(inDirectory: attached ?? screenMonitor.directories[info.id])
+    #else
+    return info.displayName(inDirectory: attached)
+    #endif
   }
 
   private func defaultLocalName(for session: TerminalSession) -> String {
