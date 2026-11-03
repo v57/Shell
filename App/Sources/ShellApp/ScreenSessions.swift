@@ -52,6 +52,8 @@ final class ScreenSessionsMonitor {
   }
   
   private(set) var sessions: [ScreenSessionInfo] = []
+  /// Where the sessions without a name of their own were at the last refresh, by `ScreenSessionInfo.id`.
+  private(set) var directories: [String: String] = [:]
   private(set) var errorMessage: String?
   /// Set when a create/rename action fails; cleared by the UI on dismiss.
   var actionError: ScreenActionError?
@@ -97,12 +99,17 @@ final class ScreenSessionsMonitor {
     guard featureEnabled else { return }
     queue.async { [weak self] in
       let (sessions, message) = Self.runList()
+      var directories: [String: String] = [:]
+      for info in sessions where ScreenSessionsParser.isGeneratedName(info.shortName) {
+        directories[info.id] = Self.workingDirectory(of: info)
+      }
       DispatchQueue.main.async {
         guard let self else { return }
         if let message {
           self.errorMessage = message
         } else {
           self.sessions = sessions
+          self.directories = directories
           self.errorMessage = nil
         }
       }

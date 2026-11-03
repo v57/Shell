@@ -151,6 +151,19 @@ struct PersistentSessionTests {
 
   // MARK: - next-session-name uniquify
 
+  @Test func generatedNamesFollowTheDirectoryAndGivenNamesStay() {
+    let generated = ScreenSessionInfo(name: "zsh-2", pid: 0, state: "detached", kind: .session)
+    #expect(generated.displayName(inDirectory: "/Users/me/Developer") == "Developer")
+    #expect(generated.displayName(inDirectory: nil) == "zsh-2")
+    #expect(generated.displayName(inDirectory: "/") == "zsh-2")
+
+    let named = ScreenSessionInfo(name: "builds", pid: 0, state: "detached", kind: .session)
+    #expect(named.displayName(inDirectory: "/Users/me/Developer") == "builds")
+    #expect(!ScreenSessionsParser.isGeneratedName("zsh-work"))
+    #expect(ScreenSessionInfo(name: "26040.zsh", pid: 1, state: "detached", kind: .screen)
+      .displayName(inDirectory: "/tmp") == "tmp")
+  }
+
   @Test func nextSessionNameReturnsZshWhenFree() {
     #expect(ScreenSessionsParser.nextSessionName(existing: []) == "zsh")
     #expect(ScreenSessionsParser.nextSessionName(existing: ["web", "api"]) == "zsh")

@@ -701,7 +701,8 @@ final class AppModel {
     case .local:
       return defaultLocalName(for: session)
     case .screen(let info):
-      return info.name
+      let name = displayName(forScreen: info)
+      return name == info.shortName ? info.name : name
     case .action(let spec):
       return spec.action.name
     case .ssh(let config):
@@ -754,6 +755,13 @@ final class AppModel {
   /// so a terminal opened in a project reads as its folder. Falls back
   /// to "Local" while no child/cwd is available (starting, closed,
   /// unmounted root) — the pre-existing label.
+  /// A persistent session's name: the one the user gave it, else its directory's. An attached terminal knows the
+  /// live directory; the monitor knows the rest, up to its last refresh.
+  func displayName(forScreen info: ScreenSessionInfo) -> String {
+    let attached = attachedSession(toScreen: info)?.remoteCurrentDirectory?.path
+    return info.displayName(inDirectory: attached ?? screenMonitor.directories[info.id])
+  }
+
   private func defaultLocalName(for session: TerminalSession) -> String {
     guard
       let directory = session.currentDirectory,

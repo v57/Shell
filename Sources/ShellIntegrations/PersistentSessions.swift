@@ -59,6 +59,15 @@ public struct ScreenSessionInfo: Identifiable, Hashable {
 
   public var isRemote: Bool { remoteOrigin != nil }
 
+  /// The name to show: the one the user gave it, else its directory's, like a
+  /// plain terminal. `path` is nil while the directory isn't known.
+  public func displayName(inDirectory path: String?) -> String {
+    guard ScreenSessionsParser.isGeneratedName(shortName), let path, !path.isEmpty, path != "/" else {
+      return shortName
+    }
+    return (path as NSString).lastPathComponent
+  }
+
   /// A shell command that prints this session's working directory on its host.
   /// screen has no command for it: it reads the cwd of its window's shell, the
   /// deepest descendant of the pid `screen -ls` reports (on a Mac a `login`
@@ -249,5 +258,10 @@ public enum ScreenSessionsParser {
     var n = 1
     while existing.contains("zsh-\(n)") { n += 1 }
     return "zsh-\(n)"
+  }
+
+  /// Whether `name` is one `nextSessionName` hands out, so the user hasn't named the session.
+  public static func isGeneratedName(_ name: String) -> Bool {
+    name == "zsh" || (name.hasPrefix("zsh-") && Int(name.dropFirst(4)) != nil)
   }
 }

@@ -113,7 +113,7 @@ struct LocalSectionView: View {
       FileDrop.perform { model.requestFileDrop($0, on: .session(session.id)) }
     }
     #endif
-    ForEach(flags.isEnabled(.screen) ? model.screenMonitor.sessions.filter { state.matches($0.shortName) } : []) { info in
+    ForEach(flags.isEnabled(.screen) ? model.screenMonitor.sessions.filter { state.matches(model.displayName(forScreen: $0)) } : []) { info in
       ScreenSessionRow(
         info: info,
         isRenaming: Binding(
@@ -135,7 +135,7 @@ struct LocalSectionView: View {
         }
       }
     }
-    ForEach(flags.isEnabled(.screen) ? model.remoteScreenSessions.filter { state.matches($0.shortName) } : []) { info in
+    ForEach(flags.isEnabled(.screen) ? model.remoteScreenSessions.filter { state.matches(model.displayName(forScreen: $0)) } : []) { info in
       // Remote persistent sessions are identified by their SSH origin;
       // renaming runs on the host, which is out of scope here.
       ScreenSessionRow(info: info, isRenaming: .constant(false), onRename: { _ in })
@@ -284,7 +284,7 @@ private struct ScreenSessionRow: View {
     // The sidebar shows the short name (no "pid." prefix); the full "pid.name"
     // spec stays in the window title (navigationTitle).
     SidebarRow(
-      value: model.rowSelection(forScreen: info), info.shortName,
+      value: model.rowSelection(forScreen: info), model.displayName(forScreen: info),
       systemImage: info.isProtected ? "lock.fill" : "shield.fill"
     ) {
       StatusDot(hue: info.isAttached ? .green : .gray, isHollow: !info.isAttached)
@@ -302,7 +302,7 @@ private struct ScreenSessionRow: View {
     }
     .kitRename(isRenaming: $isRenaming) { onRename($0) }
     .kitHelp(
-      info.shortName,
+      model.displayName(forScreen: info),
       meta: [helpText, info.state, info.remoteOrigin.map { "On \($0.displayName)" }].compactMap { $0 }
         .joined(separator: " · "),
       systemImage: info.isProtected ? "lock.fill" : "shield.fill", hue: info.isAttached ? .green : .gray)
