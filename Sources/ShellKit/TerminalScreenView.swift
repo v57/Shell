@@ -3,6 +3,7 @@ import AppKit
 #elseif os(iOS)
 import UIKit
 #endif
+import ComponentKit
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -433,23 +434,18 @@ public struct TerminalScreenView: View {
     scrolledToEnd || (anchorLine ?? 0) + session.snapshot.rows >= totalLines
   }
 
-  /// The floating bottom-trailing button: `chevron.down.circle.fill` at
-  /// 32pt (medium) with the hierarchical rendering style. Hidden when the
-  /// viewport is already at the bottom. Tapping re-pins to the live grid
+  /// The floating bottom-trailing button, the kit's round one. Hidden when
+  /// the viewport is already at the bottom. Tapping re-pins to the live grid
   /// via `ScrollModifier.snapToBottom`.
   @ViewBuilder
   private func scrollToBottomButton() -> some View {
     if !isAtBottom {
-      Button {
+      Button("Scroll to Bottom", systemImage: "arrow.down") {
         ScrollModifier.snapToBottom(session: session, anchorLine: $anchorLine)
-      } label: {
-        Image(systemName: "chevron.down.circle.fill")
-          .font(.system(size: 32, weight: .medium))
-          .symbolRenderingMode(.hierarchical)
       }
-      .buttonStyle(.plain)
+      .buttonStyle(.kitRound)
+      .kitHelp("Scroll to Bottom")
       .padding(12)
-      .help("Scroll to bottom")
       .transition(.opacity.combined(with: .scale))
     }
   }

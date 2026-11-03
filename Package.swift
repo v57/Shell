@@ -27,6 +27,9 @@ let package = Package(
         // CodeActions: the smart actions (a project's schemes and their
         // build, run, test, lint and distribute commands) come from Code.
         v57("Code"),
+        // The shared design: the terminal's own controls (the scroll-to-bottom
+        // button, the iOS key bar).
+        v57("Component"),
     ],
     targets: [
         .target(
@@ -41,6 +44,7 @@ let package = Package(
                 .product(name: "WireKit", package: "Database"),
                 // The device's SSH key, saved passwords and known hosts.
                 .product(name: "VaultKit", package: "Vault"),
+                .product(name: "ComponentKit", package: "Component"),
             ],
             swiftSettings: [
                 .enableUpcomingFeature("ApproachableConcurrency"),
