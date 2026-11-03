@@ -336,10 +336,20 @@ public struct TerminalScreenView: View {
       // Content margin: the scroll view spans the full safe area; only the
       // grid text is inset from its edges.
       .padding(Self.gridPadding)
+      // What's left of the viewport below the last row. Without it the view
+      // scrolled to the bottom would sit that much lower than a terminal with
+      // no scrollback, a sliver of the line above showing over the first row.
+      .padding(.bottom, Self.bottomRemainder(rows: rows, containerHeight: containerHeight))
     }
     // Scrolling behavior (anchor tracking, content-offset reporting,
     // bottom-tailing) lives in ScrollModifier.
     .modifier(ScrollModifier(session: session, anchorLine: $anchorLine, scrollOffset: $scrollOffset, topInset: topInset, containerHeight: containerHeight))
+  }
+
+  /// The viewport height the grid's whole rows leave unused below the last one.
+  nonisolated static func bottomRemainder(rows: Int, containerHeight: CGFloat, lineHeight: CGFloat? = nil) -> CGFloat {
+    let height = lineHeight ?? metrics.lineHeight
+    return max(0, containerHeight - gridPadding * 2 - CGFloat(rows) * height)
   }
 
   // MARK: - Gliding cursor
@@ -875,9 +885,9 @@ extension TerminalScreenView {
 
     /// Keeps `scrollOffset` in sync with the scroll view. macOS 15 / iOS 18
     /// report the live content offset. macOS 14 / iOS 17 can't, so the offset
-    /// is derived from the anchor line: exact at the bottom (the grid sits
-    /// `containerHeight - contentHeight` above the viewport top, the
-    /// `H mod lineHeight` case `cell(at:)` documents) and at the top, within
+    /// is derived from the anchor line: exact at the bottom (the grid's first
+    /// row sits right at the viewport's top, `bottomRemainder` sees to that)
+    /// and at the top, within
     /// one line while scrolled part-way through a line.
     struct ContentOffsetModifier: ViewModifier {
       let session: TerminalSession
@@ -915,7 +925,8 @@ extension TerminalScreenView {
       /// from the anchor line (unit-tested against measured macOS values).
       static func fallbackOffset(anchorLine: Int, rows: Int, totalLines: Int, lineHeight: CGFloat, containerHeight: CGFloat) -> CGFloat {
         if anchorLine + rows >= totalLines {
-          let contentHeight = CGFloat(totalLines) * lineHeight + TerminalScreenView.gridPadding * 2
+          let remainder = TerminalScreenView.bottomRemainder(rows: rows, containerHeight: containerHeight, lineHeight: lineHeight)
+          let contentHeight = CGFloat(totalLines) * lineHeight + TerminalScreenView.gridPadding * 2 + remainder
           return min(0, containerHeight - contentHeight)
         }
         return -CGFloat(anchorLine) * lineHeight

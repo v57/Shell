@@ -15,8 +15,9 @@ struct ContentOffsetFallbackTests {
   }
 
   @Test func bottomMatchesTheScrollView() {
-    // 398 - (402 * 21 + 2 * 4): the grid sits 12 pt below anchor * lineHeight.
-    #expect(offset(anchor: 384) == -8052)
+    // The grid's first row (line 384) sits at the viewport's top, as it does
+    // with no scrollback: 384 * 21, nothing peeking in above it.
+    #expect(offset(anchor: 384) == -8064)
   }
 
   @Test func topAndShortContentAreZero() {
