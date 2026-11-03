@@ -225,6 +225,7 @@ struct ContentView: View {
     // the connection sheets read the model.
     .environment(model.databases)
     .environment(\.terminalBackgroundsDisabled, model.disableTerminalBackgrounds)
+    .environment(\.terminalFontSize, model.terminalFontSize)
     .environment(\.terminalAnimationsEnabled, animates)
     .onAppear {
       // Set the browser up for the initially-selected session (onChange does

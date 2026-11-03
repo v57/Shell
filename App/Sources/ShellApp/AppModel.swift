@@ -183,11 +183,17 @@ final class AppModel {
   /// UserDefaults keys for the theme settings (non-sensitive UI prefs).
   private static let appearanceModeKey = "appearanceMode"
   private static let disableTerminalBackgroundsKey = "disableTerminalBackgrounds"
+  private static let terminalFontSizeKey = "terminalFontSize"
   private static let alwaysPersistentSessionsKey = "alwaysPersistentSessions"
 
   /// Forced color scheme for the whole window (see `appearanceMode.colorScheme`).
   var appearanceMode: AppearanceMode {
     didSet { UserDefaults.standard.set(appearanceMode.rawValue, forKey: Self.appearanceModeKey) }
+  }
+
+  /// The terminals' text size, in points.
+  var terminalFontSize: CGFloat {
+    didSet { UserDefaults.standard.set(Double(terminalFontSize), forKey: Self.terminalFontSizeKey) }
   }
 
   /// When true, terminals stop drawing character backgrounds and replace
@@ -387,6 +393,8 @@ final class AppModel {
   private init() {
     appearanceMode = AppearanceMode(rawValue: UserDefaults.standard.string(forKey: Self.appearanceModeKey) ?? "") ?? .system
     disableTerminalBackgrounds = UserDefaults.standard.bool(forKey: Self.disableTerminalBackgroundsKey)
+    terminalFontSize = (UserDefaults.standard.object(forKey: Self.terminalFontSizeKey) as? Double)
+      .map { CGFloat($0) } ?? TerminalScreenView.defaultFontSize
     alwaysPersistentSessions = UserDefaults.standard.bool(forKey: Self.alwaysPersistentSessionsKey)
     // SSH hosts, database connections and device keys are the ones the v57 apps share through the vault
     // (../Vault), synced through iCloud and live across apps.

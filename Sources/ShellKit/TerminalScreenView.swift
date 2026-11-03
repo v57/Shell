@@ -126,10 +126,20 @@ public func terminalCellRuns(
 public struct TerminalScreenView: View {
   @Bindable var session: TerminalSession
 
-  /// Must match the font used by every other part of the app so metrics
-  /// and hit-testing agree.
-  private static let fontSize: CGFloat = 14
-  private static let metrics = fontMetrics(for: monoFont(ofSize: fontSize))
+  /// The text size when the app sets none (Settings › Appearance sets `terminalFontSize`).
+  public static let defaultFontSize: CGFloat = 14
+
+  /// Every part of the view reads the same size so metrics and hit-testing agree.
+  @Environment(\.terminalFontSize) private var fontSize
+  private var metrics: TerminalFontMetrics { Self.metrics(ofSize: fontSize) }
+
+  private static var metricsBySize: [CGFloat: TerminalFontMetrics] = [:]
+  static func metrics(ofSize size: CGFloat) -> TerminalFontMetrics {
+    if let cached = metricsBySize[size] { return cached }
+    let metrics = fontMetrics(for: monoFont(ofSize: size))
+    metricsBySize[size] = metrics
+    return metrics
+  }
 
   /// Inset of the grid content from the scroll view's edges (the old
   /// TerminalView `.padding(4)`, moved INSIDE the ScrollView). The scroll
@@ -244,6 +254,10 @@ public struct TerminalScreenView: View {
           .onChange(of: geo.size) { _, newSize in
             resizeIfNeeded(to: newSize, safeArea: geo.safeAreaInsets)
           }
+          .onChange(of: fontSize) { _, _ in
+            // A new text size fits another number of cells in the same space.
+            resizeIfNeeded(to: geo.size, safeArea: geo.safeAreaInsets)
+          }
           .onChange(of: geo.safeAreaInsets) { _, newInsets in
             // Fullscreen / toolbar changes shift the safe area without
             // changing the size; the grid must reflow.
@@ -292,7 +306,7 @@ public struct TerminalScreenView: View {
   /// focusable, clickable, or steal keyboard focus.
   private func messageView(_ message: String) -> some View {
     Text(message)
-      .font(.system(size: Self.fontSize, design: .monospaced))
+      .font(.system(size: fontSize, design: .monospaced))
       .foregroundStyle(TerminalPalette.secondaryText)
       .padding(16)
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -325,7 +339,7 @@ public struct TerminalScreenView: View {
               selectionEnd: selectionEnd
             )
           )
-          .frame(height: Self.metrics.lineHeight, alignment: .leading)
+          .frame(height: metrics.lineHeight, alignment: .leading)
         }
       }
       .scrollTargetLayout()
@@ -345,7 +359,7 @@ public struct TerminalScreenView: View {
       // What's left of the viewport below the last row. Without it the view
       // scrolled to the bottom would sit that much lower than a terminal with
       // no scrollback, a sliver of the line above showing over the first row.
-      .padding(.bottom, Self.bottomRemainder(rows: rows, containerHeight: containerHeight))
+      .padding(.bottom, Self.bottomRemainder(rows: rows, containerHeight: containerHeight, lineHeight: metrics.lineHeight))
     }
     // Scrolling behavior (anchor tracking, content-offset reporting,
     // bottom-tailing) lives in ScrollModifier.
@@ -353,9 +367,8 @@ public struct TerminalScreenView: View {
   }
 
   /// The viewport height the grid's whole rows leave unused below the last one.
-  nonisolated static func bottomRemainder(rows: Int, containerHeight: CGFloat, lineHeight: CGFloat? = nil) -> CGFloat {
-    let height = lineHeight ?? metrics.lineHeight
-    return max(0, containerHeight - gridPadding * 2 - CGFloat(rows) * height)
+  nonisolated static func bottomRemainder(rows: Int, containerHeight: CGFloat, lineHeight: CGFloat) -> CGFloat {
+    max(0, containerHeight - gridPadding * 2 - CGFloat(rows) * lineHeight)
   }
 
   // MARK: - Gliding cursor
@@ -383,6 +396,7 @@ public struct TerminalScreenView: View {
       let cell = reveal.replacedCell(line: line, column: column) ?? snapshot.cell(atLine: line, column: column)
       let style = Self.attributes(
         for: cell,
+        fontSize: fontSize,
         isCursor: true,
         isSelected: false,
         cursorBackground: snapshot.cursorBackground,
@@ -396,11 +410,11 @@ public struct TerminalScreenView: View {
         Text(AttributedString(cell.isBlank ? " " : String(cell.character), attributes: style.attrs))
           .fixedSize()
       }
-      .frame(width: Self.metrics.cellWidth, height: Self.metrics.lineHeight, alignment: .leading)
+      .frame(width: metrics.cellWidth, height: metrics.lineHeight, alignment: .leading)
       .clipped()
       .offset(
-        x: CGFloat(column) * Self.metrics.cellWidth,
-        y: CGFloat(line) * Self.metrics.lineHeight
+        x: CGFloat(column) * metrics.cellWidth,
+        y: CGFloat(line) * metrics.lineHeight
       )
       .animation(.smooth(duration: 0.12), value: [line, column])
       .allowsHitTesting(false)
@@ -473,12 +487,15 @@ public struct TerminalScreenView: View {
   // not 8.65), so tracking absorbs the residual: cellWidth - a'(scaled).
 
   /// Natural advance of the terminal font's own glyphs (== advance of "W").
-  private static let naturalCellWidth = metrics.cellWidth - metrics.cellKern
+  private static func naturalCellWidth(ofSize size: CGFloat) -> CGFloat {
+    let metrics = metrics(ofSize: size)
+    return metrics.cellWidth - metrics.cellKern
+  }
 
   /// Per-cluster measured advances. `scaled` is populated only for the
   /// scale class: (size, measured advance at that size). Built lazily;
   /// only non-"W" clusters are ever measured.
-  private static var clusterMetrics: [String: (base: CGFloat, scaled: (size: CGFloat, advance: CGFloat)?)] = [:]
+  private static var clusterMetrics: [CGFloat: [String: (base: CGFloat, scaled: (size: CGFloat, advance: CGFloat)?)]] = [:]
   private static func measure(_ cluster: String, at size: CGFloat) -> CGFloat {
     #if os(macOS) || os(iOS)
     (cluster as NSString).size(
@@ -488,8 +505,11 @@ public struct TerminalScreenView: View {
     monoFont(ofSize: size).width(of: cluster)
     #endif
   }
-  private static func metrics(for cluster: String) -> (base: CGFloat, scaled: (size: CGFloat, advance: CGFloat)?) {
-    if let cached = clusterMetrics[cluster] { return cached }
+  private static func metrics(
+    for cluster: String, fontSize: CGFloat
+  ) -> (base: CGFloat, scaled: (size: CGFloat, advance: CGFloat)?) {
+    if let cached = clusterMetrics[fontSize]?[cluster] { return cached }
+    let naturalCellWidth = naturalCellWidth(ofSize: fontSize)
     let base = measure(cluster, at: fontSize)
     var scaled: (size: CGFloat, advance: CGFloat)? = nil
     if base > 1.2 * naturalCellWidth, cluster.unicodeScalars.count == 1 {
@@ -500,7 +520,7 @@ public struct TerminalScreenView: View {
       }
     }
     let result = (base, scaled)
-    clusterMetrics[cluster] = result
+    clusterMetrics[fontSize, default: [:]][cluster] = result
     return result
   }
 
@@ -546,6 +566,7 @@ public struct TerminalScreenView: View {
     ) {
       let base = Self.attributes(
         for: run.cell,
+        fontSize: fontSize,
         isCursor: run.isCursor,
         isSelected: run.isSelected,
         cursorBackground: snapshot.cursorBackground,
@@ -583,7 +604,7 @@ public struct TerminalScreenView: View {
       for column in run.column..<(run.column + run.length) {
         let cell = replacement(column) ?? snapshot.cell(atLine: line, column: column)
         let cluster = cell.isBlank ? " " : String(cell.character)
-        guard let pair = Self.segmentMetrics(cluster: cluster) else {
+        guard let pair = Self.segmentMetrics(cluster: cluster, fontSize: fontSize) else {
           // .clip: per-cell frame, overflow cut at the cell edge.
           flushSegment()
           pieces.append(.cell(
@@ -616,10 +637,11 @@ public struct TerminalScreenView: View {
 
   /// (font size, tracking) that lands the cluster's glyph on an exact cell
   /// boundary; nil when the cluster needs the clipped per-cell path.
-  private static func segmentMetrics(cluster: String) -> (size: CGFloat, tracking: CGFloat)? {
-    let m = metrics(for: cluster)
+  private static func segmentMetrics(cluster: String, fontSize: CGFloat) -> (size: CGFloat, tracking: CGFloat)? {
+    let m = metrics(for: cluster, fontSize: fontSize)
     let base = m.base
-    let w = naturalCellWidth
+    let w = naturalCellWidth(ofSize: fontSize)
+    let metrics = metrics(ofSize: fontSize)
     let cellWidth = metrics.cellWidth
     if base < 0.3 * w || abs(base - w) < 0.1 {
       // SF Mono's own repertoire, plus combining marks / ZWJ / VS: zero-ish
@@ -677,15 +699,15 @@ public struct TerminalScreenView: View {
       textWithBackground(
         attr,
         background: background,
-        width: CGFloat(cellCount) * Self.metrics.cellWidth
+        width: CGFloat(cellCount) * metrics.cellWidth
       )
     case .cell(let attr, let background, _):
       textWithBackground(
         attr,
         background: background,
-        width: Self.metrics.cellWidth
+        width: metrics.cellWidth
       )
-      .frame(width: Self.metrics.cellWidth, alignment: .leading)
+      .frame(width: metrics.cellWidth, alignment: .leading)
       .clipped()
     }
   }
@@ -699,7 +721,7 @@ public struct TerminalScreenView: View {
     ZStack(alignment: .leading) {
       Rectangle()
         .fill(background ?? .clear)
-        .frame(width: width, height: Self.metrics.lineHeight)
+        .frame(width: width, height: metrics.lineHeight)
       Text(attr).fixedSize(horizontal: true, vertical: false)
     }
   }
@@ -717,6 +739,7 @@ public struct TerminalScreenView: View {
   /// an exact full-cell rect behind the text instead.
   private static func attributes(
     for cell: TerminalCell,
+    fontSize: CGFloat,
     isCursor: Bool,
     isSelected: Bool,
     cursorBackground: Color,
@@ -773,7 +796,7 @@ public struct TerminalScreenView: View {
     if cell.underline {
       attrs.underlineStyle = .single
     }
-    attrs.tracking = metrics.cellKern
+    attrs.tracking = metrics(ofSize: fontSize).cellKern
     return (attrs, background)
   }
 
@@ -788,8 +811,8 @@ public struct TerminalScreenView: View {
     // The viewport's visible bottom edge in local coordinates, used by
     // SelectionModifier to extend a drag to the last visible line.
     viewportHeight = size.height - safeArea.bottom
-    let columns = max(1, Int(floor((contentWidth - Self.gridPadding * 2) / Self.metrics.cellWidth)))
-    let rows = max(1, Int(floor((contentHeight - Self.gridPadding * 2) / Self.metrics.lineHeight)))
+    let columns = max(1, Int(floor((contentWidth - Self.gridPadding * 2) / metrics.cellWidth)))
+    let rows = max(1, Int(floor((contentHeight - Self.gridPadding * 2) / metrics.lineHeight)))
     let grid = TerminalGridSize(rows: rows, columns: columns)
     guard grid != lastGridSize else { return }
     lastGridSize = grid
@@ -901,6 +924,7 @@ extension TerminalScreenView {
     /// and at the top, within
     /// one line while scrolled part-way through a line.
     struct ContentOffsetModifier: ViewModifier {
+      @Environment(\.terminalFontSize) private var fontSize
       let session: TerminalSession
       let anchorLine: Int?
       @Binding var scrollOffset: CGFloat
@@ -923,7 +947,7 @@ extension TerminalScreenView {
                 - geometry.contentOffset.y - geometry.containerSize.height)
           } action: { _, position in
             scrollOffset = -position.offset - topInset
-            scrolledToEnd = position.toEnd < TerminalScreenView.metrics.lineHeight
+            scrolledToEnd = position.toEnd < TerminalScreenView.metrics(ofSize: fontSize).lineHeight
           }
         } else {
           content
@@ -938,7 +962,7 @@ extension TerminalScreenView {
           anchorLine: anchorLine ?? 0,
           rows: session.snapshot.rows,
           totalLines: session.snapshot.totalLines,
-          lineHeight: TerminalScreenView.metrics.lineHeight,
+          lineHeight: TerminalScreenView.metrics(ofSize: fontSize).lineHeight,
           containerHeight: containerHeight
         )
       }
@@ -1141,6 +1165,8 @@ extension TerminalScreenView {
   /// repeating timer). Hit-testing maps through the scroll CONTENT offset, so
   /// it stays exact at every scroll position.
   struct SelectionModifier: ViewModifier {
+    @Environment(\.terminalFontSize) private var fontSize
+    private var metrics: TerminalFontMetrics { TerminalScreenView.metrics(ofSize: fontSize) }
     @Bindable var session: TerminalSession
     /// Granted on mouse-down so the first click also routes the keyboard to
     /// the terminal (owned by the parent view, see InputModifier). macOS only —
@@ -1216,7 +1242,7 @@ extension TerminalScreenView {
       }
 
       guard session.selectionStart != nil else { return }
-      let rawRow = Int(floor(location.y / TerminalScreenView.metrics.lineHeight))
+      let rawRow = Int(floor(location.y / metrics.lineHeight))
       // Dragging past the top/bottom edge auto-scrolls the viewport and
       // keeps extending the selection (Terminal.app behavior).
       if rawRow < 0 {
@@ -1275,10 +1301,10 @@ extension TerminalScreenView {
       let line = Self.logicalLine(
         contentOffset: scrollOffset,
         localY: location.y,
-        lineHeight: TerminalScreenView.metrics.lineHeight,
+        lineHeight: metrics.lineHeight,
         totalLines: snapshot.totalLines
       )
-      let column = min(max(Int(floor(location.x / TerminalScreenView.metrics.cellWidth)), 0), snapshot.columns - 1)
+      let column = min(max(Int(floor(location.x / metrics.cellWidth)), 0), snapshot.columns - 1)
       return TerminalCursor(row: line, column: column)
     }
 
@@ -1326,13 +1352,13 @@ extension TerminalScreenView {
       let topLine = Self.logicalLine(
         contentOffset: scrollOffset,
         localY: 0,
-        lineHeight: TerminalScreenView.metrics.lineHeight,
+        lineHeight: metrics.lineHeight,
         totalLines: snapshot.totalLines
       )
       let bottomLine = Self.logicalLine(
         contentOffset: scrollOffset,
         localY: viewportHeight,
-        lineHeight: TerminalScreenView.metrics.lineHeight,
+        lineHeight: metrics.lineHeight,
         totalLines: snapshot.totalLines
       )
       let edgeLine = direction > 0 ? topLine : bottomLine

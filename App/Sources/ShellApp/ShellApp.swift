@@ -96,6 +96,7 @@ public struct ShellApp: App {
     WindowGroup("Detach", id: "detach", for: UUID.self) { itemID in
       DetachDetailView(itemID: itemID.wrappedValue ?? UUID())
         .environment(AppModel.shared)
+        .environment(\.terminalFontSize, AppModel.shared.terminalFontSize)
         .componentKit(accent: .accentColor)
     }
     #if os(macOS)

@@ -1,8 +1,8 @@
 import ComponentKit
 import SwiftUI
 
-/// Settings › Appearance (Shell menu → Appearance…, ⌘⇧H): the forced color scheme and the "disable character
-/// backgrounds" switch.
+/// Settings › Appearance (Shell menu → Appearance…, ⌘⇧H): the forced color scheme, the terminals' text size and the
+/// "disable character backgrounds" switch.
 struct AppearanceSettings: View {
   @Environment(AppModel.self) private var model
 
@@ -11,6 +11,9 @@ struct AppearanceSettings: View {
     FormCard {
       FormRow("Color Scheme", systemImage: "circle.lefthalf.filled", hue: .gray) {
         KitSegmented(selection: $model.appearanceMode, options: AppearanceMode.allCases.map { ($0.label, $0) })
+      }
+      FormRow("Text Size", systemImage: "textformat.size", hue: .gray) {
+        KitStepper(value: $model.terminalFontSize, in: 9...24, unit: "pt")
       }
       FormRow(
         "Disable Background Colors",

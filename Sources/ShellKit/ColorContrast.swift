@@ -84,6 +84,8 @@ extension EnvironmentValues {
   /// foreground colors with primary (the "Disable Background Colors" theme
   /// option). Default false → current rendering unchanged.
   @Entry public var terminalBackgroundsDisabled = false
+  /// The terminal's text size, in points. The grid reflows when it changes.
+  @Entry public var terminalFontSize = TerminalScreenView.defaultFontSize
   /// Motion in the terminal: the cursor glides between cells and the
   /// connecting message cross-fades into the live grid. Default false → the
   /// cursor is painted into its cell, as before.
