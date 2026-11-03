@@ -88,7 +88,13 @@ final class AppModel {
   private var features: FeatureFlagsStore { .shared }
   
   var sessions: [TerminalSession] = []
-  var selection: Selection?
+  var selection: Selection? {
+    didSet {
+      // A note that's still empty as you leave it was never written: it doesn't stay as an "Untitled" row.
+      guard case .note(let id) = oldValue, selection != oldValue, !isDetached(id), notes.isEmptyNote(id) else { return }
+      notes.deleteNote(id)
+    }
+  }
   /// The directory browser (Files panel) model, driven by the selected
   /// session. Shared so both ContentView and ShellCommands can drive it.
   let directoryBrowser = DirectoryBrowserModel()
