@@ -435,7 +435,7 @@ final class AppModel {
   /// current feature flag. Idempotent; safe to call at any time.
   private func configureGatedBackgroundWork() {
     // The monitor lists the Mac's real screen/tmux sessions: never in the screenshot demo.
-    if features.isEnabled(.screen), !ScreenshotDemo.isOn {
+    if features.isEnabled(.screen), !ScreenshotDemo.isOn || ScreenshotDemo.flag("--persistent-sessions") {
       screenMonitor.start()
     } else {
       screenMonitor.stop()
@@ -1311,8 +1311,8 @@ final class AppModel {
   /// brand-new persistent session for screen.
   #if os(macOS) || os(Windows) || os(Linux)
   @discardableResult
-  func newSession(inSameSectionAs session: TerminalSession) -> TerminalSession {
-    switch kind(of: session) {
+  func newSession(inSameSectionAs session: TerminalSession, kind sectionKind: ConnectionKind? = nil) -> TerminalSession {
+    switch sectionKind ?? kind(of: session) {
     case .local, .action:
       newTerminal()
       return sessions.last ?? session
@@ -1329,11 +1329,11 @@ final class AppModel {
   }
   #else
   @discardableResult
-  func newSession(inSameSectionAs session: TerminalSession) -> TerminalSession? {
+  func newSession(inSameSectionAs session: TerminalSession, kind sectionKind: ConnectionKind? = nil) -> TerminalSession? {
     // iOS: no local terminals — SSH sessions duplicate their connection,
     // web sessions reopen the page, database rows reopen their browser,
     // anything else opens the New Connection sheet.
-    switch kind(of: session) {
+    switch sectionKind ?? kind(of: session) {
     case .ssh(let config):
       return connect(to: config)
     case .web(let web):
@@ -1493,8 +1493,9 @@ final class AppModel {
 
 /// ⌘W: closes the selected session (quitting persistent sessions like
   /// the toolbar does), then selects the previous session in the same
-  /// section — the next one when it was the first, a fresh session in
-  /// that section when it was the only one.
+  /// section — the next one when it was the first, a persistent session
+  /// nothing is attached to when it was the only one and there is one to go
+  /// to (`detachedScreenSession`), else a fresh session in that section.
   func closeSelectedSessionAndSelectNeighbor() {
     // ⌘W with a note focused closes the note editor — and, if the note is
     // empty (never typed into), deletes it so it doesn't linger as
@@ -1523,11 +1524,13 @@ final class AppModel {
     if case .web(let web) = kind(of: session), isBlankWebSession(web) {
       webSessions.remove(web.id)
     }
+    // Read before it closes: a closed session has no kind any more, and would
+    // read as local.
+    let closedKind = kind(of: session)
     let section = sectionSessions(containing: session)
     let index = section.firstIndex { $0.id == session.id } ?? 0
-    let wasOnly = section.count == 1
     
-    if case .screen(let info) = kind(of: session) {
+    if case .screen(let info) = closedKind {
       #if os(macOS) || os(Windows) || os(Linux)
       if info.isRemote {
         // Remote sessions live on the SSH host; closing the attached terminal
@@ -1543,15 +1546,42 @@ final class AppModel {
       removeSession(session.id)
     }
     
-    let remaining = sectionSessions(containing: session)
-    if wasOnly || remaining.isEmpty {
-      newSession(inSameSectionAs: session)
-    } else if index > 0 {
-      selection = .session(remaining[index - 1].id)
+    let remaining = section.filter { kept in kept.id != session.id && sessions.contains { $0.id == kept.id } }
+    if remaining.isEmpty {
+      #if os(macOS) || os(Windows) || os(Linux)
+      if let detached = detachedScreenSession(after: closedKind) {
+        attachOrFocus(detached, on: connections.first { $0.id == detached.remoteOrigin?.sshConfigID })
+        return
+      }
+      #endif
+      newSession(inSameSectionAs: session, kind: closedKind)
     } else {
-      selection = .session(remaining[0].id)
+      selection = .session(remaining[max(0, min(index - 1, remaining.count - 1))].id)
     }
   }
+
+  #if os(macOS) || os(Windows) || os(Linux)
+  /// The persistent session ⌘W goes to after closing the last terminal of
+  /// `closed`, nil when a new session should open instead: for a persistent
+  /// session, another one on the same machine with nothing attached; for a
+  /// local terminal, the same when new terminals are persistent anyway. Skips
+  /// password-protected ones, which would stop at a password prompt.
+  private func detachedScreenSession(after closed: ConnectionKind) -> ScreenSessionInfo? {
+    let candidates: [ScreenSessionInfo]
+    switch closed {
+    case .screen(let info):
+      candidates =
+        (info.isRemote
+        ? remoteScreenSessions.filter { $0.remoteOrigin?.sshConfigID == info.remoteOrigin?.sshConfigID }
+        : screenMonitor.sessions).filter { $0.name != info.name }
+    case .local where alwaysPersistentSessions && features.isEnabled(.screen):
+      candidates = screenMonitor.sessions
+    default:
+      return nil
+    }
+    return candidates.first { !$0.isProtected && attachedSession(toScreen: $0) == nil }
+  }
+  #endif
   
   /// The id of the running session for a connection, if any.
   func sessionID(for config: SSHConfig) -> UUID? {

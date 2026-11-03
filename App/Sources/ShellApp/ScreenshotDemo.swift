@@ -5,8 +5,9 @@ import ShellKit
 /// Debug builds: `--screenshot-demo` runs Shell on made-up hosts, databases and notes for the screenshots
 /// (`.dev/screenshots.json`), never the user's. The vault opens a fresh store in a temporary folder and never syncs;
 /// actions, web pages and history are the demo's own (debug builds share the installed app's defaults); the
-/// screen/tmux monitor stays off, since it lists the Mac's real sessions. `.dev/screenshots.json` also gives the
-/// launch a `ZDOTDIR` with a plain prompt.
+/// screen/tmux monitor stays off, since it lists the Mac's real sessions (`--persistent-sessions` turns it on; launch
+/// with your own `XDG_RUNTIME_DIR` for a `session` daemon of its own). `.dev/screenshots.json` also gives the launch a
+/// `ZDOTDIR` with a plain prompt.
 ///
 ///   --screenshot-demo         the demo
 ///   --run <command>           typed into the first terminal
