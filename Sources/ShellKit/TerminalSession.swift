@@ -87,6 +87,32 @@ public final class TerminalSession: Identifiable {
   /// status; nil for non-action sessions and while running).
   public var actionExitCode: Int32?
 
+  /// The command line of what the terminal runs in its foreground (argv, with
+  /// the program first), read live from the OS. Nil for non-local transports
+  /// and while no child is running.
+  public var foregroundArguments: [String]? {
+    #if os(macOS)
+    guard let pid = transport.foregroundProcessID else { return nil }
+    var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
+    var size = 0
+    guard sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > 4 else { return nil }
+    var bytes = [UInt8](repeating: 0, count: size)
+    guard sysctl(&mib, 3, &bytes, &size, nil, 0) == 0, size > 4 else { return nil }
+    // argc, the executable's path, padding, then argv: all NUL-terminated.
+    let argc = bytes.withUnsafeBytes { $0.loadUnaligned(as: Int32.self) }
+    let strings = bytes[4..<size].split(separator: 0, omittingEmptySubsequences: true)
+    guard argc > 0, strings.count > Int(argc) else { return nil }
+    return strings.dropFirst().prefix(Int(argc)).map { String(decoding: $0, as: UTF8.self) }
+    #elseif os(Linux)
+    guard let pid = transport.foregroundProcessID,
+          let data = FileManager.default.contents(atPath: "/proc/\(pid)/cmdline")
+    else { return nil }
+    return data.split(separator: 0, omittingEmptySubsequences: true).map { String(decoding: $0, as: UTF8.self) }
+    #else
+    return nil
+    #endif
+  }
+
   /// The current working directory of the child process, read live from
   /// the OS on each access. Follows the shell's `cd` without any shell
   /// cooperation (libproc `PROC_PIDVNODEPATHINFO`; `/proc/<pid>/cwd` on

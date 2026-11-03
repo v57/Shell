@@ -261,6 +261,24 @@ public enum ScreenSessionsParser {
   }
 
   /// Whether `name` is one `nextSessionName` hands out, so the user hasn't named the session.
+  /// The session a `session` client is attached to, from its command line
+  /// (`session <name> [cmd...]`, `session -p <name> [cmd...]`, `session attach
+  /// <name>`), nil for any other program and for the tool's other commands.
+  public static func sessionClientName(arguments: [String]) -> String? {
+    guard let program = arguments.first, (program as NSString).lastPathComponent == "session",
+      arguments.count > 1
+    else { return nil }
+    let first = arguments[1]
+    switch first {
+    case "-p", "attach":
+      return arguments.count > 2 ? arguments[2] : nil
+    case "list", "kill", "kill-all", "rename", "detach", "create", "-d":
+      return nil
+    default:
+      return first.hasPrefix("-") ? nil : first
+    }
+  }
+
   public static func isGeneratedName(_ name: String) -> Bool {
     name == "zsh" || (name.hasPrefix("zsh-") && Int(name.dropFirst(4)) != nil)
   }

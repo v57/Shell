@@ -11,6 +11,21 @@ import Testing
 /// local poller and remote scanner use, so a change here reflects real
 /// behaviour rather than a re-implementation.
 struct PersistentSessionTests {
+  // MARK: - `session` clients
+
+  @Test func sessionClientNameReadsTheClientsCommandLine() {
+    let name = ScreenSessionsParser.sessionClientName(arguments:)
+    #expect(name(["session", "work"]) == "work")
+    #expect(name(["/Users/me/.local/bin/session", "work", "top"]) == "work")
+    #expect(name(["session", "-p", "work"]) == "work")
+    #expect(name(["session", "attach", "work"]) == "work")
+    #expect(name(["session"]) == nil)
+    #expect(name(["session", "list"]) == nil)
+    #expect(name(["session", "--daemon"]) == nil)
+    #expect(name(["-zsh"]) == nil)
+    #expect(name(["sessions", "work"]) == nil)
+  }
+
   // MARK: - tmux `ls -F` parsing
 
   @Test func directoryCommandAsksTheBackend() {

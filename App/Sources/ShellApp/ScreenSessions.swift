@@ -51,7 +51,11 @@ final class ScreenSessionsMonitor {
     LocalPTYTransport.sessionExecutablePath()
   }
   
-  private(set) var sessions: [ScreenSessionInfo] = []
+  private(set) var sessions: [ScreenSessionInfo] = [] {
+    didSet { onListed?() }
+  }
+  /// Called with each new listing.
+  @ObservationIgnored var onListed: (() -> Void)?
   /// Where the sessions without a name of their own were at the last refresh, by `ScreenSessionInfo.id`.
   private(set) var directories: [String: String] = [:]
   private(set) var errorMessage: String?

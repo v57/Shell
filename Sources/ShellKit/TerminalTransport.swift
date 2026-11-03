@@ -102,6 +102,10 @@ public protocol TerminalTransport: AnyObject {
   /// the session read live child state — e.g. the current working
   /// directory via `proc_pidinfo`.
   var childProcessID: pid_t? { get }
+  /// The process group in the terminal's foreground: its leader is what the
+  /// shell is running right now (the shell itself at a prompt). Nil where
+  /// there's no local terminal.
+  var foregroundProcessID: pid_t? { get }
 
   /// False while the child has terminal echo off: a password prompt
   /// (`sudo`, `ssh`, `read -s`). Input typed then is never recorded as a
@@ -135,6 +139,7 @@ public extension TerminalTransport {
 
   /// Transports without a child process (SSH, test doubles) report nil.
   var childProcessID: pid_t? { nil }
+  var foregroundProcessID: pid_t? { nil }
 
   /// Transports without a local pty can't see the child's echo setting.
   var echoesInput: Bool { true }
@@ -171,6 +176,11 @@ public final class LocalPTYTransport: TerminalTransport {
   /// exit/close). The session uses it to read live child state such as
   /// the current working directory.
   public var childProcessID: pid_t? { childPID >= 0 ? childPID : nil }
+  public var foregroundProcessID: pid_t? {
+    guard masterFD >= 0 else { return nil }
+    let group = tcgetpgrp(masterFD)
+    return group > 0 ? group : nil
+  }
 
   /// The pty's ECHO flag; the master reports the slave's termios.
   public var echoesInput: Bool {

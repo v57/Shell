@@ -100,6 +100,8 @@ final class AppModel {
   #if os(macOS) || os(Windows) || os(Linux)
   /// Polls `screen -ls` for the sidebar's Screen section.
   var screenMonitor = ScreenSessionsMonitor()
+  /// Local terminals running a `session` client, shown as that session.
+  private var adoptedSessionClients: Set<UUID> = []
   /// Scans GNU screen/tmux sessions on the currently-connected SSH hosts and
   /// publishes them (tagged with their remote origin) so the sidebar can show
   /// remote persistent rows alongside the local ones.
@@ -436,6 +438,7 @@ final class AppModel {
   private func configureGatedBackgroundWork() {
     // The monitor lists the Mac's real screen/tmux sessions: never in the screenshot demo.
     if features.isEnabled(.screen), !ScreenshotDemo.isOn || ScreenshotDemo.flag("--persistent-sessions") {
+      screenMonitor.onListed = { [weak self] in self?.adoptSessionClients() }
       screenMonitor.start()
     } else {
       screenMonitor.stop()
@@ -1516,6 +1519,10 @@ final class AppModel {
       return
     }
     #endif
+    #if os(macOS) || os(Windows) || os(Linux)
+    // A client that exited since the last listing doesn't speak for its session.
+    adoptSessionClients()
+    #endif
     guard let session = selectedSession else { return }
     // ⌘W on a web page that never got a URL (started from an SSH host's
     // "Web Session" item and left blank) drops its saved entry too, so it
@@ -1629,6 +1636,31 @@ final class AppModel {
   func createScreenSession(in directory: String? = nil) {
     screenMonitor.createSession(in: directory) { [weak self] info in
       self?.attach(toScreen: info, startingIn: directory)
+    }
+  }
+
+  /// A local terminal the user started `session` in is that session's terminal:
+  /// otherwise the listing would show the session as another tab, and opening it
+  /// would attach a second client. It's a plain terminal again once the client
+  /// exits and leaves the shell at its prompt.
+  func adoptSessionClients() {
+    for id in adoptedSessionClients {
+      guard let session = sessions.first(where: { $0.id == id }) else {
+        adoptedSessionClients.remove(id)
+        continue
+      }
+      if session.foregroundArguments.flatMap(ScreenSessionsParser.sessionClientName) == nil {
+        adoptedSessionClients.remove(id)
+        sessionKinds[id] = .local
+      }
+    }
+    for session in sessions where kind(of: session) == .local {
+      guard let name = session.foregroundArguments.flatMap(ScreenSessionsParser.sessionClientName),
+        let info = screenMonitor.sessions.first(where: { $0.kind == .session && $0.name == name }),
+        attachedSession(toScreen: info) == nil
+      else { continue }
+      sessionKinds[session.id] = .screen(info)
+      adoptedSessionClients.insert(session.id)
     }
   }
 
