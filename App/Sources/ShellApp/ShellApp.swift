@@ -50,6 +50,7 @@ public struct ShellApp: App {
     WindowGroup {
       MainWindow()
         .environment(AppModel.shared)
+        .vaultHostKeyRequests()
         // ComponentKit's design, in the system accent Shell has always used.
         .componentKit(accent: .accentColor)
     }

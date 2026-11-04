@@ -6,9 +6,9 @@ import ShellKit
 /// modify a remote `~/.ssh/authorized_keys`.
 ///
 /// Authentication mirrors interactive sessions: the Secure Enclave key
-/// first (via `SSHSession`), saved password as fallback. Host keys are
-/// trusted on first use — opening the authorized-keys panel for a host IS
-/// the intent to connect to it. A changed host key fails the command.
+/// first (via `SSHSession`), saved password as fallback. A host key not seen
+/// before is the user's to accept, asked over the window before anything is
+/// sent. A changed host key fails the command.
 @MainActor
 final class HeadlessSSHCommandRunner {
   struct Result {
@@ -21,6 +21,7 @@ final class HeadlessSSHCommandRunner {
   private var exitCode: Int32 = -1
   private var terminationMessage: String?
   private var finished = false
+  private var timeoutTask: Task<Void, Never>?
 
   func run(config: SSHConfig, command: String, timeout: TimeInterval = 30) async throws -> Result {
     try await withCheckedThrowingContinuation { continuation in
@@ -28,31 +29,34 @@ final class HeadlessSSHCommandRunner {
       self.session = session
 
       // Timeout guard: a hung connection must not block the panel forever.
-      let timeoutTask = Task { [weak self] in
-        try? await Task.sleep(for: .seconds(timeout))
-        guard let self, !self.finished else { return }
-        self.session?.close()
-        self.complete(continuation, forceError: AuthorizedKeysError.connectionFailed("timed out after \(Int(timeout))s"))
+      @MainActor func startTimeout() {
+        timeoutTask = Task { [weak self] in
+          try? await Task.sleep(for: .seconds(timeout))
+          guard let self, !self.finished, !Task.isCancelled else { return }
+          self.session?.close()
+          self.complete(continuation, forceError: AuthorizedKeysError.connectionFailed("timed out after \(Int(timeout))s"))
+        }
       }
+      startTimeout()
 
       session.onOutput = { [weak self] data in
         self?.outputBuffer += String(data: data, encoding: .utf8) ?? ""
       }
-      session.onExit = { [weak self, timeoutTask] code in
-        timeoutTask.cancel()
+      session.onExit = { [weak self] code in
+        self?.timeoutTask?.cancel()
         self?.exitCode = code
         self?.complete(continuation)
       }
-      session.onTerminated = { [weak self, timeoutTask] message in
-        timeoutTask.cancel()
+      session.onTerminated = { [weak self] message in
+        self?.timeoutTask?.cancel()
         self?.terminationMessage = message
         self?.complete(continuation)
       }
-      // Trust on first use, never a changed key — the user explicitly opened
-      // the keys panel for this host (the engine also auto-accepts known
-      // hosts).
-      session.onHostKeyPrompt = { prompt in
-        prompt.respondTrustingFirstUse()
+      // The user decides about a first contact, and the clock waits for them.
+      // A changed key is refused (the engine accepts known hosts itself).
+      session.onHostKeyPrompt = { [weak self] prompt in
+        self?.timeoutTask?.cancel()
+        prompt.askInWindow { startTimeout() }
       }
       // Saved passwords answer silently; without one, auth fails and the
       // panel surfaces the termination message.

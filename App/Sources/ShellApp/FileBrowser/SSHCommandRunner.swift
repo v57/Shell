@@ -8,10 +8,10 @@ import ShellIntegrations
 /// by the directory browser for file operations on remote connections.
 ///
 /// Authentication mirrors interactive sessions: the Secure Enclave key first
-/// (via `SSHSession`), saved password as fallback. Host keys are trusted on
-/// first use — opening the file browser for a host IS the intent to connect
-/// to it. A timeout guard aborts a hung connection so the browser cannot be
-/// blocked forever.
+/// (via `SSHSession`), saved password as fallback. A host key not seen before
+/// is the user's to accept, asked over the window before anything is sent. A
+/// timeout guard aborts a hung connection so the browser cannot be blocked
+/// forever.
 ///
 /// The connection config is supplied by the caller (e.g. extracted from
 /// `model.kind(of:)`'s `.ssh(config)`); this runner never resolves config
@@ -32,6 +32,7 @@ final class SSHCommandRunner: FileCommandExecutor {
   private var exitCode: Int32 = -1
   private var terminationMessage: String?
   private var finished = false
+  private var timeoutTask: Task<Void, Never>?
 
   init(config: SSHConfig, timeout: TimeInterval = 30) {
     self.config = config
@@ -56,34 +57,37 @@ final class SSHCommandRunner: FileCommandExecutor {
       self.session = session
 
       // Timeout guard: a hung connection must not block the file browser.
-      let timeoutTask = Task { [weak self] in
-        try? await Task.sleep(for: .seconds(self?.timeout ?? 30))
-        guard let self, !self.finished else { return }
-        self.session?.close()
-        self.complete(
-          continuation,
-          forceError: SSHCommandRunnerError.connectionFailed(
-            "timed out after \(Int(self.timeout))s"))
+      @MainActor func startTimeout() {
+        timeoutTask = Task { [weak self] in
+          try? await Task.sleep(for: .seconds(self?.timeout ?? 30))
+          guard let self, !self.finished, !Task.isCancelled else { return }
+          self.session?.close()
+          self.complete(
+            continuation,
+            forceError: SSHCommandRunnerError.connectionFailed(
+              "timed out after \(Int(self.timeout))s"))
+        }
       }
+      startTimeout()
 
       session.onOutput = { [weak self] data in
         self?.outputBuffer += String(data: data, encoding: .utf8) ?? ""
       }
-      session.onExit = { [weak self, timeoutTask] code in
-        timeoutTask.cancel()
+      session.onExit = { [weak self] code in
+        self?.timeoutTask?.cancel()
         self?.exitCode = code
         self?.complete(continuation)
       }
-      session.onTerminated = { [weak self, timeoutTask] message in
-        timeoutTask.cancel()
+      session.onTerminated = { [weak self] message in
+        self?.timeoutTask?.cancel()
         self?.terminationMessage = message
         self?.complete(continuation)
       }
-      // Trust on first use, never a changed key — the user explicitly opened
-      // the file browser for this host (the engine also auto-accepts known
-      // hosts).
-      session.onHostKeyPrompt = { prompt in
-        prompt.respondTrustingFirstUse()
+      // The user decides about a first contact, and the clock waits for them.
+      // A changed key is refused (the engine accepts known hosts itself).
+      session.onHostKeyPrompt = { [weak self] prompt in
+        self?.timeoutTask?.cancel()
+        prompt.askInWindow { startTimeout() }
       }
       // Saved passwords answer silently; without one, auth fails and the
       // caller surfaces the termination error.

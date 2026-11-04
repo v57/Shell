@@ -29,14 +29,6 @@ public struct TerminalHostKeyPrompt: Identifiable {
     self.respond = respond
   }
 
-  /// Answers for connections that run without a visible prompt (file
-  /// browser, tunnels, the authorized-keys panel): trusts a host on first
-  /// contact, rejects a changed key. A changed key must never be accepted
-  /// silently: the saved password would go to whoever answered, and the
-  /// remembered key would be replaced.
-  public func respondTrustingFirstUse() {
-    respond(previousFingerprint == nil)
-  }
 }
 
 /// Shown when an SSH server asks for a password.

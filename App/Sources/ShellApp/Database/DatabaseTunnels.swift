@@ -73,10 +73,10 @@ enum DatabaseTunnels {
   /// Logs in to the host in forwarding-only mode (no remote shell) and resolves to a dialer for its channels: one
   /// authenticated connection carries every connection the engine makes.
   private static func login(_ session: SSHSession, config: SSHConfig) async throws -> WireDialer {
-    // Trust on first use, never a changed key: opening a database connection bound to a host IS the intent to
-    // connect (same policy as the web card and the file browser).
+    // A first contact is the user's to decide, a changed key is refused (same policy as the web card and the file
+    // browser).
     session.onHostKeyPrompt = { prompt in
-      prompt.respondTrustingFirstUse()
+      prompt.askInWindow()
     }
     session.onPasswordPrompt = { [config] prompt in
       // No saved SSH password and key auth failed: cancelling the prompt fails the login, which surfaces through

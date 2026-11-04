@@ -58,6 +58,7 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
     /// seconds although keepalives were being sent.
     case noResponse
     case hostKeyRejected
+    case hostKeyNotPublished(actual: String)
     case authenticationCancelled
     case noAvailableAuthenticationMethods
     /// The connection is not open (no live session to multiplex on).
@@ -78,6 +79,8 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
         return "The host stopped responding."
       case .hostKeyRejected:
         return "Host key was rejected."
+      case .hostKeyNotPublished(let actual):
+        return SSHTunnelError.hostKeyNotPublished(host: "This server", actual: actual).errorDescription
       case .authenticationCancelled:
         return "Authentication was cancelled."
       case .noAvailableAuthenticationMethods:
@@ -112,7 +115,7 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
       return true
     case .libssh2(let code, _):
       return linkErrorCodes.contains(code)
-    case .hostNotFound, .hostKeyRejected, .authenticationCancelled,
+    case .hostNotFound, .hostKeyRejected, .hostKeyNotPublished, .authenticationCancelled,
          .noAvailableAuthenticationMethods, .notConnected, .remoteCommandFailed:
       return false
     }
@@ -502,7 +505,13 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
     let base64 = hashData.base64EncodedString().replacingOccurrences(of: "=", with: "")
     let fingerprint = "SHA256:\(base64)"
 
-    let known = knownHosts.fingerprint(for: config.host, port: config.port)
+    // The code hosts' keys ship with SSHKit: another key there is refused, and asking wouldn't help.
+    if let published = SSHKnownHosts.fingerprints(host: config.host, port: config.port) {
+      guard published.contains(fingerprint) else { throw EngineError.hostKeyNotPublished(actual: fingerprint) }
+      return
+    }
+
+    let known = knownHosts.fingerprint(for: config)
     if known == fingerprint {
       return
     }
@@ -513,15 +522,15 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
     let sem = DispatchSemaphore(value: 0)
     let respond: @Sendable (Bool) -> Void = { [knownHosts, config] accept in
       if accept {
-        knownHosts.save(fingerprint: fingerprint, host: config.host, port: config.port)
+        knownHosts.save(fingerprint: fingerprint, for: config)
       }
       sem.signal()
     }
     DispatchQueue.main.async { [weak self] in
       self?.onHostKeyChallenge?(HostKeyChallenge(fingerprint: fingerprint, previousFingerprint: known, respond: respond))
     }
-    _ = sem.wait(timeout: .now() + .seconds(60))
-    if knownHosts.fingerprint(for: config.host, port: config.port) != fingerprint {
+    _ = sem.wait(timeout: .now() + .seconds(120))
+    if knownHosts.fingerprint(for: config) != fingerprint {
       throw EngineError.hostKeyRejected
     }
   }
