@@ -859,7 +859,7 @@ final class AppModel {
     let session = TerminalSession(
       transport: SSHSession(config: config),
       startupMessage: "Connecting to \(config.host)…",
-      reconnect: { SSHSession(config: config) }
+      reconnect: { SSHSession(config: config, unattended: true) }
     )
     sessionKinds[session.id] = .ssh(config)
     registerCapture(for: session, archiveLocally: false)

@@ -54,6 +54,19 @@ public nonisolated enum SSHKeychain {
     return try VaultIdentity.key()
   }
   
+  /// Before a login uses this device's key: asks if the key needs the user and no window is open, unless `unattended`, and
+  /// throws if there's no yes. Blocks while asking. A key made before that does nothing here (`VaultIdentity`).
+  static func confirmKeyUse(reason: String, unattended: Bool) throws {
+    try VaultIdentity.confirm(reason: reason, unattended: unattended)
+  }
+
+  /// A signature with this device's key: through the window a key that needs the user has open; it never asks.
+  static func signature(
+    for data: Data, key: SecureEnclave.P256.Signing.PrivateKey
+  ) throws -> P256.Signing.ECDSASignature {
+    try VaultIdentity.signature(for: data, key: key)
+  }
+
   private static func loadOrCreateKey(
     account: String,
     label: String

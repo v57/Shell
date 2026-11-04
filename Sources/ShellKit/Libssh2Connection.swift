@@ -148,6 +148,8 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
 
   private let config: SSHConfig
   private let privateKey: SecureEnclave.P256.Signing.PrivateKey?
+  /// Nobody started this login just now (a dropped link dialed again): a key that would have to ask the user fails it.
+  private let unattended: Bool
   /// When non-nil the channel requests PTY + exec instead of a shell
   /// (action sessions); the remote exit status arrives via onExit.
   private let execCommand: String?
@@ -202,10 +204,11 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
 
   init(
     config: SSHConfig, privateKey: SecureEnclave.P256.Signing.PrivateKey?, execCommand: String? = nil,
-    forwardingOnly: Bool = false, knownHosts: KnownHostsStore = KnownHostsStore()
+    forwardingOnly: Bool = false, unattended: Bool = false, knownHosts: KnownHostsStore = KnownHostsStore()
   ) {
     self.config = config
     self.privateKey = privateKey
+    self.unattended = unattended
     self.execCommand = execCommand
     self.forwardingOnly = forwardingOnly
     self.knownHosts = knownHosts
@@ -544,6 +547,7 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
 
     // 1) Secure Enclave key (publickey with external signer).
     if config.authMethod == .keychainKey, let key = privateKey {
+      try SSHKeychain.confirmKeyUse(reason: "sign in to \(config.host)", unattended: unattended)
       let pubBlob = SSHKeychain.publicKeyBlob(for: key)
       if authWithPublicKey(sess, username: username, usernameLen: usernameLen, key: key, pubBlob: pubBlob) {
         return
@@ -1353,7 +1357,7 @@ private let seSignCallback: @convention(c) (
   let ref = Unmanaged<SEKeyRef>.fromOpaque(opaque).takeUnretainedValue()
   let msg = Data(bytes: data, count: dataLen)
   do {
-    let signature = try ref.key.signature(for: msg)
+    let signature = try SSHKeychain.signature(for: msg, key: ref.key)
     let raw = signature.rawRepresentation
     guard raw.count == 64 else { return -1 }
     let r = Data(raw.prefix(32))

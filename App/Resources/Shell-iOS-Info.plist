@@ -6,5 +6,7 @@
 	<!-- Animations and scrolling at up to 120 fps on an iPhone with ProMotion; without it they stop at 60. -->
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Confirms it's you before this device's SSH key signs in to a server.</string>
 </dict>
 </plist>

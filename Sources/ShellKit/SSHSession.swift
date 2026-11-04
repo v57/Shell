@@ -14,6 +14,8 @@ public final class SSHSession: TerminalTransport {
   /// When true the connection carries no shell/exec session channel and exists
   /// purely to multiplex `direct-tcpip` port-forward channels.
   private let forwardingOnly: Bool
+  /// Nobody started this login just now: a key that would have to ask the user fails it instead.
+  private let unattended: Bool
 
   /// All callbacks are delivered on the main thread.
   public var onOutput: ((Data) -> Void)?
@@ -32,10 +34,11 @@ public final class SSHSession: TerminalTransport {
   private var engine: Libssh2Connection?
   private var started = false
 
-  public init(config: SSHConfig, execCommand: String? = nil, forwardingOnly: Bool = false) {
+  public init(config: SSHConfig, execCommand: String? = nil, forwardingOnly: Bool = false, unattended: Bool = false) {
     self.config = config
     self.execCommand = execCommand
     self.forwardingOnly = forwardingOnly
+    self.unattended = unattended
   }
 
   public func start() {
@@ -49,7 +52,8 @@ public final class SSHSession: TerminalTransport {
       config: config,
       privateKey: key,
       execCommand: execCommand,
-      forwardingOnly: forwardingOnly
+      forwardingOnly: forwardingOnly,
+      unattended: unattended
     )
 
     engine.onOutput = { [weak self] data in
