@@ -375,6 +375,7 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
         throw EngineError.libssh2(-1, "libssh2_session_init_ex returned NULL")
       }
       session = sess
+      SSHAlgorithms.restrict(sess)
 
       try handshake(sess, fd: fd)
       try verifyHostKey(sess)
