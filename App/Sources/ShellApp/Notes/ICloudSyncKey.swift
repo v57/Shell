@@ -1,9 +1,8 @@
 import CryptoKit
 import Foundation
+import VaultKit
 #if canImport(Security)
 import Security
-#else
-import VaultKit
 #endif
 
 /// The AES-256 key that encrypts iCloud-synced data (notes, SSH configs).
@@ -64,6 +63,8 @@ enum ICloudSyncKey {
 
 #if canImport(Security)
   private static func save(_ data: Data, account: String, label: String) throws {
+    // With iCloud off nothing new goes to iCloud Keychain, and a new key couldn't open old data anyway.
+    guard !VaultICloud.isOff else { throw KeyError.keychainReadFailed(errSecItemNotFound) }
     // Syncable items must NOT be ThisDeviceOnly and must live in the
     // data-protection keychain (kSecUseDataProtectionKeychain, already
     // used by SecureFileStore). iCloud Keychain does the rest.

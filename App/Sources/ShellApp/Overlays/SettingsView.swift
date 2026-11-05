@@ -77,6 +77,7 @@ struct SettingsView: View {
           footer: "Turned-off features are hidden and stop their background work; their data is kept.")
       }
       SettingsPane("Actions", systemImage: "bolt", hue: .purple, id: "actions") { ActionsSettings() }
+      SettingsPane("Privacy", systemImage: "hand.raised", hue: .blue, id: "privacy") { VaultICloudCard() }
       SettingsPane("Accounts", systemImage: "person.2", hue: .indigo, section: "v57", id: Self.accountsPane) {
         VaultAccountsSettings()
       }
