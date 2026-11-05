@@ -94,10 +94,12 @@ struct AuthorizedKeysView: View {
       Button("Remove from iCloud", systemImage: "icloud.slash") {
         forget(entry)
       }
+      .kitMenuPreview("Stops syncing this key through iCloud.")
     case .file:
       Button("Save to iCloud", systemImage: "icloud.and.arrow.up") {
         saveToICloud(entry)
       }
+      .kitMenuPreview("Syncs this key through iCloud.")
     case .device:
       EmptyView()
     }

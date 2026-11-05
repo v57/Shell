@@ -28,6 +28,10 @@ struct NotesSectionView: View {
               Button(note.isEncrypted ? "Decrypt Note" : "Encrypt Note") {
                 model.notes.setEncrypted(!note.isEncrypted, for: note.id)
               }
+              .kitMenuPreview(
+                note.isEncrypted
+                  ? "Takes the encryption off this note, so it’s saved as plain text."
+                  : "Saves this note encrypted.")
               Divider()
               Button("Delete Note", role: .destructive) {
                 model.deleteNote(note.id)

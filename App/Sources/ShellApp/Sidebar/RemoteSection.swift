@@ -139,6 +139,7 @@ private struct SSHConfigGroup: View {
         Button("Close Connection", role: .destructive) {
           model.removeSession(session.id)
         }
+        .kitMenuPreview("Closes this connection to \(config.displayName). The host stays in your list.")
       }
     }
     // A file dropped on a running SSH session's row: ask whether to upload it
@@ -184,6 +185,7 @@ private struct SSHConfigGroup: View {
           // A remote create must exec on the host's LIVE connection; it is
           // the only entry here that requires the host to be connected.
           .disabled(!model.hasLiveSSHConnection(to: config))
+          .kitMenuPreview("Starts a session on \(config.displayName) that keeps running after you disconnect.")
           Button("Refresh Sessions", systemImage: "arrow.clockwise") {
             model.refreshPersistentSessions()
           }
@@ -235,6 +237,7 @@ private struct SSHConfigRow: View {
               Button("Web Session", systemImage: "globe") {
                 model.openNewWebSession(on: config)
               }
+              .kitMenuPreview("Opens a web page through \(config.displayName).")
             }
             if flags.isEnabled(.database) {
               Button("Database", systemImage: "cylinder.split.1x2") {

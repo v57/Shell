@@ -531,6 +531,7 @@ struct ContentView: View {
         ToolGroup { webSSHTunnelPicker(web: web) }
       } menu: {
         KitSubmenu("SSH Tunnel", systemImage: "network") { webSSHTunnelOptions(web) }
+          .kitMenuPreview("Sends this web session through an SSH host instead of opening it directly.")
       }
       #endif
       ToolbarSlot { webAddressField(web) }
@@ -569,9 +570,7 @@ struct ContentView: View {
           filesButton(inMenu: true)
           #if os(macOS)
           if let directory = model.smartActionDirectory {
-            KitSubmenu("Open With", systemImage: "arrow.up.forward.app") {
-              OpenWithMenu(directory: directory, kinds: model.openWithKinds, inMenu: true)
-            }
+            KitOpenWithRow(ProjectOpener.openApps(model.openWithKinds, in: directory))
           }
           #endif
         }
@@ -696,6 +695,7 @@ struct ContentView: View {
             Button(kind.title, systemImage: "square.and.arrow.up") {
               model.runSmartAction(kind, scheme: scheme, in: directory)
             }
+            .kitMenuPreview(kind.menuPreview(scheme: scheme.name))
           }
         }
       }
@@ -904,6 +904,7 @@ private struct SmartActionButton: View {
       }
     }
     .toolbarHelp(running ? "Stop" : "\(kind.title) \(scheme.name)", inMenu: inMenu)
+    .kitMenuPreview(inMenu ? kind.menuPreview(scheme: scheme.name, running: running) : nil)
   }
 
   private var icon: String {
@@ -912,6 +913,22 @@ private struct SmartActionButton: View {
     case .build: return "hammer.fill"
     case .test: return "play.diamond"
     default: return "checkmark.seal"
+    }
+  }
+}
+
+extension ActionKind {
+  /// What running (or, while it runs, stopping) the action does, for a menu's panel.
+  func menuPreview(scheme: String, running: Bool = false) -> String? {
+    switch self {
+    case .run: running ? "Stops \(scheme)." : "Runs the \(scheme) scheme."
+    case .build: running ? "Stops the build." : "Builds the \(scheme) scheme without running it."
+    case .test: running ? "Stops the tests." : "Runs the tests in the \(scheme) scheme."
+    case .lint: running ? "Stops the linter." : "Checks the code in the \(scheme) scheme with its linter."
+    case .install: "Builds \(scheme) and copies the app into Applications."
+    case .export: "Builds \(scheme), notarizes it and zips the app, ready to share."
+    case .upload: "Builds \(scheme) and uploads it to App Store Connect."
+    case .clean: nil
     }
   }
 }
@@ -931,6 +948,7 @@ private struct DistributeMenu: View {
         Button(kind.title, systemImage: "square.and.arrow.up") {
           model.runSmartAction(kind, scheme: scheme, in: directory)
         }
+        .kitMenuPreview(kind.menuPreview(scheme: scheme.name))
       }
       if kinds.contains(where: \.needsNotarization) {
         Divider()

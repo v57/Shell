@@ -118,7 +118,39 @@ extension AppModel {
     }
   }
 
-  /// A line under the title saying what the choices mean, where they need it.
+  /// What a choice will do, for the drop menu's panel while it's highlighted.
+  func fileDropPreview(of action: FileDropAction, for request: FileDropRequest) -> String {
+    let files = request.files
+    let single = files.count == 1 ? files[0] : nil
+    let subject = single?.name ?? "the \(files.count) items"
+    switch action {
+    case .copy:
+      return "Copies \(subject) into the folder this session is in."
+    case .upload:
+      let folders = files.contains(where: \.isDirectory) ? " Folders can’t be uploaded yet." : ""
+      let host = fileDropTargetName(for: request)
+      if case .session(let id) = request.target, sessionFolder(id) != nil {
+        return "Sends \(subject) to the folder this session is in on \(host).\(folders)"
+      }
+      return "Sends \(subject) to your home folder on \(host).\(folders)"
+    case .insertPath:
+      return single.map { "Types the path of \($0.name) into the terminal." }
+        ?? "Types the paths of \(subject) into the terminal."
+    case .goToFolder:
+      guard let single else { return "Changes this session’s folder." }
+      return single.isDirectory
+        ? "Changes this session’s folder to \(single.name)."
+        : "Changes this session’s folder to the one \(single.name) is in."
+    case .copyToNote:
+      return single.map { "Copies the text of \($0.name) into a new encrypted note. The file stays as it is." }
+        ?? "Copies each file’s text into a new encrypted note of its own. The files stay as they are."
+    case .linkFile:
+      return single.map { "Opens \($0.name) under Text Files. Your edits change the file itself." }
+        ?? "Opens the files under Text Files. Your edits change the files themselves."
+    }
+  }
+
+  /// What the choices mean, where they need it: the drop menu's panel says it after what was dropped where.
   func fileDropMessage(for request: FileDropRequest) -> String? {
     guard case .notes = request.target else { return nil }
     let skipped = request.files.filter(\.isDirectory).count

@@ -317,12 +317,15 @@ struct DirectoryBrowserView: View {
         let others = names.subtracting([row.name])
         if !others.isEmpty {
           Divider()
+          let picked = others.count == 1 ? (others.first ?? "") : "the \(others.count) items you picked"
           Button("Move Here", systemImage: "folder") {
             onMoveCopyIntoDirectory(others, absolutePath(for: row), .move)
           }
+          .kitMenuPreview("Moves \(picked) into \(row.name).")
           Button("Copy Here", systemImage: "doc.on.doc") {
             onMoveCopyIntoDirectory(others, absolutePath(for: row), .copy)
           }
+          .kitMenuPreview("Copies \(picked) into \(row.name).")
         }
       }
     }

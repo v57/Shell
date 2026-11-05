@@ -167,6 +167,7 @@ private struct RunningSectionView: View {
             .kitContextMenu {
               if session.isActionRunning {
                 Button("Cancel (Ctrl+C)") { session.send(Data([0x03])) }
+                  .kitMenuPreview("Stops the running action, as Ctrl+C would.")
               }
               Button("Close", role: .destructive) {
                 model.removeSession(session.id)

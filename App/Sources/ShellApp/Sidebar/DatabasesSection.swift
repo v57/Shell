@@ -95,6 +95,7 @@ struct DatabasesSectionView: View {
     }
     KitMenuSection("Show") {
       Toggle("Hide Unused for a Week", isOn: $hidesUnused.animation(.kit))
+        .kitMenuPreview("Hides connections you haven’t opened for a week. They stay saved.")
     }
   }
 }

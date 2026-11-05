@@ -28,6 +28,7 @@ struct WebSessionRow: View {
     .kitContextMenu {
       Button("Open") { model.openOrFocusWebSession(web) }
       Button("Reconnect") { model.reconnectWebSession(web) }
+        .kitMenuPreview("Closes \(web.sidebarTitle) and opens it again.")
       Divider()
       Button("Edit…") { model.editingWebSession = web }
       Divider()

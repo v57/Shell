@@ -98,7 +98,9 @@ struct LocalSectionView: View {
         if flags.isEnabled(.authorizedKeys) {
           Button("Authorized Keys", systemImage: "key.2.on.ring.fill") {
             model.openLocalAuthorizedKeys()
-          }.help("Manage this \(KitDevice.nameInSentence)'s authorized keys")
+          }
+          .help("Manage this \(KitDevice.nameInSentence)'s authorized keys")
+          .kitMenuPreview("Shows which keys can log in to this \(KitDevice.nameInSentence).")
         }
         Divider()
         Button("Close Terminal", role: .destructive) {
@@ -133,6 +135,7 @@ struct LocalSectionView: View {
         Button("Close Session", role: .destructive) {
           model.closeScreenSession(info)
         }
+        .kitMenuPreview("Ends the session and anything still running in it.")
       }
     }
     ForEach(flags.isEnabled(.screen) ? model.remoteScreenSessions.filter { state.matches(model.displayName(forScreen: $0)) } : []) { info in
@@ -152,6 +155,7 @@ struct LocalSectionView: View {
           Button("Close Session", role: .destructive) {
             model.closeRemoteScreenSession(info)
           }
+          .kitMenuPreview("Ends the session and anything still running in it.")
         }
     }
   }
@@ -230,6 +234,7 @@ struct LocalSectionView: View {
           Button("Web Session", systemImage: "globe") {
             model.openEmptyWebSession()
           }
+          .kitMenuPreview("Opens a web page in a new session here.")
         }
         if flags.isEnabled(.database) {
           Button("Database", systemImage: "cylinder.split.1x2") {

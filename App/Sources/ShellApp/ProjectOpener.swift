@@ -59,6 +59,19 @@ enum ProjectOpener {
     }
   }
 
+  /// The installed apps of `kinds` for a menu's Open With row, each opening `directory`.
+  @MainActor static func openApps(_ kinds: [OpenWithKind], in directory: URL) -> [KitOpenApp?] {
+    kinds.map { kind in
+      guard isInstalled(kind) else { return nil }
+      let name = displayName(for: kind)
+      return KitOpenApp(
+        name, icon: icon(for: kind), preview: "Opens \(directory.lastPathComponent) in \(name).", id: kind.rawValue
+      ) {
+        open(kind, in: directory)
+      }
+    }
+  }
+
   /// What to hand the app: for Xcode prefer the project bundle (`Package.swift`
   /// for a pure SwiftPM package); editors/Finder get the directory itself.
   private static func targetURL(for kind: OpenWithKind, in directory: URL) -> URL {

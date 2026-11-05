@@ -104,28 +104,27 @@ private struct WindowAnchorView: NSViewRepresentable {
 }
 
 /// The drop menu's rows (designed on the "Shell Drop Menu" canvas): the choices first, nearest the pointer, each
-/// with its number key, then what was dropped where.
+/// with its number key; the panel at the end says what was dropped where, and what the highlighted choice will do.
 private struct FileDropMenu: View {
   @Environment(AppModel.self) private var model
   let request: FileDropRequest
 
   var body: some View {
     let actions = model.fileDropActions(for: request)
+    KitMenuPreview(summary)
     ForEach(Array(actions.enumerated()), id: \.element) { index, action in
       Button(model.fileDropTitle(of: action, for: request), systemImage: action.systemImage) {
         model.performFileDrop(action, for: request)
       }
       .kitMenuHint(index < 9 ? "\(index + 1)" : nil)
+      .kitMenuPreview(model.fileDropPreview(of: action, for: request))
     }
-    Divider()
-    KitMenuFooter(
-      model.fileDropSubject(for: request), subtitle: "Dropped on \(model.fileDropTargetName(for: request))",
-      message: model.fileDropMessage(for: request), systemImage: headerSymbol)
   }
 
-  private var headerSymbol: String {
-    guard request.files.count == 1 else { return "doc.on.doc" }
-    return request.files[0].isDirectory ? "folder" : "doc"
+  /// "harbor.png, dropped on prod-db.", and what the choices mean where they need it.
+  private var summary: String {
+    let line = "\(model.fileDropSubject(for: request)), dropped on \(model.fileDropTargetName(for: request))."
+    return model.fileDropMessage(for: request).map { "\(line) \($0)" } ?? line
   }
 }
 

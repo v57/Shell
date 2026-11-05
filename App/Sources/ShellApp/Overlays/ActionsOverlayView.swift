@@ -115,6 +115,7 @@ struct ActionsOverlayView: View {
           .kitContextMenu {
             Button("Edit…") { model.editAction(action) }
             Button("Remove", role: .destructive) { model.actions.remove(action.id) }
+              .kitMenuPreview("Takes \(action.name) off Your Actions.")
           }
         }
         if model.actions.all.isEmpty {
@@ -243,6 +244,7 @@ struct ActionsOverlayView: View {
         Button("Edit Action…") { addToActions(kind, scheme: scheme) }
       } else if model.smartActionCommand(kind, scheme: scheme) != nil {
         Button("Add to Your Actions…") { addToActions(kind, scheme: scheme) }
+          .kitMenuPreview("Keeps a copy of \(kind.title) \(scheme.name) in Your Actions. You can edit it first.")
       }
     }
   }
