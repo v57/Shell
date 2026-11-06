@@ -95,6 +95,37 @@ public func terminalCellRuns(
   return runs
 }
 
+// MARK: - Lines
+
+/// What one line of the grid draws from (`TerminalScreenView.lineKey`).
+nonisolated struct TerminalLineKey: Equatable {
+  var cells: ArraySlice<TerminalCell>
+  var columns: Int
+  /// The column of the cursor painted into this line's runs.
+  var cursorColumn: Int?
+  var cursorBackground: Color?
+  /// The selection's ends, while it covers this line.
+  var selection: [TerminalCursor]?
+  /// The line's still-typing columns and what they show meanwhile.
+  var pending: TerminalOutputReveal.PendingLine?
+  var replaced: [TerminalCell]?
+  var fontSize: CGFloat
+  var backgroundsDisabled: Bool
+  var scheme: ColorScheme
+}
+
+/// One line of the grid, built again only when its key changes (with
+/// `.equatable()`): a snapshot that changes a line or two leaves the others as
+/// they were, instead of building every line's runs and text again.
+struct TerminalLineRow<Content: View>: View, Equatable {
+  let key: TerminalLineKey
+  @ViewBuilder let content: () -> Content
+
+  var body: some View { content() }
+
+  nonisolated static func == (lhs: Self, rhs: Self) -> Bool { lhs.key == rhs.key }
+}
+
 // MARK: - The pure SwiftUI terminal (rendering AND input)
 
 /// The entire terminal screen as pure SwiftUI — no NSView, no
@@ -205,6 +236,9 @@ public struct TerminalScreenView: View {
   @Environment(\.terminalAnimationsEnabled) private var animationsEnabled
   /// New output typing out (animations only): the buffer the grid renders.
   @State private var reveal = TerminalOutputReveal()
+  /// The keyboard's handler, a box this view fills as it updates (see
+  /// `InputModifier.Keys`).
+  @State private var keys = InputModifier.Keys()
 
   public var body: some View {
     // Read observable properties in body (not inside closures) so SwiftUI
@@ -265,7 +299,7 @@ public struct TerminalScreenView: View {
             // changing the size; the grid must reflow.
             resizeIfNeeded(to: geo.size, safeArea: newInsets)
           }
-          .modifier(InputModifier(session: session, focused: $focused, keyboardOn: showKeyboard, onKeyboardDismissed: { showKeyboard = false }, anchorLine: $anchorLine))
+          .modifier(InputModifier(session: session, focused: $focused, keyboardOn: showKeyboard, keyboard: $showKeyboard, keys: keys.configured(session: session, anchorLine: $anchorLine)))
           .modifier(SelectionModifier(
             session: session,
             focused: $focused,
@@ -330,17 +364,28 @@ public struct TerminalScreenView: View {
     return ScrollView {
       LazyVStack(alignment: .leading, spacing: 0) {
         ForEach(0..<totalLines, id: \.self) { line in
-          lineView(
-            linePieces(
-              snapshot: snapshot,
-              line: line,
-              // A gliding cursor is drawn by the overlay below, not into
-              // its cell's run.
-              atBottom: atBottom && !animationsEnabled,
-              selectionStart: selectionStart,
-              selectionEnd: selectionEnd
+          // A gliding cursor is drawn by the overlay below, not into its
+          // cell's run.
+          let paintsCursor = atBottom && !animationsEnabled
+          // Each line is built again only when what it draws changed: new
+          // output usually changes a line or two, and building every line's
+          // runs and text on each snapshot was most of an update's time.
+          TerminalLineRow(
+            key: lineKey(
+              snapshot: snapshot, line: line, atBottom: paintsCursor, selectionStart: selectionStart,
+              selectionEnd: selectionEnd)
+          ) {
+            lineView(
+              linePieces(
+                snapshot: snapshot,
+                line: line,
+                atBottom: paintsCursor,
+                selectionStart: selectionStart,
+                selectionEnd: selectionEnd
+              )
             )
-          )
+          }
+          .equatable()
           .frame(height: metrics.lineHeight, alignment: .leading)
         }
       }
@@ -366,6 +411,47 @@ public struct TerminalScreenView: View {
     // Scrolling behavior (anchor tracking, content-offset reporting,
     // bottom-tailing) lives in ScrollModifier.
     .modifier(ScrollModifier(session: session, anchorLine: $anchorLine, scrollOffset: $scrollOffset, scrolledToEnd: $scrolledToEnd, topInset: topInset, containerHeight: containerHeight))
+  }
+
+  /// Everything one line's drawing depends on (see `TerminalLineRow`): its
+  /// cells, the cursor and selection where they touch it, its typing-out
+  /// state and the text style.
+  private func lineKey(
+    snapshot: TerminalSnapshot,
+    line: Int,
+    atBottom: Bool,
+    selectionStart: TerminalCursor?,
+    selectionEnd: TerminalCursor?
+  ) -> TerminalLineKey {
+    let cells: ArraySlice<TerminalCell>
+    let scrollbackCount = snapshot.scrollback.count
+    if line < scrollbackCount {
+      cells = snapshot.scrollback[line][...]
+    } else {
+      let start = (line - scrollbackCount) * snapshot.columns
+      let end = min(start + snapshot.columns, snapshot.cells.count)
+      cells = start >= 0 && start < end ? snapshot.cells[start..<end] : []
+    }
+    let screenRow = line - (snapshot.totalLines - snapshot.rows)
+    let cursorColumn = atBottom && snapshot.showCursor && screenRow == snapshot.cursor.row ? snapshot.cursor.column : nil
+    var selection: [TerminalCursor]?
+    if let selectionStart, let selectionEnd,
+       line >= min(selectionStart.row, selectionEnd.row), line <= max(selectionStart.row, selectionEnd.row) {
+      selection = [selectionStart, selectionEnd]
+    }
+    let pending = animationsEnabled ? reveal.pending[line] : nil
+    return TerminalLineKey(
+      cells: cells,
+      columns: snapshot.columns,
+      cursorColumn: cursorColumn,
+      cursorBackground: cursorColumn == nil ? nil : snapshot.cursorBackground,
+      selection: selection,
+      pending: pending,
+      replaced: pending == nil ? nil : reveal.replaced[line],
+      fontSize: fontSize,
+      backgroundsDisabled: backgroundsDisabled,
+      scheme: colorScheme
+    )
   }
 
   /// The viewport height the grid's whole rows leave unused below the last one.
@@ -1023,11 +1109,34 @@ extension TerminalScreenView {
     /// which is what re-invokes the iOS keyboard bridge's updateUIView and lets
     /// the hidden UIKeyInput proxy become first responder.
     let keyboardOn: Bool
-    /// The system closed the keyboard (a swipe, the hide key): the next tap asks for it again.
-    let onKeyboardDismissed: () -> Void
-    /// Anchor binding: Cmd+K / typing snap back to the bottom after the
-    /// content height changes (see ScrollModifier.snapToBottom).
-    @Binding var anchorLine: Int?
+    /// Set to false when the system closes the keyboard (a swipe, the hide
+    /// key): the next tap asks for it again.
+    let keyboard: Binding<Bool>
+    /// The key handler. A box rather than a closure or the anchor's binding:
+    /// those were new on every snapshot (the anchor follows the output), so
+    /// this modifier, and the key handler `.onKeyPress` puts in the terminal's
+    /// environment, updated with each line of output.
+    let keys: Keys
+
+    /// Handles the terminal's keys with the session and anchor the screen
+    /// last set (`configured`).
+    @MainActor final class Keys {
+      private var session: TerminalSession?
+      /// Anchor binding: Cmd+K / typing snap back to the bottom after the
+      /// content height changes (see ScrollModifier.snapToBottom).
+      private var anchorLine: Binding<Int?> = .constant(nil)
+
+      func configured(session: TerminalSession, anchorLine: Binding<Int?>) -> Self {
+        self.session = session
+        self.anchorLine = anchorLine
+        return self
+      }
+
+      func handle(_ press: KeyPress) -> KeyPress.Result {
+        guard let session else { return .ignored }
+        return InputModifier.handleKeyPress(press, session: session, anchorLine: anchorLine)
+      }
+    }
 
     func body(content: Content) -> some View {
       // macOS: the terminal holds SwiftUI focus (needed for .onKeyPress and the
@@ -1045,8 +1154,8 @@ extension TerminalScreenView {
         .focused(focused)
         .focusEffectDisabled()
         #endif
-        .onKeyPress { press in
-          handleKeyPress(press)
+        .onKeyPress { [keys] press in
+          keys.handle(press)
         }
         #if !os(iOS)
         .onPasteCommand(of: [UTType.plainText, UTType.utf8PlainText]) { _ in
@@ -1065,14 +1174,16 @@ extension TerminalScreenView {
           // HARDWARE keystrokes). An invisible UITextView proxy becomes first
           // responder (raising the keyboard) and forwards the typed characters/
           // backspace to the session.
-          TerminalKeyboardBridge(session: session, isFocused: keyboardOn, onDismissed: onKeyboardDismissed)
+          TerminalKeyboardBridge(session: session, isFocused: keyboardOn, onDismissed: { [keyboard] in keyboard.wrappedValue = false })
             .frame(width: 1, height: 1)
             .allowsHitTesting(false)
         }
         #endif
     }
 
-    private func handleKeyPress(_ press: KeyPress) -> KeyPress.Result {
+    fileprivate static func handleKeyPress(
+      _ press: KeyPress, session: TerminalSession, anchorLine: Binding<Int?>
+    ) -> KeyPress.Result {
       guard press.phase == .down || press.phase == .repeat else { return .ignored }
 
       let flags = Self.nsFlags(from: press.modifiers)
@@ -1080,14 +1191,14 @@ extension TerminalScreenView {
       // snap to the (new) bottom too.
       if flags.contains(.command), press.key.character.lowercased() == "k" {
         session.clearStdout()
-        ScrollModifier.snapToBottom(session: session, anchorLine: $anchorLine)
+        ScrollModifier.snapToBottom(session: session, anchorLine: anchorLine)
         return .handled
       }
       if !flags.contains(.command) {
         // Typing clears the selection and snaps back to the bottom.
         session.selectionStart = nil
         session.selectionEnd = nil
-        ScrollModifier.snapToBottom(session: session, anchorLine: $anchorLine)
+        ScrollModifier.snapToBottom(session: session, anchorLine: anchorLine)
       }
 
       let keyCode = Self.keyCode(for: press.key)
