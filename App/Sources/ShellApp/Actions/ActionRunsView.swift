@@ -31,15 +31,7 @@ struct ActionRunsView: View {
         ScrollView {
           RunBlocks(selection: selection) {
             ForEach(showsAll ? model.actionSessions : [session]) { run in
-              RunBlock(
-                model.actionSpec(for: run)?.action.name ?? "Action", command: command(of: run),
-                id: run.id.uuidString, systemImage: "play.fill", status: run.actionRunStatus,
-                output: output(of: run),
-                stop: run.isActionRunning ? { run.send(Data([0x03])) } : nil
-              )
-              .kitContextMenu {
-                Button("Close", role: .destructive) { model.removeSession(run.id) }
-              }
+              ActionRunBlock(run: run)
             }
           }
           .padding(KitMetrics.gutter)
@@ -57,6 +49,25 @@ struct ActionRunsView: View {
       set: { id in
         if let id, let uuid = UUID(uuidString: id), showsAll { model.selection = .session(uuid) }
       })
+  }
+}
+
+/// One run's block. A view of its own that reads its run's output: read in `ActionRunsView`'s body, a line of output
+/// from any run built every block again, each with its last 200 lines.
+private struct ActionRunBlock: View {
+  @Environment(AppModel.self) private var model
+  let run: TerminalSession
+
+  var body: some View {
+    RunBlock(
+      model.actionSpec(for: run)?.action.name ?? "Action", command: command(of: run),
+      id: run.id.uuidString, systemImage: "play.fill", status: run.actionRunStatus,
+      output: output(of: run),
+      stop: run.isActionRunning ? { [run] in run.send(Data([0x03])) } : nil
+    )
+    .kitContextMenu {
+      Button("Close", role: .destructive) { model.removeSession(run.id) }
+    }
   }
 
   /// The command the run executes, without the `cd` into the project and the
