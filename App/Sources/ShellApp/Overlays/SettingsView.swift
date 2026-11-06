@@ -25,7 +25,7 @@ struct SettingsView: View {
   static let accountsPane = "accounts"
   static let appearancePane = "appearance"
 
-  @AppStorage(SettingsView.paneKey) private var pane = ""
+  @KitStorage(SettingsView.paneKey) private var pane = ""
   @Environment(AppModel.self) private var model
   @Environment(\.kitIdiom) private var idiom
   private var flags: FeatureFlagsStore { .shared }

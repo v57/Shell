@@ -90,11 +90,17 @@ final class AppModel {
   var sessions: [TerminalSession] = []
   var selection: Selection? {
     didSet {
+      let database = databaseSelection(for: selection)
+      if database != databaseSelection { databaseSelection = database }
       // A note that's still empty as you leave it was never written: it doesn't stay as an "Untitled" row.
       guard case .note(let id) = oldValue, selection != oldValue, !isDetached(id), notes.isEmptyNote(id) else { return }
       notes.deleteNote(id)
     }
   }
+  /// The selection as the Databases section sees it: a saved connection's row, an open database's session, or the
+  /// connection of a row in its tree (`.database` of its id); nil for anything else. Set only when it changes, so
+  /// switching terminals, notes or tables doesn't run that section again (it groups and sorts every connection).
+  private(set) var databaseSelection: Selection?
   /// The directory browser (Files panel) model, driven by the selected
   /// session. Shared so both ContentView and ShellCommands can drive it.
   let directoryBrowser = DirectoryBrowserModel()
@@ -1927,6 +1933,16 @@ final class AppModel {
   /// The live terminal session standing for `connection`, if it is open —
   /// lets the sidebar row show an open dot and makes Open focus the existing
   /// connection instead of launching a duplicate (same convention as web rows).
+  private func databaseSelection(for selection: Selection?) -> Selection? {
+    switch selection {
+    case .database: selection
+    case .databaseItem(let item): .database(item.connectionID)
+    case .session(let id):
+      if let session = session(id), case .database = kind(of: session) { selection } else { nil }
+    default: nil
+    }
+  }
+
   func liveDatabaseSession(for connection: DatabaseConnection) -> TerminalSession? {
     sessions.first { session in
       if case .database(let open) = kind(of: session) { return open.id == connection.id }

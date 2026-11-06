@@ -40,13 +40,13 @@ struct SidebarView: View {
   @State private var importOffer: VaultImportOffer?
   @State private var isDropTargeted = false
 
+  /// What the rows of a database's tree tag: the sidebar's own items. Made once: a new one (it holds a closure) on
+  /// each update changed the environment of every tree row.
+  private static let databaseTag = DatabaseSidebarTag { AnyHashable(AppModel.Selection.databaseItem($0)) }
+
   var body: some View {
-    @Bindable var model = model
     @Bindable var state = state
-    KitSidebar(
-      selection: $model.selection, searchText: $state.searchText, searchPrompt: "Filter",
-      columnVisibility: $columnVisibility
-    ) {
+    SidebarFrame(searchText: $state.searchText, columnVisibility: $columnVisibility) {
       // The window's account, hidden while Personal is the only one.
       VaultAccountPicker(meta: model.connections.count == 1 ? "1 host" : "\(model.connections.count) hosts")
 
@@ -87,10 +87,10 @@ struct SidebarView: View {
       #endif
     }
     // The rows of a database's tree select as the sidebar's own items.
-    .environment(\.databaseSidebarTag, DatabaseSidebarTag { AnyHashable(AppModel.Selection.databaseItem($0)) })
+    .environment(\.databaseSidebarTag, Self.databaseTag)
     // Rows coming, going and reordering slide rather than jump (the kit stills
     // this in an inactive window and under Reduce Motion).
-    .animation(.kit, value: rowIdentities)
+    .modifier(RowIdentityAnimation())
     // The kit's own Hide Sidebar button and the detail column's Show Sidebar
     // (`kitSidebarToggle`) stand in for the system toggle.
     .toolbar(removing: .sidebarToggle)
@@ -104,6 +104,50 @@ struct SidebarView: View {
     }
     .kitSheet(item: $importOffer) { offer in VaultImportSheet(offer, vault: model.vault, app: "Shell") }
     #endif
+  }
+
+}
+
+/// The kit's sidebar around the sections, bound to the window's selection. A view of its own: a binding reads its
+/// value as it's made, so made in `SidebarView`'s body the selection ran that body again on every click (the row
+/// identities hashed again, a new database tag for every tree row, the sections compared again). Here the sections come
+/// in built and stay the same value when only the selection changes.
+private struct SidebarFrame<Content: View, BottomBar: View>: View {
+  @Environment(AppModel.self) private var model
+  let searchText: Binding<String>
+  let columnVisibility: Binding<NavigationSplitViewVisibility>
+  let content: Content
+  let bottomBar: BottomBar
+
+  init(
+    searchText: Binding<String>, columnVisibility: Binding<NavigationSplitViewVisibility>,
+    @ViewBuilder content: () -> Content, @ViewBuilder bottomBar: () -> BottomBar
+  ) {
+    self.searchText = searchText
+    self.columnVisibility = columnVisibility
+    self.content = content()
+    self.bottomBar = bottomBar()
+  }
+
+  var body: some View {
+    @Bindable var model = model
+    KitSidebar(
+      selection: $model.selection, searchText: searchText, searchPrompt: "Filter", columnVisibility: columnVisibility
+    ) {
+      content
+    } bottomBar: {
+      bottomBar
+    }
+  }
+}
+
+/// Animates rows coming, going and moving. A modifier of its own, so the sessions, hosts, notes and history it hashes
+/// are read here and a change to them doesn't run the sidebar's body.
+private struct RowIdentityAnimation: ViewModifier {
+  @Environment(AppModel.self) private var model
+
+  func body(content: Content) -> some View {
+    content.animation(.kit, value: rowIdentities)
   }
 
   /// The identities of every row the sections render, in order: a change here
@@ -146,7 +190,7 @@ private struct RunningSectionView: View {
   @Environment(AppModel.self) private var model
   let state: SidebarState
 
-  @AppStorage("sidebar.running.collapsed") private var runningCollapsed = false
+  @KitStorage("sidebar.running.collapsed") private var runningCollapsed = false
 
   private var flags: FeatureFlagsStore { .shared }
 
@@ -286,7 +330,7 @@ private struct TextFilesSectionView: View {
   @Environment(AppModel.self) private var model
   let state: SidebarState
 
-  @AppStorage("sidebar.files.collapsed") private var filesCollapsed = false
+  @KitStorage("sidebar.files.collapsed") private var filesCollapsed = false
 
   private var files: [OpenedFile] { model.openedFiles.filter { state.matches($0.displayName) } }
 

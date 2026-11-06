@@ -16,11 +16,11 @@ struct DatabasesSectionView: View {
   /// The sidebar's shared state (SidebarChrome.swift): the filter, the database rename and delete.
   let state: SidebarState
 
-  @AppStorage("sidebar.databases.collapsed") private var collapsed = false
-  @AppStorage("sidebar.databases.sort") private var sort = DatabaseSort.recent
-  @AppStorage("sidebar.databases.hidesUnused") private var hidesUnused = true
+  @KitStorage("sidebar.databases.collapsed") private var collapsed = false
+  @KitStorage("sidebar.databases.sort") private var sort = DatabaseSort.recent
+  @KitStorage("sidebar.databases.hidesUnused") private var hidesUnused = true
   /// The engine the section shows, or all ("").
-  @AppStorage("sidebar.databases.engine") private var engineFilter = ""
+  @KitStorage("sidebar.databases.engine") private var engineFilter = ""
   /// Show More: the connections the filters hide, until a filter changes.
   @State private var showsMore = false
   @State private var showsOptions = false
@@ -137,7 +137,7 @@ struct DatabaseGroup: Identifiable {
     let groups = order.compactMap { key -> DatabaseGroup? in
       guard let members = byKey[key] else { return nil }
       let primary =
-        members.first { model.isOpen($0) } ?? members.first { model.rowSelection(for: $0) == model.selection }
+        members.first { model.isOpen($0) } ?? members.first { model.rowSelection(for: $0) == model.databaseSelection }
         ?? members.max { ($0.lastUsed ?? .distantPast) < ($1.lastUsed ?? .distantPast) } ?? members[0]
       return DatabaseGroup(primary: primary, members: members)
     }
@@ -161,10 +161,8 @@ struct DatabaseGroup: Identifiable {
   /// Open, selected, or used in the last week: shown while unused ones wait behind Show More.
   func isRecent(model: AppModel) -> Bool {
     if isOpen(model: model) { return true }
-    if members.contains(where: { model.rowSelection(for: $0) == model.selection }) { return true }
-    if case .databaseItem(let item) = model.selection, members.contains(where: { $0.id == item.connectionID }) {
-      return true
-    }
+    if members.contains(where: { model.rowSelection(for: $0) == model.databaseSelection }) { return true }
+    if case .database(let id) = model.databaseSelection, members.contains(where: { $0.id == id }) { return true }
     guard let lastUsed else { return false }
     return lastUsed > Date().addingTimeInterval(-7 * 24 * 3600)
   }

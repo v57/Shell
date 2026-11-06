@@ -8,7 +8,7 @@ struct WebSectionView: View {
   /// The sidebar's shared state (SidebarChrome.swift): the filter.
   let state: SidebarState
 
-  @AppStorage("sidebar.web.collapsed") private var collapsed = false
+  @KitStorage("sidebar.web.collapsed") private var collapsed = false
 
   private var flags: FeatureFlagsStore { .shared }
 

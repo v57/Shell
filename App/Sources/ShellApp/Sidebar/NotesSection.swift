@@ -10,7 +10,7 @@ struct NotesSectionView: View {
   let state: SidebarState
 
   /// Collapse state for this section, persisted across launches.
-  @AppStorage("sidebar.notes.collapsed") private var notesCollapsed = false
+  @KitStorage("sidebar.notes.collapsed") private var notesCollapsed = false
 
   private var flags: FeatureFlagsStore { .shared }
 

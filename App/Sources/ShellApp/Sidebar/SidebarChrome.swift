@@ -93,11 +93,7 @@ struct SidebarChrome: ViewModifier {
     content
       // Clicking a row writes its `Selection`; AppModel routes it to the item
       // (connect / attach / open / focus) — the section views only tag rows.
-      .onChange(of: model.selection) { _, newValue in
-        if state.renamingSessionID != nil { state.renamingSessionID = nil }
-        guard let selection = newValue else { return }
-        model.activate(selection)
-      }
+      .modifier(SelectionRouter(state: state))
       .navigationTitle("Terminals")
       // Drive the history-mode → terminals swap with a blur-replace transition
       // (both branches carry .transition(.blurReplace)).
@@ -161,6 +157,21 @@ struct SidebarChrome: ViewModifier {
     flags.isEnabled(.monitoring)
   }
   #endif
+}
+
+/// Routes a new selection to its item. A modifier of its own, so a click updates it alone: read in `SidebarChrome`'s
+/// body, the selection built its sheets, alerts and their bindings again on every click.
+private struct SelectionRouter: ViewModifier {
+  @Environment(AppModel.self) private var model
+  let state: SidebarState
+
+  func body(content: Content) -> some View {
+    content.onChange(of: model.selection) { _, newValue in
+      if state.renamingSessionID != nil { state.renamingSessionID = nil }
+      guard let selection = newValue else { return }
+      model.activate(selection)
+    }
+  }
 }
 
 extension View {

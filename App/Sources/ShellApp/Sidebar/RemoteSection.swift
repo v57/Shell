@@ -17,7 +17,7 @@ struct RemoteSectionView: View {
   /// The sidebar's shared state (SidebarChrome.swift).
   let state: SidebarState
   /// Collapse state for this section, persisted across launches.
-  @AppStorage("sidebar.remote.collapsed") private var remoteCollapsed = false
+  @KitStorage("sidebar.remote.collapsed") private var remoteCollapsed = false
   /// The saved SSH connection currently being edited (opens the edit sheet).
   @State private var editingConfig: SSHConfig?
 

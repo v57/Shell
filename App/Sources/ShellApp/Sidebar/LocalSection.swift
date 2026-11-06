@@ -25,7 +25,7 @@ struct LocalSectionView: View {
   let state: SidebarState
 
   /// Collapse state for this section, persisted across launches.
-  @AppStorage("sidebar.local.collapsed") private var localCollapsed = false
+  @KitStorage("sidebar.local.collapsed") private var localCollapsed = false
   /// The screen session currently being renamed (keyed by full name).
   @State private var renamingScreenName: String?
 
@@ -43,7 +43,7 @@ struct LocalSectionView: View {
     sectionContent
       // A selection change cancels an in-flight rename in THIS section;
       // SidebarChrome's own routing clears the shared session rename.
-      .onChange(of: model.selection) { _, _ in renamingScreenName = nil }
+      .modifier(RenameCancelOnSelection(renamingScreenName: $renamingScreenName))
   }
 
   /// This section's card; the gate is the section's own.
@@ -314,3 +314,16 @@ private struct ScreenSessionRow: View {
   }
 }
 #endif
+
+/// Ends a persistent session's rename when the selection changes. A modifier of its own: read in the section's body,
+/// the selection built every row of This Mac (and its history) again on each click.
+private struct RenameCancelOnSelection: ViewModifier {
+  @Environment(AppModel.self) private var model
+  @Binding var renamingScreenName: String?
+
+  func body(content: Content) -> some View {
+    content.onChange(of: model.selection) { _, _ in
+      if renamingScreenName != nil { renamingScreenName = nil }
+    }
+  }
+}

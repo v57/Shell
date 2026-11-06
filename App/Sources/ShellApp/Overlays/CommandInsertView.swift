@@ -18,7 +18,7 @@ struct CommandInsertView: View {
 
   /// Persisted choice: send each line as a separate Enter (true) vs. send
   /// the newlines verbatim (false). Defaults to separate commands.
-  @AppStorage("sendAsSeparateCommands") private var sendAsSeparateCommands = true
+  @KitStorage("sendAsSeparateCommands") private var sendAsSeparateCommands = true
 
   /// The toggle is only meaningful for multi-line input: a single line has
   /// no newlines to translate either way.
