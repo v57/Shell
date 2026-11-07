@@ -166,34 +166,19 @@ struct LocalSectionView: View {
   private var meta: some View {
     if model.historyMode {
       MetaLine(model.history.sessions.count == 1 ? "1 session" : "\(model.history.sessions.count) sessions")
-    } else if flags.isEnabled(.monitoring), monitor.watts > 0 {
-      Button {
-        state.showingStatsGraphs = true
-      } label: {
-        // Never animated: the stats tick every second, and digit-roll motion
-        // on every tick is pure distraction.
-        // The meters while they fit, the bare figures in a narrow sidebar.
-        ViewThatFits(in: .horizontal) {
-          HStack(spacing: 6) {
-            StatsMeter(label: "CPU", percent: monitor.cpuPercent, hue: .blue)
-            StatsMeter(label: "GPU", percent: monitor.gpuPercent, hue: .purple)
-            Text("\(monitor.watts) W")
-          }
-          .fixedSize()
-          MetaLine(
-            "\(Int(monitor.cpuPercent.rounded()))%", "\(Int(monitor.gpuPercent.rounded()))%", "\(monitor.watts) W")
-        }
-        .monospacedDigit()
-        .transaction { $0.animation = nil }
+    } else if flags.isEnabled(.monitoring) {
+      LocalStatsLine(monitor: monitor, showGraphs: { [state] in state.showingStatsGraphs = true }) {
+        sessionsLine
       }
-      // The kit's hover and press wash, so the line reads as the button it is.
-      .buttonStyle(KitRowButtonStyle(cornerRadius: KitMetrics.radiusXS))
-      .kitHelp("CPU · GPU · System power draw", meta: "Click for graphs")
     } else {
-      let count = localSessions.count
-      let active = localSessions.filter(\.hasActivity).count
-      MetaLine([count == 1 ? "1 session" : "\(count) sessions", active > 0 ? "\(active) running" : ""])
+      sessionsLine
     }
+  }
+
+  private var sessionsLine: MetaLine {
+    let count = localSessions.count
+    let active = localSessions.filter(\.hasActivity).count
+    return MetaLine([count == 1 ? "1 session" : "\(count) sessions", active > 0 ? "\(active) running" : ""])
   }
 
   /// The header's controls: the history toggle (and, in history, delete all),
@@ -243,6 +228,44 @@ struct LocalSectionView: View {
         }
       }
       .kitHelp("New session")
+    }
+  }
+}
+
+/// The live CPU, GPU and power draw (clicking it opens the graphs for the last minute), or `fallback` until the monitor
+/// has a reading. A view of its own: the monitor ticks every second, and read in the section's body each tick built
+/// and laid out the whole section again (about 40 ms every second while Shell sat idle).
+private struct LocalStatsLine<Fallback: View>: View {
+  let monitor: SystemStatsMonitor
+  let showGraphs: () -> Void
+  @ViewBuilder let fallback: Fallback
+
+  var body: some View {
+    if monitor.watts > 0 {
+      Button {
+        showGraphs()
+      } label: {
+        // Never animated: the stats tick every second, and digit-roll motion
+        // on every tick is pure distraction.
+        // The meters while they fit, the bare figures in a narrow sidebar.
+        ViewThatFits(in: .horizontal) {
+          HStack(spacing: 6) {
+            StatsMeter(label: "CPU", percent: monitor.cpuPercent, hue: .blue)
+            StatsMeter(label: "GPU", percent: monitor.gpuPercent, hue: .purple)
+            Text("\(monitor.watts) W")
+          }
+          .fixedSize()
+          MetaLine(
+            "\(Int(monitor.cpuPercent.rounded()))%", "\(Int(monitor.gpuPercent.rounded()))%", "\(monitor.watts) W")
+        }
+        .monospacedDigit()
+        .transaction { $0.animation = nil }
+      }
+      // The kit's hover and press wash, so the line reads as the button it is.
+      .buttonStyle(KitRowButtonStyle(cornerRadius: KitMetrics.radiusXS))
+      .kitHelp("CPU · GPU · System power draw", meta: "Click for graphs")
+    } else {
+      fallback
     }
   }
 }
