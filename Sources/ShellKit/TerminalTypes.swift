@@ -271,14 +271,16 @@ public struct TerminalSnapshot {
   private func lineText(line: Int, from startColumn: Int, to endColumn: Int) -> String {
     guard line >= 0, line < totalLines else { return "" }
     var text = ""
-    let lastColumn = min(endColumn, columns - 1)
+    var lastColumn = min(endColumn, columns - 1)
+    // Trailing blanks are left out before the text is built: trimming them from the string one `removeLast` at a
+    // time (each walking back over a Character) was half of a fast command's output on the main thread, since
+    // history capture turns every new scrollback line into text.
+    while lastColumn >= startColumn, cell(atLine: line, column: lastColumn).isBlank { lastColumn -= 1 }
     guard startColumn <= lastColumn else { return "" }
+    text.reserveCapacity(lastColumn - startColumn + 1)
     for column in startColumn...lastColumn {
       let cell = cell(atLine: line, column: column)
       text.append(cell.isBlank ? " " : cell.character)
-    }
-    while text.last == " " {
-      text.removeLast()
     }
     return text
   }
