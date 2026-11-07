@@ -21,8 +21,8 @@ enum FallbackAddresses {
   }
 
   /// What's wrong with a row: a space inside the address, or one tried already (the host's address, a row above).
-  static func issues(_ rows: [FallbackAddress], host: String) -> [UUID: String] {
-    var issues: [UUID: String] = [:]
+  static func issues(_ rows: [FallbackAddress], host: String) -> [UUID: LocalizedStringKey] {
+    var issues: [UUID: LocalizedStringKey] = [:]
     var seen: Set<String> = [host.trimmingCharacters(in: .whitespaces).lowercased()]
     for row in rows {
       let value = row.address.trimmingCharacters(in: .whitespaces)

@@ -254,7 +254,7 @@ private struct SSHConfigRow: View {
     .animation(.kit, value: isConnected)
     // The tooltip: the address; a Hub device's, the device reached at its Hub Network address.
     .kitHelp(
-      hub.map { "\($0) via Hub" } ?? config.displayName, meta: hub == nil ? address : "At its Hub Network address",
+      hub.map { "\($0) via Hub" } ?? "\(config.displayName)", meta: hub == nil ? "\(address)" : "At its Hub Network address",
       systemImage: hub == nil ? "network" : "point.3.connected.trianglepath.dotted", hue: hub == nil ? .blue : .gray)
   }
 

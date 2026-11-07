@@ -30,7 +30,7 @@ struct WebSessionDetailView: View {
     Group {
       if let tunnel {
         if let error = tunnel.errorMessage {
-          EmptyState(systemImage: "globe", title: "Couldn't Connect", message: error, status: .failed(error))
+          EmptyState(systemImage: "globe", title: "Couldn't Connect", message: "\(error)", status: .failed(error))
         } else if let tunneled = tunnel.tunnelURL {
           webView(for: tunneled)
         } else {
@@ -45,7 +45,7 @@ struct WebSessionDetailView: View {
         // is the toolbar search field — there is no in-content bar).
         EmptyState(
           systemImage: "globe", title: "Web Session",
-          message: web.url.isEmpty ? "Type the page's address into the URL field, then press Return." : web.url)
+          message: web.url.isEmpty ? "Type the page's address into the URL field, then press Return." : "\(web.url)")
       }
     }
     .onAppear { resolveURL(from: web.url) }

@@ -49,7 +49,7 @@ struct NewConnectionView: View {
   var body: some View {
     KitSheet(
       title: editing == nil ? "New Connection" : "Edit Connection",
-      meta: editing == nil ? "An SSH host to open terminals on" : editing?.displayName,
+      meta: editing.map { "\($0.displayName)" } ?? "An SSH host to open terminals on",
       systemImage: "network", hue: .blue
     ) {
       FormCard {
@@ -65,7 +65,7 @@ struct NewConnectionView: View {
       }
       FormCard("Authentication") {
         FormRow("Method", systemImage: "key", hue: .indigo) {
-          KitPicker("Method", selection: $authMethod, options: SSHConfig.AuthMethod.allCases.map { ($0.label, $0) })
+          KitPicker("Method", selection: $authMethod, options: SSHConfig.AuthMethod.allCases.map { ("\($0.label)", $0) })
             .fixedSize()
         }
         if authMethod == .password {
@@ -79,7 +79,7 @@ struct NewConnectionView: View {
       }
       if authMethod == .keychainKey {
         FormCard("SSH key", footer: "Add this key to the server's ~/.ssh/authorized_keys to use key authentication.") {
-          FormRow("Default key", help: model.publicKeyFingerprint(), systemImage: "key.horizontal", hue: .gray) {
+          FormRow("Default key", help: model.publicKeyFingerprint().map { "\($0)" }, systemImage: "key.horizontal", hue: .gray) {
             Button("Copy", systemImage: "doc.on.doc") {
               model.copyPublicKey()
               keyError = model.publicKeyError

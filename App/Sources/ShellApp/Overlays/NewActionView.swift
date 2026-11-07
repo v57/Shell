@@ -102,7 +102,7 @@ struct NewActionView: View {
 
   var body: some View {
     KitSheet(
-      title: editing == nil ? "New Action" : "Edit Action", meta: editing?.name,
+      title: editing == nil ? "New Action" : "Edit Action", meta: editing.map { "\($0.name)" },
       systemImage: "bolt", hue: .purple, width: 480
     ) {
       FormCard("Action") {
@@ -176,9 +176,9 @@ struct NewActionView: View {
         }
         ForEach(availableDependencies) { dep in
           FormRow(
-            dep.name,
+            "\(dep.name)",
             help: dep.dependencies.isEmpty
-              ? nil : "\(dep.dependencies.count) dep.\(dep.dependencies.count == 1 ? "" : "s")",
+              ? nil : dep.dependencies.count == 1 ? "1 dep." : "\(dep.dependencies.count) deps.",
             systemImage: "bolt", hue: .gray
           ) {
             Button("Add as a dependency", systemImage: "plus") { dependencies.insert(dep.id) }

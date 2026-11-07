@@ -104,7 +104,7 @@ struct ActionsOverlayView: View {
       } items: {
         ForEach(actions) { action in
           PaletteItem(
-            action.name, id: action.id.uuidString, systemImage: "terminal", hue: .indigo,
+            "\(action.name)", id: action.id.uuidString, systemImage: "terminal", hue: .indigo,
             detail: action.commands.split(separator: "\n").first.map(String.init),
             note: runningActionIDs.contains(action.id) ? "Running" : nil,
             isEnabled: canRun
@@ -228,7 +228,7 @@ struct ActionsOverlayView: View {
     let running = model.isSmartActionRunning(kind, scheme: scheme, in: directory)
     let style = SmartActionStyle(kind)
     return PaletteItem(
-      kind.title, id: "\(scheme.id).\(kind.rawValue)", systemImage: style.systemImage, hue: style.hue,
+      "\(kind.title)", id: "\(scheme.id).\(kind.rawValue)", systemImage: style.systemImage, hue: style.hue,
       detail: scheme.terminalCommand(for: kind), status: running ? .working : .idle,
       returnLabel: running ? "Stop" : nil
     ) {

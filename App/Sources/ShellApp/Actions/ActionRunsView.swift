@@ -60,7 +60,7 @@ private struct ActionRunBlock: View {
 
   var body: some View {
     RunBlock(
-      model.actionSpec(for: run)?.action.name ?? "Action", command: command(of: run),
+      model.actionSpec(for: run).map { "\($0.action.name)" } ?? "Action", command: command(of: run),
       id: run.id.uuidString, systemImage: "play.fill", status: run.actionRunStatus,
       output: output(of: run),
       stop: run.isActionRunning ? { [run] in run.send(Data([0x03])) } : nil

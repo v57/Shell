@@ -125,7 +125,7 @@ struct DirectoryBrowserView: View {
 
   @ViewBuilder private var content: some View {
     if let errorMessage {
-      EmptyState(systemImage: "exclamationmark.triangle", title: "Couldn't Load Folder", message: errorMessage) {
+      EmptyState(systemImage: "exclamationmark.triangle", title: "Couldn't Load Folder", message: "\(errorMessage)") {
         Button("Retry", action: onRetry).buttonStyle(.kit)
       }
     } else if isLoading && rows.isEmpty {

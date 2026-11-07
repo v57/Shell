@@ -161,7 +161,7 @@ private struct SessionAgentRow: View {
   private var installToolRow: some View {
     FormRow(
       "Session Tool", help: "Keeps terminals running, without tmux or screen. Downloads it to ~/.local/bin",
-      systemImage: "arrow.down.circle", hue: .indigo, error: agent.toolErrorMessage
+      systemImage: "arrow.down.circle", hue: .indigo, error: agent.toolErrorMessage.map { "\($0)" }
     ) {
       if agent.isInstallingTool {
         LiveIcon(systemImage: "arrow.down.circle", hue: .indigo, status: .working, size: 20)
@@ -175,7 +175,7 @@ private struct SessionAgentRow: View {
   private var keepRunningRow: some View {
     FormRow(
       "Keep Sessions Running After Quit", help: caption, systemImage: "moon.zzz", hue: .indigo,
-      error: agent.errorMessage
+      error: agent.errorMessage.map { "\($0)" }
     ) {
       if agent.isWorking {
         LiveIcon(systemImage: "gearshape.2", hue: .indigo, status: .working, size: 20)
@@ -191,7 +191,7 @@ private struct SessionAgentRow: View {
     .onAppear { agent.refresh() }
   }
 
-  private var caption: String {
+  private var caption: LocalizedStringKey {
     switch agent.status {
     case nil: return "Checking…"
     case .notInstalled: return "Sessions end when Shell quits; a login item keeps the session daemon running"

@@ -51,7 +51,7 @@ struct LocalSectionView: View {
   private var sectionContent: some View {
     if flags.isEnabled(.sessions) || flags.isEnabled(.screen) || flags.isEnabled(.history) || flags.isEnabled(.web) || flags.isEnabled(.database) {
       KitSection(
-        model.historyMode ? "Local History" : thisComputerName, systemImage: model.historyMode ? "clock" : "laptopcomputer",
+        model.historyMode ? "Local History" : "\(thisComputerName)", systemImage: model.historyMode ? "clock" : "laptopcomputer",
         hue: model.historyMode ? .orange : .green, isExpanded: .expanded(collapsed: $localCollapsed)
       ) {
         if model.historyMode {
@@ -60,7 +60,7 @@ struct LocalSectionView: View {
               Text(record.activityDate, style: .relative)
             }
             .kitHelp(
-              record.title,
+              "\(record.title)",
               meta: "Last command \(record.activityDate.formatted(.relative(presentation: .named)))",
               systemImage: "clock", hue: .orange)
           }
@@ -300,6 +300,12 @@ private struct ScreenSessionRow: View {
     model.attachedSession(toScreen: info)
   }
 
+  /// The tooltip's line: the kind, the state and where it runs.
+  private var helpMeta: String {
+    [helpText, info.state, info.remoteOrigin.map { String(localized: "On \($0.displayName)") }].compactMap { $0 }
+      .joined(separator: " · ")
+  }
+
   private var helpText: String {
     switch info.kind {
     case .tmux: "tmux session"
@@ -330,9 +336,8 @@ private struct ScreenSessionRow: View {
     }
     .kitRename(isRenaming: $isRenaming) { onRename($0) }
     .kitHelp(
-      model.displayName(forScreen: info),
-      meta: [helpText, info.state, info.remoteOrigin.map { "On \($0.displayName)" }].compactMap { $0 }
-        .joined(separator: " · "),
+      "\(model.displayName(forScreen: info))",
+      meta: "\(helpMeta)",
       systemImage: info.isProtected ? "lock.fill" : "shield.fill", hue: info.isAttached ? .green : .gray)
   }
 }

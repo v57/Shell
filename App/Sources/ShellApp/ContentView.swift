@@ -197,7 +197,8 @@ struct ContentView: View {
           get: { model.notes.storageError != nil || model.history.storageError != nil },
           set: { if !$0 { model.notes.storageError = nil; model.history.storageError = nil } }
         ),
-        message: model.notes.storageError ?? model.history.storageError ?? "Unknown encrypted storage error.")
+        message: (model.notes.storageError ?? model.history.storageError).map { "\($0)" }
+          ?? "Unknown encrypted storage error.")
       #if os(macOS)
       // Settings is the standard Settings window on the Mac: a request for it
       // (Manage Accounts…, the screenshot demo's --settings) opens the window.
@@ -455,7 +456,7 @@ struct ContentView: View {
     }
   }
 
-  private static func sessionAgentMessage(_ status: SessionAgent.Status) -> String {
+  private static func sessionAgentMessage(_ status: SessionAgent.Status) -> LocalizedStringKey {
     switch status {
     case .needsApproval: "Its login item is off in Login Items & Extensions."
     case .waiting: "The login item takes over when Shell quits; sessions started after that keep running."
@@ -656,7 +657,7 @@ struct ContentView: View {
           KitMenuButton(scheme.name, systemImage: "scope", style: .button) {
             schemeOptions(scheme)
           }
-          .kitHelp("Select scheme", meta: scheme.name)
+          .kitHelp("Select scheme", meta: "\(scheme.name)")
         }
         ForEach(SmartActionButton.kinds.filter { scheme.terminalCommand(for: $0) != nil }, id: \.self) { kind in
           SmartActionButton(kind: kind, scheme: scheme, directory: directory, inMenu: false)
@@ -869,10 +870,10 @@ struct ContentView: View {
 
   /// The picker's current value label: the bound SSH host's display name, or
   /// "None" when the web session is a plain (no-ssh) page.
-  private func currentWebSSHTunnelLabel(for web: WebSession) -> String {
+  private func currentWebSSHTunnelLabel(for web: WebSession) -> LocalizedStringKey {
     if let id = web.sshConfigID,
        let config = model.connections.first(where: { $0.id == id }) {
-      return config.displayName
+      return "\(config.displayName)"
     }
     return "None (open directly)"
   }

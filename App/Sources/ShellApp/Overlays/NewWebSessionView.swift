@@ -31,7 +31,7 @@ struct NewWebSessionView: View {
 
   var body: some View {
     KitSheet(
-      title: "Edit Web Session", meta: editing.sidebarTitle, systemImage: "globe", hue: .teal
+      title: "Edit Web Session", meta: "\(editing.sidebarTitle)", systemImage: "globe", hue: .teal
     ) {
       FormCard {
         FormRow("Name", help: "Empty takes the page's title", systemImage: "character.cursor.ibeam", hue: .teal,
@@ -42,7 +42,7 @@ struct NewWebSessionView: View {
         FormRow("SSH Host", systemImage: "network", hue: .blue) {
           KitPicker(
             "SSH host", selection: $sshConfigID,
-            options: [("None (open directly)", nil as UUID?)] + model.connections.map { ($0.displayName, $0.id as UUID?) })
+            options: sshHostOptions)
             .fixedSize()
         }
       }
@@ -54,6 +54,10 @@ struct NewWebSessionView: View {
         .keyboardShortcut(.defaultAction)
         .disabled(!canSave)
     }
+  }
+
+  private var sshHostOptions: [(LocalizedStringKey, UUID?)] {
+    [("None (open directly)", nil)] + model.connections.map { ("\($0.displayName)", $0.id) }
   }
 
   private var urlField: some View {

@@ -69,7 +69,7 @@ private struct FileDropMenuPresenter: ViewModifier {
           get: { showsErrors && model.fileDropError != nil },
           set: { if !$0 { model.fileDropError = nil } }
         ),
-        message: model.fileDropError, systemImage: "doc.badge.ellipsis")
+        message: model.fileDropError.map { "\($0)" }, systemImage: "doc.badge.ellipsis")
     #else
     content
     #endif

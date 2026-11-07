@@ -86,9 +86,10 @@ private struct NoteRow: View {
       }
     }
     .kitHelp(
-      model.notes.title(for: note.id),
-      meta: (note.isEncrypted ? "Encrypted file · " : "")
-        + "Edited \(note.lastUpdate.formatted(.relative(presentation: .named)))",
+      "\(model.notes.title(for: note.id))",
+      meta: note.isEncrypted
+        ? "Encrypted file · Edited \(note.lastUpdate.formatted(.relative(presentation: .named)))"
+        : "Edited \(note.lastUpdate.formatted(.relative(presentation: .named)))",
       systemImage: "note.text", hue: .orange)
     .animation(.kit, value: note.isEncrypted)
   }

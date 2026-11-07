@@ -308,7 +308,8 @@ private struct ActionRunRow: View {
       }
     }
     .kitHelp(
-      spec?.action.name ?? "Action", meta: "\(environmentLabel) · \(statusText(status))", systemImage: "play.fill",
+      spec.map { "\($0.action.name)" } ?? "Action", meta: "\(environmentLabel) · \(statusText(status))",
+      systemImage: "play.fill",
       hue: .purple, status: status)
   }
 
@@ -347,9 +348,10 @@ private struct TextFilesSectionView: View {
             }
           }
           .kitHelp(
-            file.displayName,
-            meta: [(file.url.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath,
-                   file.isDirty ? "Unsaved changes" : nil].compactMap { $0 }.joined(separator: " · "),
+            "\(file.displayName)",
+            meta: file.isDirty
+              ? "\((file.url.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath) · Unsaved changes"
+              : "\((file.url.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath)",
             systemImage: "doc.text", hue: .gray)
           .kitContextMenu {
             Button("Close", role: .destructive) {
@@ -426,7 +428,7 @@ struct SessionRow: View {
     }
     .subtitle { SessionStatusLine(session: session) }
     .kitHelp(
-      session.customName ?? defaultLabel, meta: "\(place) · \(stateText)", systemImage: "terminal", hue: hue,
+      "\(session.customName ?? defaultLabel)", meta: "\(place) · \(stateText)", systemImage: "terminal", hue: hue,
       status: session.linkStatus)
     .kitRename(isRenaming: $isRenaming) { onRename($0) }
     .animation(.kit, value: stateDotHue)

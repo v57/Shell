@@ -40,7 +40,7 @@ struct AuthorizedKeysView: View {
 
   var body: some View {
     KitSheet(
-      title: "Authorized Keys", meta: targetTitle, systemImage: "key.2.on.ring", hue: .indigo,
+      title: "Authorized Keys", meta: "\(targetTitle)", systemImage: "key.2.on.ring", hue: .indigo,
       status: isLoading ? .working : .idle, width: 520
     ) {
       if isLoading && entries.isEmpty {
