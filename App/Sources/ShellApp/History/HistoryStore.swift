@@ -20,13 +20,13 @@ struct HistorySession: Identifiable, Codable, Hashable {
   let archivedAt: Date
 
   var title: String {
-    guard let command = commands.last?.text else { return "Local Session" }
+    guard let command = commands.last?.text else { return String(localized: "Local Session") }
     let oneLine = command
       .replacingOccurrences(of: "\r\n", with: " ")
       .replacingOccurrences(of: "\n", with: " ")
       .replacingOccurrences(of: "\r", with: " ")
       .trimmingCharacters(in: .whitespaces)
-    return oneLine.isEmpty ? "Local Session" : oneLine
+    return oneLine.isEmpty ? String(localized: "Local Session") : oneLine
   }
 
   var activityDate: Date { commands.last?.submittedAt ?? archivedAt }

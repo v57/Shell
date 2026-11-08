@@ -751,7 +751,7 @@ final class AppModel {
   func webDisplayName(for web: WebSession) -> String {
     let saved = webSessions.all.first { $0.id == web.id } ?? web
     if !saved.name.isEmpty { return saved.name }
-    return saved.url.isEmpty ? "Web Session" : saved.url
+    return saved.url.isEmpty ? String(localized: "Web Session") : saved.url
   }
 
   /// Names a web page from the loaded page's HTML `<title>` — the naming hook
@@ -796,7 +796,7 @@ final class AppModel {
     guard
       let directory = session.currentDirectory,
       directory.path != "/"
-    else { return "Local" }
+    else { return String(localized: "Local") }
     return directory.lastPathComponent
   }
   
@@ -1231,7 +1231,7 @@ final class AppModel {
   /// (the sidebar already presents `screenMonitor.actionError`).
   private func screenSessionActionError(_ message: String) {
     screenMonitor.actionError = ScreenActionError(
-      title: "Could not create persistent session",
+      title: String(localized: "Could not create persistent session"),
       message: message
     )
   }

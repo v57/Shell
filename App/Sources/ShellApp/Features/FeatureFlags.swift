@@ -45,19 +45,19 @@ enum FeatureID: String, CaseIterable, Identifiable {
   /// Human-readable name, for surfacing a toggle in settings/UI.
   var label: String {
     switch self {
-    case .animations: return "Animations"
-    case .sessions: return "Sessions"
-    case .screen: return "Screen sessions"
-    case .ssh: return "SSH"
-    case .notes: return "Notes"
-    case .history: return "History"
-    case .actions: return "Actions"
-    case .smartActions: return "Smart Actions"
-    case .monitoring: return "Monitoring"
-    case .files: return "Files"
-    case .authorizedKeys: return "Authorized Keys"
-    case .web: return "Web"
-    case .database: return "Database"
+    case .animations: return String(localized: "Animations")
+    case .sessions: return String(localized: "Sessions")
+    case .screen: return String(localized: "Screen sessions")
+    case .ssh: return String(localized: "SSH")
+    case .notes: return String(localized: "Notes")
+    case .history: return String(localized: "History")
+    case .actions: return String(localized: "Actions")
+    case .smartActions: return String(localized: "Smart Actions")
+    case .monitoring: return String(localized: "Monitoring")
+    case .files: return String(localized: "Files")
+    case .authorizedKeys: return String(localized: "Authorized Keys")
+    case .web: return String(localized: "Web")
+    case .database: return String(localized: "Database")
     }
   }
 
@@ -65,19 +65,19 @@ enum FeatureID: String, CaseIterable, Identifiable {
   /// alongside `label` on a settings toggle row.
   var description: String {
     switch self {
-    case .animations: return "Page, cursor and output animations"
-    case .sessions: return "Local terminal sessions"
-    case .screen: return "GNU screen / tmux persistent sessions"
-    case .ssh: return "SSH connections and remote terminals"
-    case .notes: return "Encrypted notes"
-    case .history: return "Local command history"
-    case .actions: return "Saved commands and actions"
-    case .smartActions: return "Per-directory project actions"
-    case .monitoring: return "Live CPU / GPU / wattage stats"
-    case .files: return "Files panel and file browsing"
-    case .authorizedKeys: return "SSH authorized keys"
-    case .web: return "In-app web sessions"
-    case .database: return "Database connections"
+    case .animations: return String(localized: "Page, cursor and output animations")
+    case .sessions: return String(localized: "Local terminal sessions")
+    case .screen: return String(localized: "GNU screen / tmux persistent sessions")
+    case .ssh: return String(localized: "SSH connections and remote terminals")
+    case .notes: return String(localized: "Encrypted notes")
+    case .history: return String(localized: "Local command history")
+    case .actions: return String(localized: "Saved commands and actions")
+    case .smartActions: return String(localized: "Per-directory project actions")
+    case .monitoring: return String(localized: "Live CPU / GPU / wattage stats")
+    case .files: return String(localized: "Files panel and file browsing")
+    case .authorizedKeys: return String(localized: "SSH authorized keys")
+    case .web: return String(localized: "In-app web sessions")
+    case .database: return String(localized: "Database connections")
     }
   }
 }

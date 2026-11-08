@@ -81,40 +81,40 @@ extension AppModel {
 
   /// What was dropped: the file's name, or how many items.
   func fileDropSubject(for request: FileDropRequest) -> String {
-    request.files.count == 1 ? request.files[0].name : "\(request.files.count) items"
+    request.files.count == 1 ? request.files[0].name : String(localized: "\(request.files.count) items")
   }
 
   /// Where it was dropped: the session, host or Notes.
   func fileDropTargetName(for request: FileDropRequest) -> String {
     switch request.target {
-    case .session(let id): session(id).map { displayName(for: $0) } ?? "Session"
+    case .session(let id): session(id).map { displayName(for: $0) } ?? String(localized: "Session")
     case .host(let config): config.displayName
-    case .notes: "Notes"
+    case .notes: String(localized: "Notes")
     }
   }
 
   /// What was dropped where, in one line (the menu's accessibility label).
   func fileDropTitle(for request: FileDropRequest) -> String {
     let what = request.files.count == 1 ? "“\(request.files[0].name)”" : fileDropSubject(for: request)
-    return "\(what) on \(fileDropTargetName(for: request))"
+    return String(localized: "\(what) on \(fileDropTargetName(for: request))")
   }
 
   func fileDropTitle(of action: FileDropAction, for request: FileDropRequest) -> String {
     let plural = request.files.count > 1
     switch action {
     case .copy, .upload:
-      let verb = action == .copy ? "Copy" : "Upload"
-      if case .host = request.target { return "\(verb) to Home Folder" }
-      guard case .session(let id) = request.target, let folder = sessionFolder(id) else { return "\(verb) Here" }
-      return "\(verb) to “\((folder as NSString).lastPathComponent)”"
+      let verb = action == .copy ? String(localized: "Copy") : String(localized: "Upload")
+      if case .host = request.target { return String(localized: "\(verb) to Home Folder") }
+      guard case .session(let id) = request.target, let folder = sessionFolder(id) else { return String(localized: "\(verb) Here") }
+      return String(localized: "\(verb) to “\((folder as NSString).lastPathComponent)”")
     case .insertPath:
-      return plural ? "Insert Paths" : "Insert Path"
+      return plural ? String(localized: "Insert Paths") : String(localized: "Insert Path")
     case .goToFolder:
-      return request.files.first?.isDirectory == true ? "Go to Folder" : "Go to Enclosing Folder"
+      return request.files.first?.isDirectory == true ? String(localized: "Go to Folder") : String(localized: "Go to Enclosing Folder")
     case .copyToNote:
-      return plural ? "Copy to Encrypted Notes" : "Copy to Encrypted Note"
+      return plural ? String(localized: "Copy to Encrypted Notes") : String(localized: "Copy to Encrypted Note")
     case .linkFile:
-      return plural ? "Link Files" : "Link File"
+      return plural ? String(localized: "Link Files") : String(localized: "Link File")
     }
   }
 
@@ -122,31 +122,31 @@ extension AppModel {
   func fileDropPreview(of action: FileDropAction, for request: FileDropRequest) -> String {
     let files = request.files
     let single = files.count == 1 ? files[0] : nil
-    let subject = single?.name ?? "the \(files.count) items"
+    let subject = single?.name ?? String(localized: "the \(files.count) items")
     switch action {
     case .copy:
-      return "Copies \(subject) into the folder this session is in."
+      return String(localized: "Copies \(subject) into the folder this session is in.")
     case .upload:
-      let folders = files.contains(where: \.isDirectory) ? " Folders can’t be uploaded yet." : ""
+      let folders = files.contains(where: \.isDirectory) ? String(localized: " Folders can’t be uploaded yet.") : ""
       let host = fileDropTargetName(for: request)
       if case .session(let id) = request.target, sessionFolder(id) != nil {
-        return "Sends \(subject) to the folder this session is in on \(host).\(folders)"
+        return String(localized: "Sends \(subject) to the folder this session is in on \(host).\(folders)")
       }
-      return "Sends \(subject) to your home folder on \(host).\(folders)"
+      return String(localized: "Sends \(subject) to your home folder on \(host).\(folders)")
     case .insertPath:
-      return single.map { "Types the path of \($0.name) into the terminal." }
-        ?? "Types the paths of \(subject) into the terminal."
+      return single.map { String(localized: "Types the path of \($0.name) into the terminal.") }
+        ?? String(localized: "Types the paths of \(subject) into the terminal.")
     case .goToFolder:
-      guard let single else { return "Changes this session’s folder." }
+      guard let single else { return String(localized: "Changes this session’s folder.") }
       return single.isDirectory
-        ? "Changes this session’s folder to \(single.name)."
-        : "Changes this session’s folder to the one \(single.name) is in."
+        ? String(localized: "Changes this session’s folder to \(single.name).")
+        : String(localized: "Changes this session’s folder to the one \(single.name) is in.")
     case .copyToNote:
-      return single.map { "Copies the text of \($0.name) into a new encrypted note. The file stays as it is." }
-        ?? "Copies each file’s text into a new encrypted note of its own. The files stay as they are."
+      return single.map { String(localized: "Copies the text of \($0.name) into a new encrypted note. The file stays as it is.") }
+        ?? String(localized: "Copies each file’s text into a new encrypted note of its own. The files stay as they are.")
     case .linkFile:
-      return single.map { "Opens \($0.name) under Text Files. Your edits change the file itself." }
-        ?? "Opens the files under Text Files. Your edits change the files themselves."
+      return single.map { String(localized: "Opens \($0.name) under Text Files. Your edits change the file itself.") }
+        ?? String(localized: "Opens the files under Text Files. Your edits change the files themselves.")
     }
   }
 
@@ -156,11 +156,11 @@ extension AppModel {
     let skipped = request.files.filter(\.isDirectory).count
     var lines: [String] = []
     if fileDropActions(for: request).contains(.linkFile) {
-      lines.append("A copy is a new note, encrypted and synced. A link edits the original file.")
+      lines.append(String(localized: "A copy is a new note, encrypted and synced. A link edits the original file."))
     } else {
-      lines.append("Remote files can only be copied into notes.")
+      lines.append(String(localized: "Remote files can only be copied into notes."))
     }
-    if skipped > 0 { lines.append("Folders are skipped.") }
+    if skipped > 0 { lines.append(String(localized: "Folders are skipped.")) }
     return lines.joined(separator: " ")
   }
 

@@ -75,7 +75,7 @@ final class SessionAgentModel {
     process.waitUntilExit()
     guard process.terminationStatus != 0 else { return nil }
     let text = String(decoding: output, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-    return text.isEmpty ? "The installer stopped with status \(process.terminationStatus)" : text
+    return text.isEmpty ? String(localized: "The installer stopped with status \(process.terminationStatus)") : text
   }
 
   func install() {

@@ -307,10 +307,10 @@ private struct KeyRow: View {
 
   private var sourceHelp: String {
     switch entry.source {
-    case .device: return "This device"
-    case .icloud: return "Another device, from iCloud"
-    case .custom: return "Added by hand, saved in iCloud"
-    case .file: return "Only in authorized_keys"
+    case .device: return String(localized: "This device")
+    case .icloud: return String(localized: "Another device, from iCloud")
+    case .custom: return String(localized: "Added by hand, saved in iCloud")
+    case .file: return String(localized: "Only in authorized_keys")
     }
   }
 }

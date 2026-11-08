@@ -383,8 +383,8 @@ extension FileRow {
   /// A short, localizable kind label: folders, symlinks, then the file
   /// extension (or "File" when the name has no extension).
   fileprivate var sortableType: String {
-    if symlinkTarget != nil { return "Symlink" }
-    if isDirectory { return "Folder" }
+    if symlinkTarget != nil { return String(localized: "Symlink") }
+    if isDirectory { return String(localized: "Folder") }
     let ext = (name as NSString).pathExtension
     return ext.isEmpty ? "File" : ext.uppercased() + " File"
   }

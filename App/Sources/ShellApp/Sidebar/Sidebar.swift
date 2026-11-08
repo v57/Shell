@@ -285,7 +285,7 @@ private struct ActionRunRow: View {
   let spec: ActionSpec?
 
   private var environmentLabel: String {
-    spec?.config?.displayName ?? "Local"
+    spec?.config?.displayName ?? String(localized: "Local")
   }
 
   var body: some View {
@@ -315,9 +315,9 @@ private struct ActionRunRow: View {
 
   private func statusText(_ status: WorkStatus) -> String {
     switch status {
-    case .working: "Running"
-    case .failed(let message): message.map { "Failed: \($0)" } ?? "Failed"
-    default: "Finished"
+    case .working: String(localized: "Running")
+    case .failed(let message): message.map { String(localized: "Failed: \($0)") } ?? String(localized: "Failed")
+    default: String(localized: "Finished")
     }
   }
 }
@@ -437,12 +437,12 @@ struct SessionRow: View {
   /// The tooltip's state: what the dot and the live icon show, in words.
   private var stateText: String {
     switch session.connectionState {
-    case .starting: "Starting"
-    case .connecting: "Connecting…"
-    case .reconnecting(let attempt): attempt > 1 ? "Reconnecting, attempt \(attempt)…" : "Reconnecting…"
-    case .connected: session.hasActivity ? "Active" : "Idle"
+    case .starting: String(localized: "Starting")
+    case .connecting: String(localized: "Connecting…")
+    case .reconnecting(let attempt): attempt > 1 ? String(localized: "Reconnecting, attempt \(attempt)…") : String(localized: "Reconnecting…")
+    case .connected: session.hasActivity ? String(localized: "Active") : String(localized: "Idle")
     case .failed(let message): message
-    case .closed: "Shell ended"
+    case .closed: String(localized: "Shell ended")
     }
   }
 

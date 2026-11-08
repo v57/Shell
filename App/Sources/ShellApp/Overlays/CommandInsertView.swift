@@ -27,7 +27,7 @@ struct CommandInsertView: View {
   }
 
   private var sessionName: String {
-    guard let session = model.selectedSession else { return "no terminal selected" }
+    guard let session = model.selectedSession else { return String(localized: "no terminal selected") }
     return model.displayName(for: session)
   }
 

@@ -95,7 +95,7 @@ struct ActionsOverlayView: View {
     if !actions.isEmpty || query.isEmpty {
       PaletteGroup(
         "Your actions",
-        meta: [model.actions.all.count == 1 ? "1 action" : "\(model.actions.all.count) actions",
+        meta: [model.actions.all.count == 1 ? String(localized: "1 action") : String(localized: "\(model.actions.all.count) actions"),
                categories.joined(separator: ", ")],
         systemImage: "bolt.fill", hue: .indigo
       ) {
@@ -147,26 +147,26 @@ struct ActionsOverlayView: View {
   private var helpText: String {
     guard let session = model.selectedSession else {
       #if os(macOS) || os(Windows) || os(Linux)
-      return "Run locally (no terminal selected)"
+      return String(localized: "Run locally (no terminal selected)")
       #else
-      return "Select a terminal first"
+      return String(localized: "Select a terminal first")
       #endif
     }
-    return "Run in " + environmentLabel(for: session)
+    return String(localized: "Run in \(environmentLabel(for: session))")
   }
 
   private func environmentLabel(for session: TerminalSession) -> String {
     switch model.kind(of: session) {
     case .local, .screen, .action:
-      return "Local"
+      return String(localized: "Local")
     case .ssh(let config):
       return config.displayName
     case .web(let web):
       // An action run from a web session targets the bound SSH host when it
       // has one, else the local machine.
-      return web.sshConfigID.flatMap { id in model.connections.first { $0.id == id }?.displayName } ?? "Local"
+      return web.sshConfigID.flatMap { id in model.connections.first { $0.id == id }?.displayName } ?? String(localized: "Local")
     case .database(let connection):
-      return connection.sshConfigID.flatMap { id in model.connections.first { $0.id == id }?.displayName } ?? "Local"
+      return connection.sshConfigID.flatMap { id in model.connections.first { $0.id == id }?.displayName } ?? String(localized: "Local")
     }
   }
 
@@ -259,7 +259,7 @@ struct ActionsOverlayView: View {
     let kinds = model.openWithKinds.filter { ProjectOpener.isInstalled($0) }
     if let directory = model.smartActionDirectory, !kinds.isEmpty, query.isEmpty {
       PaletteGroup(
-        "Open \(directory.lastPathComponent) in", meta: [kinds.count == 1 ? "1 app" : "\(kinds.count) apps"],
+        "Open \(directory.lastPathComponent) in", meta: [kinds.count == 1 ? String(localized: "1 app") : String(localized: "\(kinds.count) apps")],
         systemImage: "folder", hue: .gray
       ) {
         ForEach(kinds, id: \.self) { kind in

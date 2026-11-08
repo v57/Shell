@@ -53,7 +53,7 @@ struct WebSessionDetailView: View {
   }
 
   private var displayName: String {
-    web.name.isEmpty ? (web.url.isEmpty ? "Web Session" : web.url) : web.name
+    web.name.isEmpty ? (web.url.isEmpty ? String(localized: "Web Session") : web.url) : web.name
   }
 
   /// Resolves the stored URL string into a `URL`. For an ssh-owned session the

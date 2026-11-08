@@ -402,42 +402,42 @@ struct ShellCommands: Commands {
   /// a local terminal, a duplicate connection, or a new persistent
   /// session; a plain local terminal when nothing is selected.
   private var newTerminalLabel: String {
-    if AppModel.shared.selectedNote != nil { return "New Note" }
+    if AppModel.shared.selectedNote != nil { return String(localized: "New Note") }
     guard let session = AppModel.shared.selectedSession else {
-      return "New Local Terminal"
+      return String(localized: "New Local Terminal")
     }
     switch AppModel.shared.kind(of: session) {
     case .local, .action:
-      return "New Local Terminal"
+      return String(localized: "New Local Terminal")
     case .screen:
-      return "New Persistent Session"
+      return String(localized: "New Persistent Session")
     case .ssh(let config):
-      return "New Connection to \(config.displayName)"
+      return String(localized: "New Connection to \(config.displayName)")
     case .web:
-      return "New Web Page"
+      return String(localized: "New Web Page")
     case .database(let connection):
-      return "Open \(connection.displayName)"
+      return String(localized: "Open \(connection.displayName)")
     }
   }
   
   private var closeTerminalLabel: String {
-    if AppModel.shared.selectedNote != nil { return "Close Note" }
+    if AppModel.shared.selectedNote != nil { return String(localized: "Close Note") }
     guard let session = AppModel.shared.selectedSession else {
-      return "Close Terminal"
+      return String(localized: "Close Terminal")
     }
     switch AppModel.shared.kind(of: session) {
     case .local:
-      return "Close Terminal"
+      return String(localized: "Close Terminal")
     case .action:
-      return "Close Action"
+      return String(localized: "Close Action")
     case .screen:
-      return "Close Session"
+      return String(localized: "Close Session")
     case .ssh:
-      return "Close Connection"
+      return String(localized: "Close Connection")
     case .web:
-      return "Close Web Page"
+      return String(localized: "Close Web Page")
     case .database:
-      return "Close Database"
+      return String(localized: "Close Database")
     }
   }
 }

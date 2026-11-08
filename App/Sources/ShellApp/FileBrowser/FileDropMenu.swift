@@ -123,7 +123,7 @@ private struct FileDropMenu: View {
 
   /// "harbor.png, dropped on prod-db.", and what the choices mean where they need it.
   private var summary: String {
-    let line = "\(model.fileDropSubject(for: request)), dropped on \(model.fileDropTargetName(for: request))."
+    let line = String(localized: "\(model.fileDropSubject(for: request)), dropped on \(model.fileDropTargetName(for: request)).")
     return model.fileDropMessage(for: request).map { "\(line) \($0)" } ?? line
   }
 }

@@ -490,21 +490,21 @@ struct ContentView: View {
       if let record = model.historySession(id), !model.isDetached(id) {
         return PageTitle(
           record.title,
-          meta: ["History", record.activityDate.formatted(.relative(presentation: .named, unitsStyle: .abbreviated))],
+          meta: [String(localized: "History"), record.activityDate.formatted(.relative(presentation: .named, unitsStyle: .abbreviated))],
           systemImage: "clock", hue: .orange)
       }
     #if os(macOS)
     case .openedFile(let id):
       if let file = model.openedFile(id), !model.isDetached(id) {
         return PageTitle(
-          file.displayName, meta: [file.isDirty ? "Edited" : "Text file", file.url.deletingLastPathComponent().path],
+          file.displayName, meta: [file.isDirty ? String(localized: "Edited") : String(localized: "Text file"), file.url.deletingLastPathComponent().path],
           systemImage: "doc.text", hue: .gray)
       }
     #endif
     default:
       break
     }
-    return PageTitle("Terminals", meta: ["No terminal selected"], systemImage: "terminal", hue: .green)
+    return PageTitle("Terminals", meta: [String(localized: "No terminal selected")], systemImage: "terminal", hue: .green)
   }
 
   /// The selected page's tools in the kit's toolbar, matching `detailPane`.

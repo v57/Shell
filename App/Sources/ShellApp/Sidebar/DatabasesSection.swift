@@ -108,8 +108,8 @@ enum DatabaseSort: String, CaseIterable {
 
   var title: String {
     switch self {
-    case .recent: "Recently Used"
-    case .name: "Name"
+    case .recent: String(localized: "Recently Used")
+    case .name: String(localized: "Name")
     }
   }
 }

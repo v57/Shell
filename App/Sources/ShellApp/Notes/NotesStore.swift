@@ -59,7 +59,7 @@ final class NotesStore {
   // MARK: - Reading
 
   func title(for id: UUID) -> String {
-    decryptedNote(id: id)?.title ?? "Untitled"
+    decryptedNote(id: id)?.title ?? String(localized: "Untitled")
   }
 
   func subtitle(for id: UUID) -> String? {

@@ -308,9 +308,9 @@ private struct ScreenSessionRow: View {
 
   private var helpText: String {
     switch info.kind {
-    case .tmux: "tmux session"
-    case .screen: "GNU screen session"
-    case .session: info.isProtected ? "Password-protected session" : "session"
+    case .tmux: String(localized: "tmux session")
+    case .screen: String(localized: "GNU screen session")
+    case .session: info.isProtected ? String(localized: "Password-protected session") : String(localized: "session")
     }
   }
 

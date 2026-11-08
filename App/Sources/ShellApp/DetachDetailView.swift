@@ -112,7 +112,7 @@ struct DetachDetailView: View {
         model.displayName(for: session), meta: kind.titleMeta, systemImage: kind.titleSymbol, hue: kind.titleHue,
         status: status)
     } else if let note = model.notes.notes.first(where: { $0.id == itemID }) {
-      return PageTitle(model.notes.title(for: note.id), meta: ["Note"], systemImage: "doc.text", hue: .orange)
+      return PageTitle(model.notes.title(for: note.id), meta: [String(localized: "Note")], systemImage: "doc.text", hue: .orange)
     }
     return PageTitle("Item Closed", systemImage: "rectangle.dashed", hue: .gray)
   }

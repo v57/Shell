@@ -211,7 +211,7 @@ final class ScreenSessionsMonitor {
         guard let self else { return }
         if let message {
           self.actionError = ScreenActionError(
-            title: "Could not create persistent session",
+            title: String(localized: "Could not create persistent session"),
             message: message
           )
           self.refresh()
@@ -252,7 +252,7 @@ final class ScreenSessionsMonitor {
         guard let self else { return }
         if let message {
           self.actionError = ScreenActionError(
-            title: "Could not close persistent session",
+            title: String(localized: "Could not close persistent session"),
             message: message
           )
         }
@@ -282,7 +282,7 @@ final class ScreenSessionsMonitor {
     process.waitUntilExit()
     guard process.terminationStatus != 0 else { return nil }
     let message = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-      .trimmingCharacters(in: .whitespacesAndNewlines) ?? "Failed to create session (exit \(process.terminationStatus))"
+      .trimmingCharacters(in: .whitespacesAndNewlines) ?? String(localized: "Failed to create session (exit \(process.terminationStatus))")
     return message
   }
   
@@ -295,15 +295,15 @@ final class ScreenSessionsMonitor {
     let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else {
       actionError = ScreenActionError(
-        title: "Could not rename persistent session",
-        message: "Name must not be empty."
+        title: String(localized: "Could not rename persistent session"),
+        message: String(localized: "Name must not be empty.")
       )
       return
     }
     guard trimmed.rangeOfCharacter(from: .whitespacesAndNewlines) == nil else {
       actionError = ScreenActionError(
-        title: "Could not rename persistent session",
-        message: "Session names can't contain spaces."
+        title: String(localized: "Could not rename persistent session"),
+        message: String(localized: "Session names can't contain spaces.")
       )
       return
     }
@@ -312,8 +312,8 @@ final class ScreenSessionsMonitor {
     // sidebar row identity).
     guard !sessions.contains(where: { $0.id != info.id && $0.shortName == trimmed }) else {
       actionError = ScreenActionError(
-        title: "Could not rename persistent session",
-        message: "A session named '\(trimmed)' already exists."
+        title: String(localized: "Could not rename persistent session"),
+        message: String(localized: "A session named '\(trimmed)' already exists.")
       )
       return
     }
@@ -341,7 +341,7 @@ final class ScreenSessionsMonitor {
         guard let self else { return }
         if let message {
           self.actionError = ScreenActionError(
-            title: "Could not rename persistent session",
+            title: String(localized: "Could not rename persistent session"),
             message: message
           )
         } else {
@@ -412,7 +412,7 @@ final class ScreenSessionsMonitor {
     process.waitUntilExit()
     guard process.terminationStatus != 0 else { return nil }
     let message = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-      .trimmingCharacters(in: .whitespacesAndNewlines) ?? "Failed to create session (exit \(process.terminationStatus))"
+      .trimmingCharacters(in: .whitespacesAndNewlines) ?? String(localized: "Failed to create session (exit \(process.terminationStatus))")
     return message
   }
   
@@ -431,7 +431,7 @@ final class ScreenSessionsMonitor {
     process.waitUntilExit()
     guard process.terminationStatus != 0 else { return nil }
     let message = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-      .trimmingCharacters(in: .whitespacesAndNewlines) ?? "Rename failed (exit \(process.terminationStatus))"
+      .trimmingCharacters(in: .whitespacesAndNewlines) ?? String(localized: "Rename failed (exit \(process.terminationStatus))")
     return message
   }
   
@@ -450,7 +450,7 @@ final class ScreenSessionsMonitor {
     process.waitUntilExit()
     guard process.terminationStatus != 0 else { return nil }
     let message = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-      .trimmingCharacters(in: .whitespacesAndNewlines) ?? "Failed to close session (exit \(process.terminationStatus))"
+      .trimmingCharacters(in: .whitespacesAndNewlines) ?? String(localized: "Failed to close session (exit \(process.terminationStatus))")
     // Closing is idempotent from the UI's perspective. A stale row may be
     // acted on after the shell already ended and took down the tmux server.
     if isTmuxMissingTarget(message) { return nil }
@@ -477,7 +477,7 @@ final class ScreenSessionsMonitor {
     process.waitUntilExit()
     guard process.terminationStatus != 0 else { return nil }
     let message = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-      .trimmingCharacters(in: .whitespacesAndNewlines) ?? "Failed to close session (exit \(process.terminationStatus))"
+      .trimmingCharacters(in: .whitespacesAndNewlines) ?? String(localized: "Failed to close session (exit \(process.terminationStatus))")
     return message
   }
 
@@ -505,7 +505,7 @@ final class ScreenSessionsMonitor {
       .trimmingCharacters(in: .whitespacesAndNewlines)
     let stdout = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
       .trimmingCharacters(in: .whitespacesAndNewlines)
-    return message ?? stdout ?? "Rename failed (exit \(process.terminationStatus))"
+    return message ?? stdout ?? String(localized: "Rename failed (exit \(process.terminationStatus))")
   }
 
   /// `tmux ls -F '#{session_name} #{session_attached}'` — one line per
@@ -571,7 +571,7 @@ final class ScreenSessionsMonitor {
     process.waitUntilExit()
     guard process.terminationStatus != 0 else { return nil }
     let message = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-      .trimmingCharacters(in: .whitespacesAndNewlines) ?? "Rename failed (exit \(process.terminationStatus))"
+      .trimmingCharacters(in: .whitespacesAndNewlines) ?? String(localized: "Rename failed (exit \(process.terminationStatus))")
     return message
   }
   
@@ -592,7 +592,7 @@ final class ScreenSessionsMonitor {
     process.waitUntilExit()
     guard process.terminationStatus != 0 else { return nil }
     let message = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-      .trimmingCharacters(in: .whitespacesAndNewlines) ?? "Failed to close session (exit \(process.terminationStatus))"
+      .trimmingCharacters(in: .whitespacesAndNewlines) ?? String(localized: "Failed to close session (exit \(process.terminationStatus))")
     return message
   }
 
