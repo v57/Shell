@@ -78,12 +78,22 @@ struct ActionsOverlayView: View {
       }
     }
     if !terminals.isEmpty {
-      PaletteMenu(model.selectedSession.map { model.displayName(for: $0) } ?? "Local", systemImage: "terminal") {
+      PaletteMenu(model.selectedSession.map { model.displayName(for: $0) } ?? noTerminalLabel, systemImage: "terminal") {
         ForEach(terminals) { session in
           Button(model.displayName(for: session)) { model.selection = .session(session.id) }
         }
       }
     }
+  }
+
+  /// The scope with no terminal selected: actions run locally on a desktop; iPhone and iPad have no local terminal, so
+  /// they wait for one to be picked (S-006).
+  private var noTerminalLabel: String {
+    #if os(macOS) || os(Windows) || os(Linux)
+    String(localized: "Local")
+    #else
+    String(localized: "Choose a Terminal")
+    #endif
   }
 
   // MARK: Your actions
