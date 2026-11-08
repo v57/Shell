@@ -9,7 +9,7 @@ import ShellIntegrations
 ///
 /// Authentication mirrors interactive sessions: the Secure Enclave key first
 /// (via `SSHSession`), saved password as fallback. A host key not seen before
-/// is the user's to accept, asked over the window before anything is sent. A
+/// is refused without sending anything: the terminal asks about it. A
 /// timeout guard aborts a hung connection so the browser cannot be blocked
 /// forever.
 ///
@@ -32,6 +32,8 @@ final class SSHCommandRunner: FileCommandExecutor {
   private var exitCode: Int32 = -1
   private var terminationMessage: String?
   private var finished = false
+  /// The server's key was unknown and refused (see `onHostKeyPrompt`).
+  private var refusedHostKey = false
   private var timeoutTask: Task<Void, Never>?
 
   init(config: SSHConfig, timeout: TimeInterval = 30) {
@@ -83,11 +85,15 @@ final class SSHCommandRunner: FileCommandExecutor {
         self?.terminationMessage = message
         self?.complete(continuation)
       }
-      // The user decides about a first contact, and the clock waits for them.
-      // A changed key is refused (the engine accepts known hosts itself).
+      // A key Shell doesn't know yet is the terminal's question: the Files
+      // panel lists the host of a terminal that is connecting at the same
+      // moment and asks itself, with the fingerprints. Asking here too made a
+      // first connection ask about one key three times (S-001). The listing
+      // fails instead and comes back once the terminal's answer is remembered
+      // (the engine accepts known hosts itself).
       session.onHostKeyPrompt = { [weak self] prompt in
-        self?.timeoutTask?.cancel()
-        prompt.askInWindow { startTimeout() }
+        prompt.respond(false)
+        self?.refusedHostKey = true
       }
       // Saved passwords answer silently; without one, auth fails and the
       // caller surfaces the termination error.
@@ -104,6 +110,7 @@ final class SSHCommandRunner: FileCommandExecutor {
     exitCode = -1
     terminationMessage = nil
     finished = false
+    refusedHostKey = false
   }
 
   private func complete(
@@ -115,6 +122,8 @@ final class SSHCommandRunner: FileCommandExecutor {
     session = nil
     if let forceError {
       continuation.resume(throwing: forceError)
+    } else if refusedHostKey {
+      continuation.resume(throwing: SSHCommandRunnerError.untrustedHostKey)
     } else if let terminationMessage {
       continuation.resume(throwing: SSHCommandRunnerError.connectionFailed(terminationMessage))
     } else {
@@ -128,10 +137,15 @@ final class SSHCommandRunner: FileCommandExecutor {
 enum SSHCommandRunnerError: LocalizedError {
   case connectionFailed(String)
 
+  /// The server's key isn't known yet; the terminal asks about it.
+  case untrustedHostKey
+
   var errorDescription: String? {
     switch self {
     case .connectionFailed(let message):
       return "Could not connect: \(message)"
+    case .untrustedHostKey:
+      return String(localized: "This server's key isn't trusted yet. Accept it in the terminal.")
     }
   }
 }

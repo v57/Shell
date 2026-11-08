@@ -57,6 +57,9 @@ import ShellIntegrations
   /// reliable signal that the path moved underneath a listing.
   private var generation = 0
 
+  /// The last listing stopped at a host key the terminal asks about (S-001).
+  @ObservationIgnored private var waitsForHostKey = false
+
   /// The last time the remote `pwd` sync ran, so `syncTick()` throttles it.
   @ObservationIgnored private var lastSSHTick = Date.distantPast
 
@@ -122,11 +125,13 @@ import ShellIntegrations
       }.value
       guard gen == generation, context === ctx else { return }  // superseded
       rows = result
+      waitsForHostKey = false
       ctx.listingIsStale = false
       busy = false
     } catch {
       guard gen == generation, context === ctx else { return }  // superseded
       lastError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+      waitsForHostKey = (error as? SSHCommandRunnerError).map { if case .untrustedHostKey = $0 { true } else { false } } ?? false
       busy = false
     }
   }
@@ -251,7 +256,10 @@ import ShellIntegrations
       // cadence and skip entirely while the panel is hidden.
       guard visible, Date().timeIntervalSince(lastSSHTick) >= sshTickInterval else { return }
       lastSSHTick = Date()
-      Task { if await ctx.refresh() { await refresh() } }
+      // A listing refused at a host key the terminal was asking about comes
+      // back once the user has answered there.
+      let retry = waitsForHostKey
+      Task { if await ctx.refresh() || retry { await refresh() } }
     case .web:
       // Web sessions have no directory to browse; the Files panel is never
       // shown for them, so there is nothing to tick.
