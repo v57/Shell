@@ -41,6 +41,7 @@ struct DirectoryBrowserView: View {
   let path: String
   /// Selected entry names (the `.id` of a `FileRow` is its name).
   @Binding var selection: Set<String>
+  @Environment(\.kitIdiom) private var idiom
   /// The active column sort order, driven by the grid's sortable columns.
   @Binding var sortOrder: [KeyPathComparator<FileRow>]
   /// Whether a refresh is in flight. Shown as a working `EmptyState` only while the
@@ -271,9 +272,18 @@ struct DirectoryBrowserView: View {
     // MARK: - iOS list
 
     private var fileTable: some View {
+      // On iPhone a row isn't left selected (a tap opens it, as a sidebar row pushes its screen): a tap goes into a
+      // folder or opens a file. On iPad a tap selects and a double tap opens, as on the Mac.
       KitList(
         selection: Binding<String?>(
-          get: { selection.first }, set: { selection = $0.map { [$0] } ?? [] })
+          get: { idiom == .phone ? nil : selection.first },
+          set: { name in
+            if idiom == .phone {
+              if let name, let row = rows.first(where: { $0.name == name }) { activate(row) }
+            } else {
+              selection = name.map { [$0] } ?? []
+            }
+          })
       ) {
         ForEach(sortedRows) { row in
           SidebarRow(
