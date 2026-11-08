@@ -42,6 +42,7 @@ public final class TerminalOutputParser {
     // pane history comes from region scrolls ON the alt screen, which we
     // capture into the alt grid's scrollback (see recordsRegionScroll).
     alternateGrid.recordsScrollback = false
+    alternateGrid.reflowsOnResize = false
   }
 
   /// Consumes output asynchronously on the parse queue. The snapshot is
@@ -385,12 +386,9 @@ public final class TerminalOutputParser {
     case UInt8(ascii: "r"):
       // DECSTBM: set scrolling region
       let top = max((params.first ?? 1) - 1, 0)
-      mutateActiveGrid { grid in
-        let bottom = params.count > 1 ? min(max(params[1] - 1, top), grid.rows - 1) : grid.rows - 1
-        grid.scrollTop = top
-        grid.scrollBottom = bottom
-        grid.setCursor(row: 0, column: 0)
-      }
+      // A 0 or missing bottom means the last row.
+      let bottom = params.count > 1 && params[1] > 0 ? params[1] - 1 : nil
+      mutateActiveGrid { $0.setScrollRegion(top: top, bottom: bottom) }
     default:
       break
     }
@@ -568,6 +566,11 @@ struct TerminalGrid {
   /// real scrollback). Ordinary apps that use mid-screen regions (vim,
   /// less) keep their old behavior: those lines are not terminal history.
   var recordsRegionScroll = false
+  /// False for the alternate screen: a resize crops and pads its rows (as
+  /// xterm does) instead of re-flowing them, since the full-screen program on
+  /// it redraws at the new size. A re-flow there moved the rows a narrower
+  /// screen wrapped into a scrollback the alt screen doesn't have.
+  var reflowsOnResize = true
   /// Screen rows whose VISIBLE content changed since the last snapshot
   /// (the snapshot consumes the set). Only cell-writing operations mark
   /// rows — pure cursor movement and SGR changes do not (nothing paints).
@@ -612,6 +615,10 @@ struct TerminalGrid {
     // has. Re-flowing then would close the gaps above the cursor and move it,
     // out of step with the program drawing there.
     guard newRows != rows || newColumns != columns else { return }
+    guard reflowsOnResize else {
+      resizeCropping(rows: newRows, columns: newColumns)
+      return
+    }
     let oldRows = self.rows
     let oldColumns = self.columns
     let oldCells = cells
@@ -670,13 +677,20 @@ struct TerminalGrid {
     prefix.reserveCapacity(rowsSeq.count + 1)
     var acc = 0
     for row in rowsSeq { acc += row.count; prefix.append(acc) }
-    let cursorPhysical = oldScrollback.count + oldCursor.row
-    let cursorAbsCell = prefix[cursorPhysical] + oldCursor.column
-    var cursorLine = 0
-    for (idx, start) in lineStarts.enumerated() where start <= cursorPhysical {
-      cursorLine = idx
+    // The saved cursor (DECSC, or the main screen's cursor saved by 1049
+    // while a full-screen program runs) moves with its line too: left at its
+    // old row, a smaller screen restored it below the last row.
+    func locate(_ position: TerminalCursor) -> (line: Int, offset: Int) {
+      let physical = oldScrollback.count + min(max(position.row, 0), oldRows - 1)
+      let absCell = prefix[physical] + min(max(position.column, 0), oldColumns - 1)
+      var line = 0
+      for (idx, start) in lineStarts.enumerated() where start <= physical {
+        line = idx
+      }
+      return (line, absCell - prefix[lineStarts[line]])
     }
-    let cursorOffsetInLine = cursorAbsCell - prefix[lineStarts[cursorLine]]
+    let (cursorLine, cursorOffsetInLine) = locate(oldCursor)
+    let savedLocation = savedCursor.map(locate)
 
     // Drop grid filler: trailing EMPTY logical lines below the cursor's line
     // and the last content line are just unused screen space (the blank rows
@@ -697,8 +711,10 @@ struct TerminalGrid {
     var newRowsSeq: [[TerminalCell]] = []
     var newWrapped: [Bool] = []
     var cursorLineGlobalStart = -1
+    var savedLineGlobalStart = -1
     for (li, line) in lines.enumerated() {
       if li == cursorLine { cursorLineGlobalStart = newRowsSeq.count }
+      if li == savedLocation?.line { savedLineGlobalStart = newRowsSeq.count }
       let rw = Self.rewrap(line, width: newColumns)
       newRowsSeq.append(contentsOf: rw)
       // First row of a logical line is a hard start (false); the rest wrap.
@@ -762,6 +778,53 @@ struct TerminalGrid {
       row: min(max(0, newCursorRow), newRows - 1),
       column: min(max(0, newCursorCol), newColumns - 1)
     )
+    if let savedLocation {
+      // A saved line below the content was dropped as filler: the last row.
+      let row = savedLineGlobalStart >= 0
+        ? savedLineGlobalStart + savedLocation.offset / newColumns - gridStart
+        : gridCount - 1
+      let column = savedLineGlobalStart >= 0 ? savedLocation.offset % newColumns : 0
+      savedCursor = TerminalCursor(
+        row: min(max(0, row), newRows - 1),
+        column: min(max(0, column), newColumns - 1)
+      )
+    }
+    markAllDirty()
+  }
+
+  /// The alternate screen's resize: rows keep their place from the top and
+  /// are cut or padded on the right and at the bottom. When the cursor would
+  /// fall below the new last row, the top rows go instead so it stays on its
+  /// line. Nothing enters a scrollback.
+  private mutating func resizeCropping(rows newRows: Int, columns newColumns: Int) {
+    let shift = max(0, cursor.row - (newRows - 1))
+    var newCells = Array(repeating: TerminalCell.space, count: newRows * newColumns)
+    var newRowWrapped = Array(repeating: false, count: newRows)
+    let keptColumns = min(columns, newColumns)
+    for row in 0..<newRows {
+      let source = row + shift
+      guard source < rows else { break }
+      for column in 0..<keptColumns {
+        newCells[row * newColumns + column] = cells[source * columns + column]
+      }
+      // A row cut at another width no longer wraps into the next one.
+      newRowWrapped[row] = newColumns == columns && rowWrapped[source]
+    }
+    func moved(_ position: TerminalCursor) -> TerminalCursor {
+      TerminalCursor(
+        row: min(max(0, position.row - shift), newRows - 1),
+        column: min(max(0, position.column), newColumns - 1)
+      )
+    }
+    rows = newRows
+    columns = newColumns
+    cells = newCells
+    rowWrapped = newRowWrapped
+    scrollTop = 0
+    scrollBottom = newRows - 1
+    wrapPending = false
+    cursor = moved(cursor)
+    savedCursor = savedCursor.map(moved)
     markAllDirty()
   }
 
@@ -828,10 +891,44 @@ struct TerminalGrid {
     savedCursor = cursor
   }
   
+  /// The saved position is clamped to the grid: a cursor saved on a bigger
+  /// screen must not land past its last row or column (htop's F10, S-002).
   mutating func restoreCursor() {
     if let savedCursor {
+      wrapPending = false
       cursor = savedCursor
+      clampCursor()
     }
+  }
+
+  /// Keeps the cursor on the grid. Every row-indexed write relies on it.
+  private mutating func clampCursor() {
+    cursor.row = clamp(cursor.row, min: 0, max: max(rows - 1, 0))
+    cursor.column = clamp(cursor.column, min: 0, max: max(columns - 1, 0))
+  }
+
+  /// Moves the cursor down one row as a line feed does (xterm IND): at the
+  /// scroll region's bottom the region scrolls; below the region the cursor
+  /// moves down to the last row and stops, without scrolling.
+  private mutating func moveDownOrScroll() {
+    if cursor.row == scrollBottom {
+      scrollUp()
+    } else if cursor.row < rows - 1 {
+      cursor.row += 1
+    }
+  }
+
+  /// Sets the scroll region (DECSTBM, rows from 0). A region that isn't at
+  /// least two rows, or that starts below the screen, is ignored as xterm
+  /// ignores it; a bottom past the screen ends at the last row.
+  mutating func setScrollRegion(top: Int, bottom: Int?) {
+    let last = rows - 1
+    let top = max(top, 0)
+    let bottom = min(bottom ?? last, last)
+    guard top < bottom else { return }
+    scrollTop = top
+    scrollBottom = bottom
+    setCursor(row: 0, column: 0)
   }
   
   mutating func setCursor(row: Int? = nil, column: Int? = nil) {
@@ -850,25 +947,20 @@ struct TerminalGrid {
   
   mutating func put(_ character: Character) {
     guard rows > 0, columns > 0 else { return }
+    // A cursor off the grid (a stale saved position, a region from another
+    // size) would index past `rowWrapped` and `cells` below.
+    if cursor.row < 0 || cursor.row >= rows || cursor.column < 0 { clampCursor() }
     var byWrap = false
     if wrapPending {
       // The wrap deferred by the previous last-column write happens now.
       wrapPending = false
       cursor.column = 0
-      cursor.row += 1
-      if cursor.row > scrollBottom {
-        scrollUp()
-        cursor.row = scrollBottom
-      }
+      moveDownOrScroll()
       byWrap = true
     }
     if cursor.column >= columns {
       cursor.column = 0
-      cursor.row += 1
-      if cursor.row > scrollBottom {
-        scrollUp()
-        cursor.row = scrollBottom
-      }
+      moveDownOrScroll()
       byWrap = false
     }
 
@@ -922,19 +1014,16 @@ struct TerminalGrid {
     // wrap state, so the next printable character still wraps to the next
     // line (matching xterm.js). Only CR and explicit cursor movement cancel
     // the pending wrap.
-    cursor.row += 1
-    if cursor.row > scrollBottom {
-      scrollUp()
-      cursor.row = scrollBottom
-    }
+    moveDownOrScroll()
   }
   
   mutating func reverseIndex() {
     wrapPending = false
     if cursor.row == scrollTop {
       scrollDown()
-    } else {
-      cursor.row = max(scrollTop, cursor.row - 1)
+    } else if cursor.row > 0 {
+      // Above the region the cursor moves up to the first row (xterm RI).
+      cursor.row -= 1
     }
   }
   
