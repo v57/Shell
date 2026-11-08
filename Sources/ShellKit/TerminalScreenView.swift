@@ -1767,6 +1767,10 @@ private final class TerminalKeyInput: UITextView {
     guard let barContainer, barContainer.height != height else { return }
     barContainer.height = height
     barContainer.invalidateIntrinsicContentSize()
+    // The keyboard takes the new height only when the input views are laid out again, and only then says its frame
+    // changed: without it the arrows and Fn rows opened over the grid's last rows, which kept its size, so a
+    // full-screen program (htop) drew its bottom lines behind them (S-002).
+    if isFirstResponder { reloadInputViews() }
   }
 
   override init(frame: CGRect, textContainer: NSTextContainer?) {
