@@ -71,6 +71,17 @@ device's keys plus every other device's published keys, each with its
 status on the target's `~/.ssh/authorized_keys`: added keys can be
 removed, keys not yet added can be added — one click each.
 
+## Libraries
+The package's libraries, for use in other apps. Each has a page in `Docs/` beside the
+[user guide](Docs/README.md).
+
+| Library | Purpose | Platforms | Import |
+| --- | --- | --- | --- |
+| [ShellKit](Docs/ShellKit.md) | Terminal sessions, the output parser, the terminal view, local pty and SSH transports | macOS, iOS (SSH only), Linux, Windows | `import ShellKit` |
+| [ShellIntegrations](Docs/ShellIntegrations.md) | Files panel listing and commands, tmux/screen/`session` sessions, Open With, smart actions cache (re-exports Code's `CodeActions`) | macOS, iOS, Linux, Windows; `SessionAgent` macOS only | `import ShellIntegrations` |
+| [ShellMonitoring](Docs/ShellMonitoring.md) | Live CPU, GPU and power readings with history | macOS; Linux and Windows CPU only; not iOS | `import ShellMonitoring` |
+| [ShellDatabaseEngines](Docs/ShellDatabaseEngines.md) | Database's `DatabaseKit` and `DatabaseUI`, re-exported for Shell's database connections | macOS, iOS; Linux and Windows build | `import ShellDatabaseEngines` |
+
 ## Use as library
 **Local terminal (forkpty, macOS only):** use the `LocalPTYTransport`
 presets — `.zsh` for an interactive login shell, `.screen(name)` /

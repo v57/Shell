@@ -62,3 +62,7 @@ vault. It checks for updates only when you ask or turn automatic checks on. See
 [Privacy and Security](Privacy-and-Security.md) for the full list.
 
 For developers: [security-review.md](security-review.md) is a 2026-10-11 review of how Shell stores and moves secrets.
+
+The package's libraries have pages here too: [ShellKit](ShellKit.md), [ShellIntegrations](ShellIntegrations.md),
+[ShellMonitoring](ShellMonitoring.md) and [ShellDatabaseEngines](ShellDatabaseEngines.md). The
+[README](../README.md#libraries) lists them.
