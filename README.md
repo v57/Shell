@@ -21,13 +21,15 @@ One SwiftUI app target builds for both macOS 14+ (Apple silicon) and iOS 17+:
 
 - **macOS** — everything: local zsh terminals, persistent `screen`/`tmux`
   sessions, SSH, notes, actions, history.
-- **iOS** — SSH and notes only. There is no local terminal (forkpty is
-  macOS-only), so the Local and Persistent sidebar sections are hidden and
-  local-only actions are filtered out.
+- **iOS** — SSH and notes only. There is no local terminal (iOS has no
+  forkpty and can't run a local shell), so the Local and Persistent sidebar
+  sections are hidden and local-only actions are filtered out.
 
-The `ShellKit` library is cross-platform; the local-pty pieces
-(`LocalPTYTransport` + its `.zsh`/`.tmux`/`.screen` presets) are compiled
-only on macOS.
+The `ShellKit` library is cross-platform. `LocalPTYTransport` (+ its
+`.zsh`/`.tmux`/`.screen` presets) is compiled on macOS and Linux (forkpty,
+`TerminalTransport.swift`) and on Windows (a ConPTY pseudo console running
+PowerShell, `LocalPTYTransport+Windows.swift`, where `.tmux` is nil and screen
+doesn't run); only iOS leaves it out.
 
 ## Building
 
@@ -83,7 +85,7 @@ The package's libraries, for use in other apps. Each has a page in `Docs/` besid
 | [ShellDatabaseEngines](Docs/ShellDatabaseEngines.md) | Database's `DatabaseKit` and `DatabaseUI`, re-exported for Shell's database connections | macOS, iOS; Linux and Windows build | `import ShellDatabaseEngines` |
 
 ## Use as library
-**Local terminal (forkpty, macOS only):** use the `LocalPTYTransport`
+**Local terminal (forkpty on macOS and Linux, ConPTY on Windows; not iOS):** use the `LocalPTYTransport`
 presets — `.zsh` for an interactive login shell, `.screen(name)` /
 `.tmux(name)` to attach to a persistent multiplexer session:
 ```swift
@@ -167,4 +169,4 @@ final class SerialTransport: TerminalTransport {
 - SSH identity keys are Secure Enclave P-256 keys: device-bound, no export, no backup — install their public keys (`⌘⇧C`) on the servers you connect to.
 - Local history uses domain-separated AES-256-GCM keys derived through a device-bound Secure Enclave P-256 agreement key. It is available only while the device is unlocked.
 - Run a normally code-signed build: the data-protection Keychain requires Shell's Keychain Sharing entitlement, so an app built with `CODE_SIGNING_ALLOWED=NO` cannot save encrypted history or share the vault.
-- Touch ID per-sign gating is intentionally not used (the Secure Enclave ACL can't be satisfied by swift-nio-ssh's signing path on this OS); a single Secure Enclave identity key is used instead.
+- Touch ID per-sign gating is intentionally not used (SSH runs on libssh2, whose external signer drives the Secure Enclave key without a per-sign prompt); a single Secure Enclave identity key is used instead.
