@@ -103,26 +103,49 @@ private final class SampleOutput: TerminalTransport {
   var onTerminated: ((String) -> Void)?
   var onExit: ((Int32) -> Void)?
 
-  /// Short enough for a pane at the largest text size, where a longer line would wrap.
-  private static let output = [
-    "\u{1B}[2J\u{1B}[3J\u{1B}[H",
-    "\u{1B}[32m~\u{1B}[0m % npm test\r\n",
-    "\u{1B}[42;30m PASS \u{1B}[0m auth\r\n",
-    "\u{1B}[41;97m FAIL \u{1B}[0m api\r\n",
-    "\u{1B}[43;30m WARN \u{1B}[0m \u{1B}[34mdeps\u{1B}[0m\r\n",
-    "\u{1B}[44;97m main \u{1B}[K\u{1B}[0m\r\n",
-    "\u{1B}[32m~\u{1B}[0m % ",
-  ].joined()
-  static let lines = 6
+  /// The lines as (SGR, text) runs. Each is cut at the pane's width when drawn, so a narrow pane (an iPhone at a
+  /// larger text size) shows them cropped instead of wrapping them into a row more than the preview has.
+  private static let sample: [[(style: String, text: String)]] = [
+    [("32", "~"), ("0", " % npm test")],
+    [("42;30", " PASS "), ("0", " auth")],
+    [("41;97", " FAIL "), ("0", " api")],
+    [("43;30", " WARN "), ("0", " "), ("34", "deps")],
+    [("44;97", " main ")],
+    [("32", "~"), ("0", " % ")],
+  ]
+  static let lines = sample.count
+  private var columns = Int.max
+
+  /// The sample, each line cut at `columns`: the status line's background reaches the edge (`EL`), the last line
+  /// leaves the cursor after the prompt.
+  static func output(columns: Int) -> String {
+    var out = "\u{1B}[2J\u{1B}[3J\u{1B}[H"
+    for (index, line) in sample.enumerated() {
+      var room = columns
+      for run in line {
+        let text = String(run.text.prefix(max(room, 0)))
+        room -= text.count
+        out += "\u{1B}[\(run.style)m\(text)"
+      }
+      if index == 4 { out += "\u{1B}[K" }
+      out += "\u{1B}[0m"
+      if index < sample.count - 1 { out += "\r\n" }
+    }
+    return out
+  }
 
   func start() {
     onConnected?()
-    onOutput?(Data(Self.output.utf8))
+    onOutput?(Data(Self.output(columns: columns).utf8))
   }
 
-  /// Drawn again, to end the status line at the new width.
+  /// Drawn again, to fit the new width and end the status line there.
   func resize(columns: Int, rows: Int) {
-    DispatchQueue.main.async { [weak self] in self?.onOutput?(Data(Self.output.utf8)) }
+    self.columns = columns
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      self.onOutput?(Data(Self.output(columns: self.columns).utf8))
+    }
   }
 
   func write(_ data: Data) {}
