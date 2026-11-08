@@ -27,8 +27,8 @@ private struct TerminalPrompts: ViewModifier {
           set: { if !$0, let prompt = session.hostKeyPrompt { session.rejectHostKey(prompt) } }),
         message: prompt.map { prompt in
           changed
-            ? "The key for \(prompt.host):\(prompt.port) isn't the one Shell remembers. Someone could be intercepting this connection, or the server was reinstalled."
-            : "The authenticity of \(prompt.host):\(prompt.port) can't be established. Connect only if this is the host's key."
+            ? "The key for \(prompt.host):\(String(prompt.port)) isn't the one Shell remembers. Someone could be intercepting this connection, or the server was reinstalled."
+            : "The authenticity of \(prompt.host):\(String(prompt.port)) can't be established. Connect only if this is the host's key."
         },
         systemImage: changed ? "exclamationmark.shield" : "key.horizontal",
         confirm: changed ? "Trust New Key" : "Accept",

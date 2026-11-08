@@ -57,7 +57,7 @@ struct NewConnectionView: View {
         FormRow("User", systemImage: "person", hue: .blue, field: userField)
         FormRow("Name", help: "Shown in the sidebar", systemImage: "character.cursor.ibeam", hue: .blue,
                 field: TextField(host.isEmpty ? "Optional" : host, text: $name))
-        FormRow("Port", systemImage: "number", hue: .blue, field: TextField("22", value: $port, format: .number))
+        FormRow("Port", systemImage: "number", hue: .blue, field: TextField("22", value: $port, format: .number.grouping(.never)).kitTextContent(.number))
       }
       FormCard {
         FallbackAddressRows(
@@ -103,21 +103,11 @@ struct NewConnectionView: View {
   }
 
   private var hostField: some View {
-    #if os(iOS)
-    TextField("example.com", text: $host).textContentType(.URL).textInputAutocapitalization(.never)
-      .autocorrectionDisabled()
-    #else
-    TextField("example.com", text: $host).textContentType(.URL).autocorrectionDisabled()
-    #endif
+    TextField("example.com", text: $host).kitTextContent(.url)
   }
 
   private var userField: some View {
-    #if os(iOS)
-    TextField("User", text: $user).textContentType(.username).textInputAutocapitalization(.never)
-      .autocorrectionDisabled()
-    #else
-    TextField("User", text: $user).textContentType(.username).autocorrectionDisabled()
-    #endif
+    TextField("User", text: $user).textContentType(.username).kitTextContent(.verbatim)
   }
 
   /// The connection as edited so far.

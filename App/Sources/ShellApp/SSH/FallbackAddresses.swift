@@ -103,11 +103,6 @@ struct FallbackAddressRows: View {
   }
 
   private func addressField(_ text: Binding<String>) -> some View {
-    #if os(iOS)
-    TextField("studio.local", text: text).textContentType(.URL).textInputAutocapitalization(.never)
-      .autocorrectionDisabled()
-    #else
-    TextField("studio.local", text: text).autocorrectionDisabled()
-    #endif
+    TextField("studio.local", text: text).kitTextContent(.url)
   }
 }
