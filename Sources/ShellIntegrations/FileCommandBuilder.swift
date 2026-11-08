@@ -29,6 +29,22 @@ public enum FileCommandBuilder {
     "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
   }
 
+  /// `path` as one word typed into a terminal: as-is when it has nothing the shell would read, else in single quotes;
+  /// nil when it holds a control character (C0, DEL or C1). Quotes stop the shell, but the line editor reads those
+  /// bytes as keys first: a dropped folder named `x<ESC>[201~<^U>touch PWNED<CR>` ends a bracketed paste, clears the
+  /// line and runs the command (security audit H5).
+  public static func terminalWord(_ path: String) -> String? {
+    guard !path.unicodeScalars.contains(where: isControl) else { return nil }
+    let plain = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/._-+,:@%")
+    if !path.isEmpty, path.unicodeScalars.allSatisfy(plain.contains) { return path }
+    return shellQuote(path)
+  }
+
+  /// A C0 or C1 control character, or DEL.
+  static func isControl(_ scalar: Unicode.Scalar) -> Bool {
+    scalar.value < 0x20 || (0x7F...0x9F).contains(scalar.value)
+  }
+
   /// Lists the contents of `directory` in long format.
   public static func list(directory: String) -> String {
     "cd \(shellQuote(directory)) && ls -la"

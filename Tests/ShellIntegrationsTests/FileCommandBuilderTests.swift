@@ -101,3 +101,22 @@ struct FileCommandBuilderTests {
     #expect(calls[0].command == "cd '/tmp' && ls -la")
   }
 }
+
+// MARK: - Words typed into a terminal (security audit H5)
+
+@Suite struct TerminalWordTests {
+  @Test func shellQuotedRejectsControlCharacters() {
+    // A folder name that ends a bracketed paste, clears the line and runs a command.
+    #expect(FileCommandBuilder.terminalWord("/tmp/x\u{1B}[201~\u{15}touch PWNED\r") == nil)
+    #expect(FileCommandBuilder.terminalWord("/tmp/a\nb") == nil)
+    #expect(FileCommandBuilder.terminalWord("/tmp/a\u{7F}") == nil)
+    #expect(FileCommandBuilder.terminalWord("/tmp/a\u{9B}201~") == nil)
+  }
+
+  @Test func plainAndQuotedPaths() {
+    #expect(FileCommandBuilder.terminalWord("/Users/me/Projects/app") == "/Users/me/Projects/app")
+    #expect(FileCommandBuilder.terminalWord("/tmp/My Folder") == "'/tmp/My Folder'")
+    #expect(FileCommandBuilder.terminalWord("/tmp/it's") == "'/tmp/it'\\''s'")
+    #expect(FileCommandBuilder.terminalWord("/tmp/日本") == "'/tmp/日本'")
+  }
+}

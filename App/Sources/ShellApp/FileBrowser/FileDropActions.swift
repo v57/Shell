@@ -3,6 +3,7 @@
 import AppKit
 #endif
 import Foundation
+import ShellIntegrations
 import ShellKit
 
 /// Where files were dropped.
@@ -175,13 +176,17 @@ extension AppModel {
       uploadToRemote(files, config: config, remoteDirectory: nil)
     case (.insertPath, .session(let id)):
       guard let session = session(id) else { return }
+      // A name with control characters is never typed: the terminal would read them as keys (security audit H5).
+      let words = files.compactMap { FileCommandBuilder.terminalWord($0.url.path) }
+      guard words.count == files.count else { return refuseControlCharacters(in: files.map(\.url.path)) }
       // A trailing space, so the next path or argument can follow straight away (Terminal does the same).
-      session.paste(files.map { Self.shellQuoted($0.url.path) }.joined(separator: " ") + " ")
+      session.paste(words.joined(separator: " ") + " ")
       selection = .session(id)
     case (.goToFolder, .session(let id)):
       guard let session = session(id), let file = files.first else { return }
       let folder = file.isDirectory ? file.url.path : file.url.deletingLastPathComponent().path
-      session.send("cd " + Self.shellQuoted(folder) + "\r")
+      guard let word = FileCommandBuilder.terminalWord(folder) else { return refuseControlCharacters(in: [folder]) }
+      session.send("cd " + word + "\r")
       selection = .session(id)
     case (.copyToNote, .notes):
       copyToNotes(files.filter { !$0.isDirectory })
@@ -254,11 +259,12 @@ extension AppModel {
     }
   }
 
-  /// `path` as one shell word: as-is when it has nothing the shell would read, else in single quotes.
-  static func shellQuoted(_ path: String) -> String {
-    let plain = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/._-+,:@%")
-    if !path.isEmpty, path.unicodeScalars.allSatisfy(plain.contains) { return path }
-    return "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
+  /// Says why a dropped path wasn't typed into the terminal.
+  private func refuseControlCharacters(in paths: [String]) {
+    let name = paths.first { FileCommandBuilder.terminalWord($0) == nil }
+      .map { ($0 as NSString).lastPathComponent.unicodeScalars.map { $0.value < 0x20 || (0x7F...0x9F).contains($0.value) ? "?" : String($0) }.joined() }
+      ?? ""
+    fileDropError = String(localized: "“\(name)” has control characters in its name, so Shell didn’t type it into the terminal.")
   }
 
   // MARK: - Copying
