@@ -122,4 +122,31 @@ struct LSOutputParserTests {
     #expect(LSOutputParser.isSymlink(fromPermissions: "lrwxr-xr-x"))
     #expect(!LSOutputParser.isSymlink(fromPermissions: "-rw-r--r--"))
   }
+
+  /// BusyBox's `ls -la` on a pty (Alpine), as Shell's Files panel got it: every name coloured, CRLF line ends (S-003).
+  static let busyBoxColourFixture = [
+    "total 12",
+    "drwxr-xr-x    3 root     root          4096 Nov  8 18:18 \u{1B}[1;34m.\u{1B}[m",
+    "drwxr-xr-x    1 root     root          4096 Nov  8 18:18 \u{1B}[1;34m..\u{1B}[m",
+    "-rw-r--r--    1 root     root             0 Nov  8 18:18 \u{1B}[0;0m.ash_history\u{1B}[m",
+    "lrwxrwxrwx    1 root     root             2 Nov  8 18:18 \u{1B}[1;36mlink\u{1B}[m -> \u{1B}[1;34mzz\u{1B}[m",
+    "-rw-r--r--    1 root     root             0 Nov  8 18:18 \u{1B}[0;0mmy file\u{1B}[m",
+    "drwxr-xr-x    2 root     root          4096 Nov  8 18:18 \u{1B}[1;34mzz\u{1B}[m",
+  ].joined(separator: "\r\n")
+
+  @Test func busyBoxColouredListingParsesPlainNamesWithoutDots() {
+    let rows = LSOutputParser.parse(Self.busyBoxColourFixture)
+    #expect(rows.map(\.name) == [".ash_history", "link", "my file", "zz"])
+    #expect(rows[1].symlinkTarget == "zz")
+    #expect(rows[3].isDirectory)
+    #expect(rows[3].size == 4096)
+    #expect(rows[3].modified == makeDate(year: currentYear, month: 11, day: 8, hour: 18, minute: 18))
+  }
+
+  @Test func escapesAreDroppedFromALine() {
+    #expect(LSOutputParser.withoutEscapes("\u{1B}[01;34mdir\u{1B}[0m") == "dir")
+    // ls --hyperlink: OSC 8 links ended by ESC \ or BEL.
+    #expect(LSOutputParser.withoutEscapes("\u{1B}]8;;file:///a\u{1B}\\a\u{1B}]8;;\u{07}") == "a")
+    #expect(LSOutputParser.withoutEscapes("plain name") == "plain name")
+  }
 }

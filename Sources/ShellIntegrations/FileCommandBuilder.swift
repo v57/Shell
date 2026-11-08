@@ -45,10 +45,18 @@ public enum FileCommandBuilder {
     scalar.value < 0x20 || (0x7F...0x9F).contains(scalar.value)
   }
 
-  /// Lists the contents of `directory` in long format.
+  /// Lists the contents of `directory` in long format, without colours and with English month names.
+  ///
+  /// The listing runs on a pty, where BusyBox's ls (Alpine, routers, NAS) colours names by default and macOS's does
+  /// with `CLICOLOR` set (S-003). `env` runs the real `ls` (no alias or function, in any login shell, fish too) with
+  /// `LS_COLORS=none`, which turns BusyBox's colours off, and without `CLICOLOR`/`CLICOLOR_FORCE`; `--color=never`
+  /// isn't in every ls. `LC_TIME=C` keeps the dates in the format the parser reads; names stay in the user's locale.
   public static func list(directory: String) -> String {
-    "cd \(shellQuote(directory)) && ls -la"
+    "cd \(shellQuote(directory)) && \(listCommand)"
   }
+
+  /// The `ls` part of `list(directory:)`.
+  public static let listCommand = "env -u CLICOLOR -u CLICOLOR_FORCE LS_COLORS=none LC_TIME=C ls -la"
 
   /// Opens a directory in the shell (`cd`) or a file with the platform's
   /// default opener.

@@ -88,7 +88,7 @@ struct DirectoryListerTests {
     #expect(calls.count == 1)
     #expect(calls[0].dir == "/Users/me")
     #expect(calls[0].command == FileCommandBuilder.list(directory: "/Users/me"))
-    #expect(calls[0].command == "cd '/Users/me' && ls -la")
+    #expect(calls[0].command == "cd '/Users/me' && \(FileCommandBuilder.listCommand)")
   }
 
   @Test func nonZeroExitThrowsErrorIncludingOutput() async throws {

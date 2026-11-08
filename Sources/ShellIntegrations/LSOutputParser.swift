@@ -16,9 +16,13 @@ public enum LSOutputParser {
   /// The leading fixed columns (mode, links, owner, group, size, month, day,
   /// time/year) are split first; everything after them is the name. This keeps
   /// names that contain spaces intact rather than splitting them on whitespace.
+  /// Colour codes and other escape sequences are dropped first: an ls that colours its names anyway (an alias with
+  /// `--color=always`, BusyBox on a pty) must not leave "\u{1B}[1;34mhome\u{1B}[m" as a name, or "." and ".." as
+  /// folders (S-003).
   public static func parse(_ text: String) -> [FileRow] {
     var rows: [FileRow] = []
-    for line in text.split(whereSeparator: { $0.isNewline }) {
+    for rawLine in text.split(whereSeparator: { $0.isNewline }) {
+      let line = withoutEscapes(rawLine)
       let trimmed = line.drop(while: { $0.isWhitespace })
       guard !trimmed.isEmpty else { continue }
       let lineString = String(trimmed)
@@ -52,6 +56,36 @@ public enum LSOutputParser {
           permissions: permissions, symlinkTarget: symlinkTarget))
     }
     return rows
+  }
+
+  /// `line` without its terminal escape sequences: CSI (colours, `ESC [ … m`), OSC (`ls --hyperlink`'s links, ended by
+  /// BEL or `ESC \\`) and two-character escapes.
+  static func withoutEscapes(_ line: Substring) -> String {
+    guard line.unicodeScalars.contains("\u{1B}") else { return String(line) }
+    var out = String.UnicodeScalarView()
+    var scalars = line.unicodeScalars.makeIterator()
+    while let scalar = scalars.next() {
+      guard scalar == "\u{1B}" else {
+        out.append(scalar)
+        continue
+      }
+      switch scalars.next() {
+      case "[":
+        // Parameters and intermediates up to a final byte in @...~.
+        while let next = scalars.next(), !(0x40...0x7E).contains(next.value) {}
+      case "]":
+        while let next = scalars.next() {
+          if next == "\u{07}" { break }
+          if next == "\u{1B}" {
+            _ = scalars.next()
+            break
+          }
+        }
+      default:
+        break
+      }
+    }
+    return String(out)
   }
 
   /// Whether a permission string denotes a directory (leading `d`).

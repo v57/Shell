@@ -22,20 +22,20 @@ struct FileCommandBuilderTests {
   // MARK: - list
 
   @Test func listCdAndLs() {
-    #expect(FileCommandBuilder.list(directory: "/Users/me") == "cd '/Users/me' && ls -la")
-    #expect(FileCommandBuilder.list(directory: "~/Projects") == "cd '~/Projects' && ls -la")
+    #expect(FileCommandBuilder.list(directory: "/Users/me") == "cd '/Users/me' && \(FileCommandBuilder.listCommand)")
+    #expect(FileCommandBuilder.list(directory: "~/Projects") == "cd '~/Projects' && \(FileCommandBuilder.listCommand)")
   }
 
   @Test func listQuotesSpaces() {
     #expect(FileCommandBuilder.list(directory: "/Users/me/My Project")
-      == "cd '/Users/me/My Project' && ls -la")
+      == "cd '/Users/me/My Project' && \(FileCommandBuilder.listCommand)")
   }
 
   // MARK: - shellQuote escaping (exercised through public builders)
 
   @Test func listEscapesApostrophe() {
     #expect(FileCommandBuilder.list(directory: "it's")
-      == "cd 'it'\\''s' && ls -la")
+      == "cd 'it'\\''s' && \(FileCommandBuilder.listCommand)")
   }
 
   // MARK: - open
@@ -98,7 +98,7 @@ struct FileCommandBuilderTests {
     let command = FileCommandBuilder.list(directory: "/tmp")
     _ = try await executor.run(inDirectory: "/tmp", command)
     let calls = await executor.calls
-    #expect(calls[0].command == "cd '/tmp' && ls -la")
+    #expect(calls[0].command == "cd '/tmp' && \(FileCommandBuilder.listCommand)")
   }
 }
 
