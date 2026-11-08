@@ -46,9 +46,11 @@ public nonisolated enum SSHKeychain {
   
   /// Returns this device's Secure Enclave key, the one every v57 app shares (`VaultIdentity`): Database
   /// logs in with it too. A key Shell made before the vault is handed over to it, so servers
-  /// that already trust it keep working.
+  /// that already trust it keep working, but only one in Shell's own data-protection keychain group: on the Mac
+  /// a plain read also searches the login keychain and the shared group, where any process could plant a key it
+  /// keeps a copy of, and that key would become the device's SSH and vault identity (security audit M5, L2).
   public static func loadOrCreateDefaultKey() throws -> SecureEnclave.P256.Signing.PrivateKey {
-    if !VaultIdentity.exists, let legacy = try? load(account: defaultKeyAccount) {
+    if !VaultIdentity.exists, let legacy = legacyIdentity() {
       try? VaultIdentity.adopt(legacy)
     }
     return try VaultIdentity.key()
@@ -210,6 +212,25 @@ public nonisolated enum SSHKeychain {
     }
   }
   
+  /// Shell's own keychain group (`$(AppIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)`): only Shell writes there.
+  static let ownAccessGroup = "\(VaultConfiguration.teamID).\(service)"
+
+  /// The key Shell kept before the vault, from Shell's own data-protection group only.
+  private static func legacyIdentity() -> Data? {
+    let query: [String: Any] = [
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrService as String: service,
+      kSecAttrAccount as String: defaultKeyAccount,
+      kSecAttrAccessGroup as String: ownAccessGroup,
+      kSecUseDataProtectionKeychain as String: true,
+      kSecReturnData as String: true,
+      kSecMatchLimit as String: kSecMatchLimitOne,
+    ]
+    var result: CFTypeRef?
+    guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess else { return nil }
+    return result as? Data
+  }
+
   private static func load(account: String) throws -> Data? {
     let query: [String: Any] = [
       kSecClass as String: kSecClassGenericPassword,
@@ -240,6 +261,9 @@ public nonisolated enum SSHKeychain {
 #else
   // Where Security is missing (Windows), VaultKit's keychain keeps this device's items: the Credential Manager.
   private static var keychain: VaultKeychain { VaultKeychain(service: service, accessGroup: nil) }
+
+  /// The key Shell kept before the vault (the Credential Manager has no groups to tell apart).
+  private static func legacyIdentity() -> Data? { try? load(account: defaultKeyAccount) }
 
   private static func save(_ data: Data, account: String, label: String) throws {
     do {

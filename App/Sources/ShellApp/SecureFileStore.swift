@@ -2,9 +2,8 @@ import CryptoKit
 import Foundation
 #if canImport(Security)
 import Security
-#else
-import VaultKit
 #endif
+import VaultKit
 
 /// Device-bound encrypted file storage shared by notes and terminal history.
 ///
@@ -172,6 +171,11 @@ nonisolated enum SecureFileStore {
   }
 
 #if canImport(Security)
+  /// Shell's own keychain group (`$(AppIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)`, the default for its items).
+  /// Named on save and load: with no group a read matches every group Shell has, so a key planted in the shared
+  /// group by another app could become the one Shell encrypts history and notes to (security audit L2).
+  static let ownAccessGroup = "\(VaultConfiguration.teamID).dev.v57.sh"
+
   private static func saveKeyEnvelope(_ data: Data) throws {
     let query: [String: Any] = [
       kSecClass as String: kSecClassGenericPassword,
@@ -181,6 +185,7 @@ nonisolated enum SecureFileStore {
       kSecValueData as String: data,
       kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
       kSecUseDataProtectionKeychain as String: true,
+      kSecAttrAccessGroup as String: ownAccessGroup,
     ]
     let status = SecItemAdd(query as CFDictionary, nil)
     if status == errSecMissingEntitlement { throw StoreError.missingKeychainEntitlement }
@@ -195,6 +200,7 @@ nonisolated enum SecureFileStore {
       kSecReturnData as String: true,
       kSecMatchLimit as String: kSecMatchLimitOne,
       kSecUseDataProtectionKeychain as String: true,
+      kSecAttrAccessGroup as String: ownAccessGroup,
     ]
     var result: CFTypeRef?
     let status = SecItemCopyMatching(query as CFDictionary, &result)
