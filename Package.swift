@@ -18,9 +18,8 @@ let package = Package(
     dependencies: [
         // Database's interface and pure-Swift engines, and its libssh2 +
         // mbedTLS build, which Shell links instead of its own (one copy per
-        // app: two would clash). Binary/SSH-libssh2/build-ssh.sh
-        // still builds the libssh2 that Database's Scripts/build-libssh2.sh
-        // repackages.
+        // app: two would clash). ../SSH's Scripts/build-libssh2.sh builds
+        // that libssh2.
         v57("Database"),
         // The vault: the store, keys and records the v57 apps share.
         v57("Vault"),
