@@ -78,9 +78,10 @@ struct OpenFilePane: View {
         // Non-UTF8 / oversized: visible notice, read-only, no write-back.
         readOnlyNotice(notice)
       } else if isMarkdown {
-        MarkdownEditorView(text: file.text, onChange: { newText in
-          model.updateOpenedFileText(newText, for: file.id)
-        }, commands: markdownCommands)
+        GuardedMarkdownEditor(
+          editor: MarkdownEditorView(text: file.text, onChange: { newText in
+            model.updateOpenedFileText(newText, for: file.id)
+          }, commands: markdownCommands))
         .safeAreaInset(edge: .bottom, spacing: 0) { MarkdownQuickActionsBar(commands: markdownCommands) }
       } else {
         monospacedEditor

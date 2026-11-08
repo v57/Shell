@@ -17,16 +17,60 @@ struct NoteEditorView: View {
   @State private var commands = MarkdownEditorCommands()
 
   var body: some View {
-    MarkdownEditorView(
-      text: model.notes.decryptedNote(id: noteID)?.text ?? "",
-      onChange: { model.notes.updateText($0, for: noteID) },
-      commands: commands
-    )
+    GuardedMarkdownEditor(
+      editor: MarkdownEditorView(
+        text: model.notes.decryptedNote(id: noteID)?.text ?? "",
+        onChange: { model.notes.updateText($0, for: noteID) },
+        commands: commands
+      ))
     .safeAreaInset(edge: .bottom, spacing: 0) { MarkdownQuickActionsBar(commands: commands) }
     // The editor is deallocated with this view, but its text edits stay on the
     // window's undo stack — a later ⌘Z would message the freed editor.
     // (ContentView keys this view by note id, so a note switch lands here too.)
     .onDisappear { UndoHygiene.discardStaleTextUndo() }
+  }
+}
+
+/// A Markdown editor whose web images wait for "Load Images" and whose links that don't open at once ask first, as
+/// in the Markdown app (security audit M1, H4): a note or a file is anyone's text, and its image is a read receipt.
+struct GuardedMarkdownEditor: View {
+  let editor: MarkdownEditorView
+  @State private var loadsImages = false
+  @State private var hasBlockedImages = false
+  @State private var linkRequest: MarkdownLinkRequest?
+
+  var body: some View {
+    VStack(spacing: 0) {
+      if hasBlockedImages, !loadsImages {
+        Banner(
+          "This note's images from the web aren't loaded.",
+          message: "Loading them tells their servers that the note was opened.", systemImage: "photo", hue: .blue
+        ) {
+          Button("Load Images") { loadsImages = true }
+        }
+        .padding(KitMetrics.gutter)
+      }
+      editor
+        .remoteImages(loads: loadsImages) { hasBlockedImages = $0 }
+        .onConfirmLink { linkRequest = $0 }
+    }
+    .kitConfirmation(
+      linkTitle, isPresented: Binding(get: { linkRequest != nil }, set: { if !$0 { linkRequest = nil } }),
+      message: linkMessage, systemImage: "link", confirm: "Open", role: nil
+    ) { [linkRequest] in linkRequest?.open() }
+  }
+
+  private var linkTitle: LocalizedStringKey {
+    guard let linkRequest, linkRequest.url.isFileURL else { return "Open this link?" }
+    return "Open “\(linkRequest.target)”?"
+  }
+
+  /// Where the link leads in full (a file's path, else the whole URL) and the app that would open it.
+  private var linkMessage: LocalizedStringKey {
+    guard let url = linkRequest?.url else { return "" }
+    let place = url.isFileURL ? url.path : url.absoluteString
+    guard let opener = linkRequest?.opener else { return "\(place) opens in another app." }
+    return "\(place) opens in \(opener)."
   }
 }
 
