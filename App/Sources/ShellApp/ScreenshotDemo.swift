@@ -254,12 +254,15 @@ enum ScreenshotDemo {
 }
 
 #if DEBUG
-  /// `--echo-terminal`: a terminal whose input comes straight back.
+  /// `--echo-terminal`: a terminal whose input comes straight back. `stty size` answers with the size the pty
+  /// was last given ("rows columns"), as a shell would.
   final class EchoTransport: TerminalTransport {
     var onOutput: ((Data) -> Void)?
     var onConnected: (() -> Void)?
     var onTerminated: ((String) -> Void)?
     var onExit: ((Int32) -> Void)?
+    private var size = (rows: 24, columns: 80)
+    private var line = ""
 
     func start() {
       onConnected?()
@@ -267,10 +270,20 @@ enum ScreenshotDemo {
     }
 
     func write(_ data: Data) {
-      onOutput?(Data(String(decoding: data, as: UTF8.self).replacingOccurrences(of: "\r", with: "\r\necho $ ").utf8))
+      var output = ""
+      for character in String(decoding: data, as: UTF8.self) {
+        if character == "\r" || character == "\n" || character == "\r\n" {
+          output += line == "stty size" ? "\r\n\(size.rows) \(size.columns)\r\necho $ " : "\r\necho $ "
+          line = ""
+        } else {
+          output.append(character)
+          line.append(character)
+        }
+      }
+      onOutput?(Data(output.utf8))
     }
 
-    func resize(columns: Int, rows: Int) {}
+    func resize(columns: Int, rows: Int) { size = (rows, columns) }
     func close() {}
   }
 #endif
