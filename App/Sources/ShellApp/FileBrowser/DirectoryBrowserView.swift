@@ -63,6 +63,10 @@ struct DirectoryBrowserView: View {
   var onNavigateUp: () -> Void
   /// The error state's Retry button.
   var onRetry: () -> Void
+  /// A crumb of the path bar: list that directory (the current one again: re-list it) (S-012).
+  var onNavigateTo: (String) -> Void
+  /// Pull to refresh on iOS: re-list the directory, the spinner showing until the rows are back (S-012).
+  var onRefresh: () async -> Void
   /// Delete the selected entries (context-menu op).
   var onDelete: (Set<String>) -> Void
   /// Move the selected entries to a destination (context-menu op).
@@ -87,7 +91,8 @@ struct DirectoryBrowserView: View {
     sortOrder: Binding<[KeyPathComparator<FileRow>]>, isLoading: Bool = false,
     errorMessage: String? = nil, sshConfig: SSHConfig? = nil, onNavigate: @escaping (FileRow) -> Void = { _ in },
     onOpen: @escaping (FileRow) -> Void = { _ in }, onNavigateUp: @escaping () -> Void = {},
-    onRetry: @escaping () -> Void = {}, onDelete: @escaping (Set<String>) -> Void = { _ in },
+    onRetry: @escaping () -> Void = {}, onNavigateTo: @escaping (String) -> Void = { _ in },
+    onRefresh: @escaping () async -> Void = {}, onDelete: @escaping (Set<String>) -> Void = { _ in },
     onMove: @escaping (Set<String>, String) -> Void = { _, _ in },
     onCopy: @escaping (Set<String>) -> Void = { _ in },
     onDrop: @escaping (DroppedFiles) -> Void = { _ in },
@@ -106,6 +111,8 @@ struct DirectoryBrowserView: View {
     self.onOpen = onOpen
     self.onNavigateUp = onNavigateUp
     self.onRetry = onRetry
+    self.onNavigateTo = onNavigateTo
+    self.onRefresh = onRefresh
     self.onDelete = onDelete
     self.onMove = onMove
     self.onCopy = onCopy
@@ -116,7 +123,7 @@ struct DirectoryBrowserView: View {
 
   var body: some View {
     VStack(spacing: 0) {
-      BreadcrumbBar(path: path, canNavigateUp: canNavigateUp, onNavigateUp: onNavigateUp)
+      BreadcrumbBar(path: path, canNavigateUp: canNavigateUp, onNavigateUp: onNavigateUp, onNavigateTo: onNavigateTo)
       Divider()
       content
     }
@@ -311,6 +318,8 @@ struct DirectoryBrowserView: View {
       .primaryAction { (name: String) in
         if let row = rows.first(where: { $0.name == name }) { activate(row) }
       }
+      // Pulling down lists the folder again: an item made elsewhere showed only after reopening the panel (S-012).
+      .refreshable { await onRefresh() }
     }
 
   #endif
@@ -425,6 +434,7 @@ private struct BreadcrumbBar: View {
   let path: String
   let canNavigateUp: Bool
   let onNavigateUp: () -> Void
+  let onNavigateTo: (String) -> Void
 
   var body: some View {
     HStack(spacing: 6) {
@@ -434,13 +444,16 @@ private struct BreadcrumbBar: View {
         .disabled(!canNavigateUp)
         .kitHelp("Up", shortcut: "⇧⌘U")
 
-      let segments = pathSegments
-      if segments.isEmpty {
+      let crumbs = Self.crumbs(of: path)
+      if crumbs.isEmpty {
         Text("Path not set").kitFont(.callout).foregroundStyle(.kitSecondary)
       } else {
+        // Each crumb lists its folder, the current one again (S-012: tapping them did nothing).
         KitPathBar(
-          components: segments.enumerated().map { index, segment in
-            KitPathItem(segment, systemImage: index == 0 ? (segment == "~" ? "house" : "internaldrive") : nil)
+          components: crumbs.enumerated().map { index, crumb in
+            KitPathItem(crumb.title, systemImage: index == 0 ? (crumb.title == "~" ? "house" : "internaldrive") : nil) {
+              onNavigateTo(crumb.path)
+            }
           })
       }
 
@@ -450,21 +463,30 @@ private struct BreadcrumbBar: View {
     .padding(.vertical, 6)
   }
 
-  /// The breadcrumb components, with the home-directory prefix collapsed to `~`.
-  private var pathSegments: [String] {
+  /// The breadcrumb components and the absolute directory each one stands for, with the home-directory prefix
+  /// collapsed to `~`.
+  static func crumbs(of path: String) -> [(title: String, path: String)] {
+    guard !path.isEmpty else { return [] }
     let home = NSHomeDirectory()
-    var display: String
-    if path == home {
-      display = "~"
-    } else if path.hasPrefix(home + "/") {
-      display = "~" + path.dropFirst(home.count)
+    var crumbs: [(title: String, path: String)] = []
+    var base: String
+    let rest: Substring
+    if path == home || path.hasPrefix(home + "/") {
+      crumbs.append(("~", home))
+      base = home
+      rest = path.dropFirst(home.count)
+    } else if path.hasPrefix("/") {
+      crumbs.append(("/", "/"))
+      base = ""
+      rest = Substring(path)
     } else {
-      display = path
+      base = ""
+      rest = Substring(path)
     }
-
-    if display == "/" || display == "~" { return [display] }
-    let parts = display.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
-    if display.hasPrefix("/") { return ["/"] + parts }
-    return parts
+    for part in rest.split(separator: "/", omittingEmptySubsequences: true) {
+      base = base.isEmpty && !path.hasPrefix("/") ? String(part) : base + "/" + part
+      crumbs.append((String(part), base))
+    }
+    return crumbs
   }
 }

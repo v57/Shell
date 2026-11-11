@@ -133,6 +133,14 @@ final class DirectoryContext: Identifiable {
     return true
   }
 
+  /// Goes to the absolute directory `target` (a crumb of the path bar). The same directory stays and is listed again.
+  func navigate(to target: String) {
+    guard !target.isEmpty else { return }
+    generation += 1
+    path = target
+    listingIsStale = true
+  }
+
   /// Strips the last path component, stopping at `/`. Returns whether the path
   /// changed (i.e. we weren't already at the root).
   @discardableResult

@@ -14,12 +14,14 @@ On the Mac, the panel is part of the **Files** feature. On iPhone and iPad it is
 
 ## Move around
 
-The path bar shows where you are, with `~` for your home folder.
+The path bar shows where you are, with `~` for your home folder. Tap or click a folder in it to go there; the last
+one lists the current folder again.
 
 - Open a folder to go into it: tap it on iPhone, double-click it on the Mac, or choose **Open Folder** from its menu.
   Opening a file runs the server's opener, as **Open in Default App** does (below).
 - **Up** (the chevron) goes to the parent folder. On the Mac: **Shell ▸ Navigate Up** (⇧⌘U). On iPhone and iPad: also
   **Settings ▸ Actions ▸ Navigate Up ▸ Go Up**.
+- On iPhone and iPad, pull the list down to list the folder again, with what changed on the server since.
 
 An empty folder shows **Empty Folder**. A folder Shell can't read shows **Couldn't Load Folder** with the reason and
 **Retry**.

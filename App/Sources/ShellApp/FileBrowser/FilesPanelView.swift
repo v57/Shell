@@ -31,6 +31,7 @@ struct FilesPanelView: View {
       sortOrder: $model.sortOrder, isLoading: model.busy, errorMessage: model.lastError,
       sshConfig: model.context?.kind.sshConfig, onNavigate: { model.navigate(into: $0) }, onOpen: { model.open($0) },
       onNavigateUp: { model.navigateUp() }, onRetry: { Task { await model.refresh() } },
+      onNavigateTo: { model.navigate(toPath: $0) }, onRefresh: { await model.refresh() },
       onDelete: { names in
         deleteCandidates = names
         showsDeleteConfirm = true

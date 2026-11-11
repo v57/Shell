@@ -147,6 +147,13 @@ import ShellIntegrations
     if ctx.navigate(into: row.name) { Task { await refresh() } }
   }
 
+  /// Lists `path` (a crumb of the path bar): the current directory again, or the one it names (S-012).
+  func navigate(toPath path: String) {
+    guard let ctx = context else { return }
+    ctx.navigate(to: path)
+    Task { await refresh() }
+  }
+
   /// Strips the last path component, stopping at `/`. The view's "up" button
   /// and the ⌘⇧U shortcut both call this.
   func navigateUp() {
