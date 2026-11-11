@@ -60,6 +60,9 @@ import ShellIntegrations
   /// The last listing stopped at a host key the terminal asks about (S-001).
   @ObservationIgnored private var waitsForHostKey = false
 
+  /// A remote `pwd` sync is running (`syncTick`).
+  @ObservationIgnored private var ticking = false
+
   /// The last time the remote `pwd` sync ran, so `syncTick()` throttles it.
   @ObservationIgnored private var lastSSHTick = Date.distantPast
 
@@ -263,10 +266,17 @@ import ShellIntegrations
       // cadence and skip entirely while the panel is hidden.
       guard visible, Date().timeIntervalSince(lastSSHTick) >= sshTickInterval else { return }
       lastSSHTick = Date()
+      // One `pwd` at a time: over a slow connection (a host reached at a fallback) a tick that started another every
+      // 5 s piled dials up behind each other (S-011).
+      guard !ticking else { return }
+      ticking = true
       // A listing refused at a host key the terminal was asking about comes
       // back once the user has answered there.
       let retry = waitsForHostKey
-      Task { if await ctx.refresh() || retry { await refresh() } }
+      Task {
+        defer { ticking = false }
+        if await ctx.refresh() || retry { await refresh() }
+      }
     case .web:
       // Web sessions have no directory to browse; the Files panel is never
       // shown for them, so there is nothing to tick.

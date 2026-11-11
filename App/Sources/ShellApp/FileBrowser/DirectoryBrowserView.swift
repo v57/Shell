@@ -119,7 +119,11 @@ struct DirectoryBrowserView: View {
       BreadcrumbBar(path: path, canNavigateUp: canNavigateUp, onNavigateUp: onNavigateUp)
       Divider()
       content
-    }.frame(minWidth: 480)
+    }
+    #if !os(iOS)
+      .frame(minWidth: 480)
+    #endif
+    // On iPhone the panel is as wide as the screen: a 480 pt minimum cut the size column off at the right (S-011).
   }
 
   // MARK: - Content states

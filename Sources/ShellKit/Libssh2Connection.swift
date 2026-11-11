@@ -144,6 +144,8 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
   /// The remote command's exit status (exec/action sessions only).
   var onExit: ((Int32) -> Void)?
   var onHostKeyChallenge: ((HostKeyChallenge) -> Void)?
+  /// The address the connection reached (the host's own or a fallback), once the socket is open; on the main thread.
+  var onAddress: ((String) -> Void)?
   var onPasswordChallenge: ((PasswordChallenge) -> Void)?
 
   // MARK: State
@@ -378,6 +380,8 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
     do {
       let fd = try openSocket(hosts: config.addresses, port: config.port, timeout: 20)
       socketFD = fd
+      let address = connectedHost
+      DispatchQueue.main.async { [weak self] in self?.onAddress?(address) }
       guard let sess = libssh2_session_init_ex(nil, nil, nil, nil) else {
         throw EngineError.libssh2(-1, "libssh2_session_init_ex returned NULL")
       }

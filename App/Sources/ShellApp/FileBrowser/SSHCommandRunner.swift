@@ -22,19 +22,9 @@ final class SSHCommandRunner: FileCommandExecutor {
   private let config: SSHConfig
   /// Max time a single command may run before the session is aborted.
   private let timeout: TimeInterval
-
-  // Per-run capture state. The runner is used serially by the directory
-  // browser (operations are gated by the model's busy flag), so instance
-  // state mirrors `HeadlessSSHCommandRunner` without needing a fresh object
-  // per command.
-  private var session: SSHSession?
-  private var outputBuffer = ""
-  private var exitCode: Int32 = -1
-  private var terminationMessage: String?
-  private var finished = false
-  /// The server's key was unknown and refused (see `onHostKeyPrompt`).
-  private var refusedHostKey = false
-  private var timeoutTask: Task<Void, Never>?
+  /// The address the last connection reached: a host whose own address doesn't answer is dialed at the fallback that
+  /// did first, instead of waiting for the dead one on every command (S-011).
+  private var answeringAddress: String?
 
   init(config: SSHConfig, timeout: TimeInterval = 30) {
     self.config = config
@@ -49,41 +39,62 @@ final class SSHCommandRunner: FileCommandExecutor {
     return try await execute(execCommand)
   }
 
+  /// The config to dial: the address that answered last time first, then the host and its other fallbacks. The host
+  /// key check knows the machine's keys at all of them (`KnownHostsStore.fingerprints`).
+  private var dialConfig: SSHConfig {
+    guard let address = answeringAddress, address.lowercased() != config.host.lowercased() else { return config }
+    var dial = config
+    dial.host = address
+    dial.fallbacks = [config.host] + config.fallbacks.filter { $0.lowercased() != address.lowercased() }
+    return dial
+  }
+
   // MARK: - Execution
 
+  /// One command's connection and what it captured. Each run has its own, so a `pwd` from the panel's tick and a
+  /// listing at the same moment can't take each other's state: one of them then never finished, and Files stayed on
+  /// "Loading…" (S-011).
+  private final class Run {
+    var session: SSHSession?
+    var output = ""
+    var exitCode: Int32 = -1
+    var terminationMessage: String?
+    var finished = false
+    /// The server's key was unknown and refused (see `onHostKeyPrompt`).
+    var refusedHostKey = false
+    var timeoutTask: Task<Void, Never>?
+  }
+
   private func execute(_ execCommand: String) async throws -> CommandResult {
-    try await withCheckedThrowingContinuation { continuation in
-      resetCapture()
+    let run = Run()
+    return try await withCheckedThrowingContinuation { continuation in
+      let session = SSHSession(config: dialConfig, execCommand: execCommand)
+      run.session = session
 
-      let session = SSHSession(config: config, execCommand: execCommand)
-      self.session = session
+      // Timeout guard: a hung connection must not block the file browser; it ends in an error the panel shows with
+      // Retry.
+      let timeout = timeout
+      run.timeoutTask = Task {
+        try? await Task.sleep(for: .seconds(timeout))
+        guard !run.finished, !Task.isCancelled else { return }
+        run.session?.close()
+        Self.complete(
+          run, continuation, forceError: SSHCommandRunnerError.connectionFailed("no answer after \(Int(timeout)) s"))
+      }
 
-      // Timeout guard: a hung connection must not block the file browser.
-      @MainActor func startTimeout() {
-        timeoutTask = Task { [weak self] in
-          try? await Task.sleep(for: .seconds(self?.timeout ?? 30))
-          guard let self, !self.finished, !Task.isCancelled else { return }
-          self.session?.close()
-          self.complete(
-            continuation,
-            forceError: SSHCommandRunnerError.connectionFailed(
-              "timed out after \(Int(self.timeout))s"))
-        }
+      session.onAddress = { [weak self] address in self?.answeringAddress = address }
+      session.onOutput = { data in
+        run.output += String(data: data, encoding: .utf8) ?? ""
       }
-      startTimeout()
-
-      session.onOutput = { [weak self] data in
-        self?.outputBuffer += String(data: data, encoding: .utf8) ?? ""
+      session.onExit = { code in
+        run.timeoutTask?.cancel()
+        run.exitCode = code
+        Self.complete(run, continuation)
       }
-      session.onExit = { [weak self] code in
-        self?.timeoutTask?.cancel()
-        self?.exitCode = code
-        self?.complete(continuation)
-      }
-      session.onTerminated = { [weak self] message in
-        self?.timeoutTask?.cancel()
-        self?.terminationMessage = message
-        self?.complete(continuation)
+      session.onTerminated = { message in
+        run.timeoutTask?.cancel()
+        run.terminationMessage = message
+        Self.complete(run, continuation)
       }
       // A key Shell doesn't know yet is the terminal's question: the Files
       // panel lists the host of a terminal that is connecting at the same
@@ -91,9 +102,9 @@ final class SSHCommandRunner: FileCommandExecutor {
       // first connection ask about one key three times (S-001). The listing
       // fails instead and comes back once the terminal's answer is remembered
       // (the engine accepts known hosts itself).
-      session.onHostKeyPrompt = { [weak self] prompt in
+      session.onHostKeyPrompt = { prompt in
         prompt.respond(false)
-        self?.refusedHostKey = true
+        run.refusedHostKey = true
       }
       // Saved passwords answer silently; without one, auth fails and the
       // caller surfaces the termination error.
@@ -105,29 +116,20 @@ final class SSHCommandRunner: FileCommandExecutor {
     }
   }
 
-  private func resetCapture() {
-    outputBuffer = ""
-    exitCode = -1
-    terminationMessage = nil
-    finished = false
-    refusedHostKey = false
-  }
-
-  private func complete(
-    _ continuation: CheckedContinuation<CommandResult, Error>,
-    forceError: Error? = nil
+  private static func complete(
+    _ run: Run, _ continuation: CheckedContinuation<CommandResult, Error>, forceError: Error? = nil
   ) {
-    guard !finished else { return }
-    finished = true
-    session = nil
+    guard !run.finished else { return }
+    run.finished = true
+    run.session = nil
     if let forceError {
       continuation.resume(throwing: forceError)
-    } else if refusedHostKey {
+    } else if run.refusedHostKey {
       continuation.resume(throwing: SSHCommandRunnerError.untrustedHostKey)
-    } else if let terminationMessage {
-      continuation.resume(throwing: SSHCommandRunnerError.connectionFailed(terminationMessage))
+    } else if let message = run.terminationMessage {
+      continuation.resume(throwing: SSHCommandRunnerError.connectionFailed(message))
     } else {
-      continuation.resume(returning: CommandResult(output: outputBuffer, exitCode: exitCode))
+      continuation.resume(returning: CommandResult(output: run.output, exitCode: run.exitCode))
     }
   }
 }

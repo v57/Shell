@@ -29,6 +29,8 @@ public final class SSHSession: TerminalTransport {
   /// The exec command's remote exit status (action sessions only).
   public var onExit: ((Int32) -> Void)?
   public var onHostKeyPrompt: ((TerminalHostKeyPrompt) -> Void)?
+  /// The address the connection reached: `config.host`, or one of its fallbacks when that didn't answer.
+  public var onAddress: ((String) -> Void)?
   public var onPasswordPrompt: ((TerminalPasswordPrompt) -> Void)?
 
   private var engine: Libssh2Connection?
@@ -61,6 +63,9 @@ public final class SSHSession: TerminalTransport {
     }
     engine.onConnected = { [weak self] in
       self?.onConnected?()
+    }
+    engine.onAddress = { [weak self] address in
+      self?.onAddress?(address)
     }
     engine.onTerminated = { [weak self] message in
       self?.onTerminated?(message)
