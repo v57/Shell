@@ -851,10 +851,11 @@ public final class TerminalSession: Identifiable {
     reconnectAttempt = 0
     lossMessage = nil
     connectionState = .connected
+    // The transport started its pty at a default size (SSH: 80×24), and a resize sent while it was still connecting
+    // (the keyboard coming up over the grid) found no channel to go to: bring the pty to the grid's real size before
+    // the shell draws its prompt, on the first connection too (S-008).
+    transport.resize(columns: lastGridSize.columns, rows: lastGridSize.rows)
     if reconnected {
-      // The fresh transport started its pty at the default size; bring it
-      // to the grid's real size before the new shell draws its prompt.
-      transport.resize(columns: lastGridSize.columns, rows: lastGridSize.rows)
       // Leave whatever screen the dead shell was on (alt screen, colors)
       // and mark the seam, so the new prompt starts on its own line below
       // the old output instead of over it.

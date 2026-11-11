@@ -1,6 +1,7 @@
 import ComponentKit
 import SwiftUI
 import ShellIntegrations
+import ShellKit
 
 /// The Files panel: binds a `DirectoryBrowserModel` into the dumb
 /// `DirectoryBrowserView`, and owns the file-operation UI — a selection-aware
@@ -48,6 +49,8 @@ struct FilesPanelView: View {
       onMoveCopyIntoDirectory: { names, targetPath, mode in
         model.moveCopy(names, to: targetPath, mode: mode)
       })
+      // The terminal's keyboard can be up under the panel: its last rows stay above it (S-008).
+      .keepsAboveKeyboard()
       .kitConfirmation(
         "Delete \(deleteCandidates.count) item\(deleteCandidates.count == 1 ? "" : "s")?",
         isPresented: $showsDeleteConfirm, message: "This cannot be undone.", systemImage: "trash", confirm: "Delete"

@@ -264,14 +264,19 @@ public struct TerminalScreenView: View {
         // input/selection modifiers are scoped here; the message is a plain
         // status label with no focus, key routing, or selection gesture.
         GeometryReader { geo in
+          // What the on-screen keyboard and its keys bar cover of the grid: the grid and the PTY get only the rows
+          // above them (S-008). 0 where SwiftUI already made room, and off iOS.
+          let keyboard = KeyboardOverlap.shared.overlap(with: geo.frame(in: .global))
+          let size = CGSize(width: geo.size.width, height: geo.size.height - keyboard)
           terminalGrid(
             snapshot: snapshot,
             selectionStart: selectionStart,
             selectionEnd: selectionEnd,
             topInset: geo.safeAreaInsets.top,
-            containerHeight: geo.size.height
+            containerHeight: size.height
           )
           .frame(maxWidth: .infinity, maxHeight: .infinity)
+          .padding(.bottom, keyboard)
           .contentShape(Rectangle())
           .onAppear {
             #if os(iOS)
@@ -280,24 +285,25 @@ public struct TerminalScreenView: View {
             // A disabled terminal is a preview.
             if isEnabled { showKeyboard = true }
             #endif
-            resizeIfNeeded(to: geo.size, safeArea: geo.safeAreaInsets)
+            resizeIfNeeded(to: size, safeArea: geo.safeAreaInsets)
           }
           #if os(iOS)
           .onDisappear { showKeyboard = false }
           // The keyboard follows the terminal's on-screen presence and taps, NOT
           // SwiftUI focus (#FocusState is not used on iOS — it fights the proxy).
           #endif
-          .onChange(of: geo.size) { _, newSize in
+          .onChange(of: size) { _, newSize in
+            // The view's size, or the keyboard coming up or going down over it.
             resizeIfNeeded(to: newSize, safeArea: geo.safeAreaInsets)
           }
           .onChange(of: fontSize) { _, _ in
             // A new text size fits another number of cells in the same space.
-            resizeIfNeeded(to: geo.size, safeArea: geo.safeAreaInsets)
+            resizeIfNeeded(to: size, safeArea: geo.safeAreaInsets)
           }
           .onChange(of: geo.safeAreaInsets) { _, newInsets in
             // Fullscreen / toolbar changes shift the safe area without
             // changing the size; the grid must reflow.
-            resizeIfNeeded(to: geo.size, safeArea: newInsets)
+            resizeIfNeeded(to: size, safeArea: newInsets)
           }
           .modifier(InputModifier(session: session, focused: $focused, keyboardOn: showKeyboard, keyboard: $showKeyboard, keys: keys.configured(session: session, anchorLine: $anchorLine)))
           .modifier(SelectionModifier(
