@@ -224,6 +224,8 @@ public struct TerminalScreenView: View {
   /// top-most line the scroll position reports.
   @State private var scrolledToEnd = false
   @State private var lastGridSize = TerminalGridSize.zero
+  /// How much of the grid the on-screen keyboard and its keys bar cover (iOS; `onKeyboardOverlap`).
+  @State private var keyboardOverlap: CGFloat = 0
 
   /// Theme plumbing: whether character backgrounds are suppressed (set by the
   /// app via the environment) and the EFFECTIVE color scheme (after any
@@ -266,7 +268,7 @@ public struct TerminalScreenView: View {
         GeometryReader { geo in
           // What the on-screen keyboard and its keys bar cover of the grid: the grid and the PTY get only the rows
           // above them (S-008). 0 where SwiftUI already made room, and off iOS.
-          let keyboard = KeyboardOverlap.shared.overlap(with: geo.frame(in: .global))
+          let keyboard = keyboardOverlap
           let size = CGSize(width: geo.size.width, height: geo.size.height - keyboard)
           terminalGrid(
             snapshot: snapshot,
@@ -322,6 +324,8 @@ public struct TerminalScreenView: View {
             scrollToBottomButton()
           }
         }
+        // Measured over the reader's whole frame, which the keyboard doesn't change.
+        .onKeyboardOverlap { keyboardOverlap = $0 }
         .transition(.opacity)
       }
     }
@@ -993,11 +997,15 @@ extension TerminalScreenView {
           // on the very first new line, stopping tailing forever.
           Self.followIfAtBottom(wasAtBottomOf: oldTotal, scrolledToEnd: scrolledToEnd, session: session, anchorLine: $anchorLine)
         }
-        .onChange(of: session.snapshot.rows) { _, _ in
+        .onChange(of: session.snapshot.rows) { oldRows, _ in
           // Resize reflows the grid but keeps scrollback, so totalLines changed
           // through rows alone; the current values are the correct baseline (at
           // the bottom this is an exact equality — the anchor does not move).
-          Self.followIfAtBottom(wasAtBottomOf: session.snapshot.totalLines, scrolledToEnd: scrolledToEnd, session: session, anchorLine: $anchorLine)
+          // At the bottom is measured with the rows the anchor was set for: the
+          // keyboard coming up over a full grid takes rows away, and measured
+          // with the fewer rows the old bottom anchor read as scrolled up, so
+          // the prompt stayed under the keys bar behind the ↓ button (S-008).
+          Self.followIfAtBottom(wasAtBottomOf: session.snapshot.totalLines, rows: oldRows, scrolledToEnd: scrolledToEnd, session: session, anchorLine: $anchorLine)
         }
         .onChange(of: anchorLine) { _, newAnchor in
           // Keep session.scrollbackOffset (used by copy/status) in sync.
@@ -1081,10 +1089,10 @@ extension TerminalScreenView {
     /// was computed against; judging against the new total instead fails the
     /// guard the moment a line is added while at the bottom (see the
     /// totalLines onChange above).
-    static func followIfAtBottom(wasAtBottomOf previousTotalLines: Int, scrolledToEnd: Bool, session: TerminalSession, anchorLine: Binding<Int?>) {
+    static func followIfAtBottom(wasAtBottomOf previousTotalLines: Int, rows previousRows: Int? = nil, scrolledToEnd: Bool, session: TerminalSession, anchorLine: Binding<Int?>) {
       let snapshot = session.snapshot
       let anchor = anchorLine.wrappedValue ?? 0
-      guard scrolledToEnd || anchor + snapshot.rows >= previousTotalLines else { return }
+      guard scrolledToEnd || anchor + max(snapshot.rows, previousRows ?? 0) >= previousTotalLines else { return }
       anchorLine.wrappedValue = max(0, snapshot.totalLines - snapshot.rows)
     }
 
@@ -1667,6 +1675,21 @@ private final class TerminalKeyBarContainer: UIView {
   override func safeAreaInsetsDidChange() {
     super.safeAreaInsetsDidChange()
     invalidateIntrinsicContentSize()
+  }
+
+  /// Where the bar really is tells the terminal how much of it the keyboard covers (`onKeyboardOverlap`, S-008).
+  override func didMoveToWindow() {
+    super.didMoveToWindow()
+    if window != nil {
+      KeyboardOverlapView.accessory = self
+    } else if KeyboardOverlapView.accessory === self {
+      KeyboardOverlapView.accessory = nil
+    }
+  }
+
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    NotificationCenter.default.post(name: KeyboardOverlapView.accessoryMoved, object: nil)
   }
 }
 
