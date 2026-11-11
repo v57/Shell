@@ -180,12 +180,19 @@ import ShellIntegrations
   /// destination is anchored to the current directory inside `FileBrowserActions`.
   func moveCopy(_ names: Set<String>, to destination: String, mode: FileCommandBuilder.MoveCopyMode)
   {
-    guard let ctx = context, !names.isEmpty else { return }
+    // Never nothing at all: a copy that can't start says why (S-010).
+    guard let ctx = context, !names.isEmpty else {
+      lastError = String(localized: "Nothing to \(mode == .move ? "move" : "copy"): no item is selected in an open folder.")
+      return
+    }
     let ordered = names.sorted()
     let actions = FileBrowserActions(model: self)
     Task {
       for name in ordered {
-        guard let row = rows.first(where: { $0.name == name }) else { continue }
+        guard let row = rows.first(where: { $0.name == name }) else {
+          lastError = String(localized: "“\(name)” isn’t in this folder any more.")
+          continue
+        }
         await actions.moveCopy(
           source: Self.absolutePath(name, in: ctx), destination: destination, mode: mode,
           isDirectory: row.isDirectory)

@@ -36,7 +36,7 @@ struct DestinationSheet: View {
         }
         FormRow(
           "Destination", systemImage: "folder", hue: .blue,
-          field: TextField("Destination path", text: $text).kitFont(.mono))
+          field: pathField)
       }
     } footer: {
       Button("Cancel") { dismiss() }
@@ -49,6 +49,19 @@ struct DestinationSheet: View {
       .keyboardShortcut(.defaultAction)
       .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
     }
-    .onAppear { text = defaultPath }
+    .onAppear {
+      text = defaultPath
+      mode = initialMode
+    }
+  }
+
+  /// A path, typed as it is: no capital letter at the start or corrections ("tmp" stayed "tmp", not "Top").
+  private var pathField: some View {
+    TextField("Destination path", text: $text)
+      .kitFont(.mono)
+      .autocorrectionDisabled()
+      #if os(iOS)
+        .textInputAutocapitalization(.never)
+      #endif
   }
 }

@@ -18,12 +18,10 @@ struct FilesPanelView: View {
   /// the context-menu Delete is tapped so the dialog acts on exactly those rows
   /// rather than re-reading the (possibly changed) selection.
   @State private var deleteCandidates: Set<String> = []
-  /// Whether the move/copy destination sheet is showing.
-  @State private var showsDestinationSheet = false
-  /// The names being moved/copied (snapshotted when the sheet is opened).
-  @State private var mutatingNames: Set<String> = []
-  /// The mode (move or copy) for a pending operation.
-  @State private var mutatingMode: FileCommandBuilder.MoveCopyMode = .move
+  /// The pending move or copy the destination sheet shows: the names and mode snapshotted when it opened. One value
+  /// the sheet is presented for, so its content never reads names or a mode from before (S-010: Copy… opened as
+  /// Move with no names, and its Copy did nothing).
+  @State private var mutating: MutateRequest?
   /// The destination the user is typing in the sheet.
   @State private var destinationText = ""
 
@@ -55,11 +53,10 @@ struct FilesPanelView: View {
         "Delete \(deleteCandidates.count) item\(deleteCandidates.count == 1 ? "" : "s")?",
         isPresented: $showsDeleteConfirm, message: "This cannot be undone.", systemImage: "trash", confirm: "Delete"
       ) { model.delete(deleteCandidates) }
-      .kitSheet(isPresented: $showsDestinationSheet) {
-        DestinationSheet(
-          defaultPath: model.path.isEmpty ? "/" : model.path, text: $destinationText,
-          initialMode: mutatingMode
-        ) { destination, mode in model.moveCopy(mutatingNames, to: destination, mode: mode) }
+      .kitSheet(item: $mutating) { request in
+        DestinationSheet(defaultPath: request.defaultPath, text: $destinationText, initialMode: request.mode) {
+          destination, mode in model.moveCopy(request.names, to: destination, mode: mode)
+        }
       }
   }
 
@@ -67,9 +64,16 @@ struct FilesPanelView: View {
   /// the current path as the destination default.
   private func beginMutate(names: Set<String>, mode: FileCommandBuilder.MoveCopyMode) {
     guard !names.isEmpty else { return }
-    mutatingNames = names
-    mutatingMode = mode
-    destinationText = model.path.isEmpty ? "/" : model.path
-    showsDestinationSheet = true
+    let path = model.path.isEmpty ? "/" : model.path
+    destinationText = path
+    mutating = MutateRequest(names: names, mode: mode, defaultPath: path)
   }
+}
+
+/// A move or copy waiting for its destination.
+private struct MutateRequest: Identifiable {
+  let id = UUID()
+  let names: Set<String>
+  let mode: FileCommandBuilder.MoveCopyMode
+  let defaultPath: String
 }

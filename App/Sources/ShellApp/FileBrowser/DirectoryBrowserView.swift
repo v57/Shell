@@ -23,7 +23,7 @@ typealias DroppedFiles = [URL]
 /// when to list, navigate, open, or run file operations.
 ///
 /// Rendered states, in priority order:
-/// - **Error** — `errorMessage` is non-nil (an `EmptyState` with Retry).
+/// - **Error** — `errorMessage` is non-nil: an `EmptyState` with Retry, or a banner above the rows when there are some.
 /// - **Loading** — `isLoading` is true and there are no rows yet (a working `EmptyState`).
 /// - **Empty** — no rows and no error (an `EmptyState`).
 /// - **Success** — the `KitGrid` (macOS) or `KitList` (iOS) of rows.
@@ -125,7 +125,7 @@ struct DirectoryBrowserView: View {
   // MARK: - Content states
 
   @ViewBuilder private var content: some View {
-    if let errorMessage {
+    if let errorMessage, rows.isEmpty {
       EmptyState(systemImage: "exclamationmark.triangle", title: "Couldn't Load Folder", message: "\(errorMessage)") {
         Button("Retry", action: onRetry).buttonStyle(.kit)
       }
@@ -134,7 +134,16 @@ struct DirectoryBrowserView: View {
     } else if rows.isEmpty {
       EmptyState(systemImage: "folder", title: "Empty Folder", message: "This folder contains no files.")
     } else {
-      fileTable
+      VStack(spacing: 0) {
+        // A failed copy, move, rename or delete over a listed folder: said above the rows, which stay (S-010).
+        if let errorMessage {
+          Banner("Couldn’t Finish", message: errorMessage, systemImage: "exclamationmark.triangle", hue: .red) {
+            Button("Reload", action: onRetry).buttonStyle(.kit)
+          }
+          .padding(KitMetrics.gutter)
+        }
+        fileTable
+      }
     }
   }
 
