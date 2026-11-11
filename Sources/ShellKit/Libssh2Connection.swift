@@ -33,6 +33,8 @@ public struct RemoteCommandResult: Sendable {
 nonisolated final class Libssh2Connection: @unchecked Sendable {
   /// A request to the UI to verify an unknown or changed host key.
   struct HostKeyChallenge {
+    /// The address that answered and showed the key: the host's own, or one of its fallbacks (S-009).
+    let address: String
     let fingerprint: String
     /// The fingerprint remembered for this host when the server now presents
     /// a different key (possible man-in-the-middle); nil on first contact.
@@ -177,6 +179,8 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
 
   // All of the following are only accessed on `queue` (the owning thread).
   private var socketFD: SocketHandle = Sockets.invalid
+  /// The address `openSocket` reached: the host, or one of its fallbacks.
+  private var connectedHost = ""
   private var session: OpaquePointer?
   private var channel: OpaquePointer?
 
@@ -445,17 +449,20 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
   ///
   /// `hosts` are the machine's addresses in order (`SSHConfig.addresses`: the host, then its fallbacks); each is
   /// tried in turn, one that doesn't answer getting a share of the time (5 s at most) so the others still get theirs.
-  /// The host key check is the same whichever answers (`config.host`'s). With every address failing, the error says
-  /// why for each, and counts as a lost connection (to dial again) when any of them only didn't answer.
+  /// The host key check knows the machine's keys at every address (`KnownHostsStore.fingerprints`) and asks about the
+  /// address that answered (`connectedHost`). With every address failing, the error says why for each, and counts as
+  /// a lost connection (to dial again) when any of them only didn't answer.
   private func openSocket(hosts: [String], port: Int, timeout: Int) throws -> SocketHandle {
     let hosts = hosts.isEmpty ? [config.host] : hosts
     var failures: [(host: String, error: EngineError, reason: String)] = []
     for (index, host) in hosts.enumerated() {
       let isLast = index == hosts.count - 1
       do {
-        return try Sockets.connect(
+        let socket = try Sockets.connect(
           host: host, port: port, timeout: TimeInterval(isLast ? timeout : min(timeout, 5)),
           keepAlive: Sockets.KeepAlive(idle: 10, interval: 5, count: 3))
+        connectedHost = host
+        return socket
       } catch {
         switch error {
         case .hostNotFound(let message): failures.append((host, .hostNotFound(message), "not found"))
@@ -515,26 +522,30 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
       return
     }
 
-    let known = knownHosts.fingerprint(for: config)
-    if known == fingerprint {
+    // The address that answered: the host's own or a fallback. A key accepted at any of the machine's addresses is
+    // this machine's, so a fallback answering with it asks nothing (S-009).
+    let address = connectedHost.isEmpty ? config.host : connectedHost
+    let known = knownHosts.fingerprint(for: config, at: address)
+    if known == fingerprint || knownHosts.fingerprints(for: config).contains(fingerprint) {
       return
     }
 
-    // Unknown or changed host key — ask the UI. The prompt saves (or not) and signals; we
-    // then re-check the store to learn the user's decision without a mutable
-    // flag racing across threads.
+    // Unknown or changed host key — ask the UI, naming the address that answered. The prompt saves (or not) and
+    // signals; we then re-check the store to learn the user's decision without a mutable flag racing across threads.
+    let previous = known ?? knownHosts.fingerprint(for: config, at: config.host)
     let sem = DispatchSemaphore(value: 0)
     let respond: @Sendable (Bool) -> Void = { [knownHosts, config] accept in
       if accept {
-        knownHosts.save(fingerprint: fingerprint, for: config)
+        knownHosts.save(fingerprint: fingerprint, for: config, at: address)
       }
       sem.signal()
     }
     DispatchQueue.main.async { [weak self] in
-      self?.onHostKeyChallenge?(HostKeyChallenge(fingerprint: fingerprint, previousFingerprint: known, respond: respond))
+      self?.onHostKeyChallenge?(
+        HostKeyChallenge(address: address, fingerprint: fingerprint, previousFingerprint: previous, respond: respond))
     }
     _ = sem.wait(timeout: .now() + .seconds(120))
-    if knownHosts.fingerprint(for: config) != fingerprint {
+    if knownHosts.fingerprint(for: config, at: address) != fingerprint {
       throw EngineError.hostKeyRejected
     }
   }

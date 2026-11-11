@@ -43,6 +43,26 @@ final class KnownHostsStore {
     return (try? store.knownFingerprint(host: config.host, port: config.port)) ?? nil
   }
 
+  /// The key accepted at one of the connection's addresses (`SSHConfig.addresses`), on the host's route.
+  func fingerprint(for config: SSHConfig, at address: String) -> String? {
+    var config = config
+    config.host = address
+    return fingerprint(for: config)
+  }
+
+  /// Accepts a key at the address that showed it.
+  func save(fingerprint: String, for config: SSHConfig, at address: String) {
+    var config = config
+    config.host = address
+    save(fingerprint: fingerprint, for: config)
+  }
+
+  /// The keys accepted for the machine a connection is, at any of its addresses: the host, the user's fallbacks and
+  /// the vault's. One machine's addresses share its keys, so a key accepted at one is known at the others (S-009).
+  func fingerprints(for config: SSHConfig) -> Set<String> {
+    Set(config.addresses.compactMap { fingerprint(for: config, at: $0) })
+  }
+
   /// The saved host a connection is, at the address the connection names.
   private func host(of config: SSHConfig) -> VaultHost? {
     guard var host = try? store?.record(VaultHost.self, id: config.vaultID) else { return nil }

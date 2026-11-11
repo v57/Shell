@@ -26,30 +26,60 @@ struct SSHFallbackAddressTests {
     #expect(again.fallbacks == ["b"])
   }
 
-  @Test(.enabled(if: port != nil, "needs SHELL_SSH_FALLBACK_TEST_PORT"))
-  func reachesTheHostAtAFallback() async throws {
-    #expect(await hostKeyShown(SSHConfig(host: "unreachable.invalid", fallbacks: ["127.0.0.1"], port: Self.port!)))
-    #expect(await hostKeyShown(SSHConfig(host: "unreachable.invalid", automaticFallbacks: ["127.0.0.1"], port: Self.port!)))
-    #expect(await !hostKeyShown(SSHConfig(host: "unreachable.invalid", port: Self.port!)))
+  /// A key accepted at one address of a machine is known at its others: the host, its fallbacks and the vault's.
+  @Test func keysAreTheMachinesAtEveryAddress() {
+    let knownHosts = KnownHostsStore(defaults: UserDefaults(suiteName: "shell-test-\(UUID().uuidString)")!, store: nil)
+    let config = SSHConfig(host: "192.0.2.1", fallbacks: ["studio.local"], automaticFallbacks: ["100.64.0.7"])
+    knownHosts.save(fingerprint: "SHA256:studio", for: config, at: "studio.local")
+    #expect(knownHosts.fingerprint(for: config, at: "192.0.2.1") == nil)
+    #expect(knownHosts.fingerprint(for: config, at: "studio.local") == "SHA256:studio")
+    #expect(knownHosts.fingerprints(for: config) == ["SHA256:studio"])
+    #expect(knownHosts.fingerprints(for: SSHConfig(host: "192.0.2.1")).isEmpty)
   }
 
-  /// Whether the connection got as far as the server's host key (it answered), refusing it.
-  private func hostKeyShown(_ base: SSHConfig) async -> Bool {
+  @Test(.enabled(if: port != nil, "needs SHELL_SSH_FALLBACK_TEST_PORT"))
+  func reachesTheHostAtAFallback() async throws {
+    #expect(await hostKeyShown(SSHConfig(host: "unreachable.invalid", fallbacks: ["127.0.0.1"], port: Self.port!)) == "127.0.0.1")
+    #expect(await hostKeyShown(SSHConfig(host: "unreachable.invalid", automaticFallbacks: ["127.0.0.1"], port: Self.port!)) == "127.0.0.1")
+    #expect(await hostKeyShown(SSHConfig(host: "unreachable.invalid", port: Self.port!)) == nil)
+  }
+
+  /// A fallback answering with a key accepted at the host's other address asks nothing.
+  @Test(.enabled(if: port != nil, "needs SHELL_SSH_FALLBACK_TEST_PORT"))
+  func aKeyAcceptedAtAnotherAddressIsKnown() async throws {
+    let knownHosts = KnownHostsStore(defaults: UserDefaults(suiteName: "shell-test-\(UUID().uuidString)")!, store: nil)
+    let first = SSHConfig(host: "127.0.0.1", port: Self.port!)
+    #expect(await hostKeyShown(first, knownHosts: knownHosts, accept: true) == "127.0.0.1")
+    #expect(knownHosts.fingerprint(for: first, at: "127.0.0.1") != nil)
+    let fallback = SSHConfig(host: "unreachable.invalid", fallbacks: ["127.0.0.1"], port: Self.port!)
+    #expect(await hostKeyShown(fallback, knownHosts: knownHosts) == nil)
+  }
+
+  /// The address the connection asked about when it got as far as the server's host key (it answered), refusing it
+  /// unless `accept`; nil when nothing asked.
+  private func hostKeyShown(
+    _ base: SSHConfig,
+    knownHosts: KnownHostsStore = KnownHostsStore(defaults: UserDefaults(suiteName: "shell-test-\(UUID().uuidString)")!, store: nil),
+    accept: Bool = false
+  ) async -> String? {
     var config = base
     config.authMethod = .password
     config.savePassword = false
-    let knownHosts = KnownHostsStore(defaults: UserDefaults(suiteName: "shell-test-\(UUID().uuidString)")!, store: nil)
     let connection = Libssh2Connection(config: config, privateKey: nil, forwardingOnly: true, knownHosts: knownHosts)
     defer { connection.close() }
-    return await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+    return await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in
       let once = FallbackOnce()
       connection.onHostKeyChallenge = { challenge in
-        challenge.respond(false)
-        if once.claim() { continuation.resume(returning: true) }
+        challenge.respond(accept)
+        if once.claim() { continuation.resume(returning: challenge.address) }
       }
-      connection.onConnected = { if once.claim() { continuation.resume(returning: true) } }
-      connection.onTerminated = { _ in if once.claim() { continuation.resume(returning: false) } }
-      connection.onConnectionLost = { _ in if once.claim() { continuation.resume(returning: false) } }
+      connection.onPasswordChallenge = { challenge in
+        challenge.respond(nil)
+        if once.claim() { continuation.resume(returning: nil) }
+      }
+      connection.onConnected = { if once.claim() { continuation.resume(returning: nil) } }
+      connection.onTerminated = { _ in if once.claim() { continuation.resume(returning: nil) } }
+      connection.onConnectionLost = { _ in if once.claim() { continuation.resume(returning: nil) } }
       connection.start()
     }
   }

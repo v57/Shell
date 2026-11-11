@@ -75,7 +75,8 @@ public final class SSHSession: TerminalTransport {
     engine.onHostKeyChallenge = { [weak self] challenge in
       guard let self else { return }
       self.onHostKeyPrompt?(TerminalHostKeyPrompt(
-        host: self.config.host,
+        // The address that answered, so the user knows which machine's key it is (S-009).
+        host: challenge.address,
         port: self.config.port,
         fingerprint: challenge.fingerprint,
         previousFingerprint: challenge.previousFingerprint,
