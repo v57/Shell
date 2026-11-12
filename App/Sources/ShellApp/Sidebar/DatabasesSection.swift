@@ -42,6 +42,12 @@ struct DatabasesSectionView: View {
         ForEach(listed) { group in
           DatabaseConnectionRow(group: group, state: state)
         }
+        // No connections yet (iPhone and iPad show the section anyway): something to try without a server.
+        if model.databaseConnections.isEmpty {
+          Button("Open the Sample Database", systemImage: "cart") { model.openSampleDatabase() }
+            .buttonStyle(.kitPlain)
+            .padding(.vertical, 4)
+        }
         if hidesUnused, !isSearching, more > 0 {
           SidebarShowMoreRow(
             count: more, isShowing: $showsMore, reason: "unused",

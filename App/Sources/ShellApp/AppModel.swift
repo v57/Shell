@@ -1886,6 +1886,15 @@ final class AppModel {
     databaseWindow.newConnection(through: host)
   }
 
+  /// Database's sample shop (`DatabaseModel.openSample`): a small SQLite database made on this device, opened here,
+  /// so the database browser can be tried with no server.
+  func openSampleDatabase() {
+    Task { @MainActor in
+      let profile = await databases.openSample()
+      if let connection = findDatabaseConnection(profile.id) { openOrFocusDatabaseConnection(connection) }
+    }
+  }
+
   /// The Edit Connection sheet for a saved connection.
   func editDatabaseConnection(_ connection: DatabaseConnection) {
     databaseWindow.editingProfileID = connection.id
