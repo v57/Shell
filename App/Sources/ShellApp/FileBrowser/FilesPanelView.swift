@@ -51,7 +51,7 @@ struct FilesPanelView: View {
       // The terminal's keyboard can be up under the panel: its last rows stay above it (S-008).
       .keepsAboveKeyboard()
       .kitConfirmation(
-        "Delete \(deleteCandidates.count) item\(deleteCandidates.count == 1 ? "" : "s")?",
+        "Delete \(deleteCandidates.count) items?",
         isPresented: $showsDeleteConfirm, message: "This cannot be undone.", systemImage: "trash", confirm: "Delete"
       ) { model.delete(deleteCandidates) }
       .kitSheet(item: $mutating) { request in
