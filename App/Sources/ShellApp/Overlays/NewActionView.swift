@@ -178,7 +178,7 @@ struct NewActionView: View {
           FormRow(
             "\(dep.name)",
             help: dep.dependencies.isEmpty
-              ? nil : dep.dependencies.count == 1 ? "1 dep." : "\(dep.dependencies.count) deps.",
+              ? nil : "\(dep.dependencies.count) deps.",
             systemImage: "bolt", hue: .gray
           ) {
             Button("Add as a dependency", systemImage: "plus") { dependencies.insert(dep.id) }

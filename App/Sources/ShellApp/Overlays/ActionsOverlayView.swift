@@ -105,7 +105,7 @@ struct ActionsOverlayView: View {
     if !actions.isEmpty || query.isEmpty {
       PaletteGroup(
         "Your actions",
-        meta: [model.actions.all.count == 1 ? String(localized: "1 action") : String(localized: "\(model.actions.all.count) actions"),
+        meta: [String(localized: "\(model.actions.all.count) actions"),
                categories.joined(separator: ", ")],
         systemImage: "bolt.fill", hue: .indigo
       ) {
@@ -269,7 +269,7 @@ struct ActionsOverlayView: View {
     let kinds = model.openWithKinds.filter { ProjectOpener.isInstalled($0) }
     if let directory = model.smartActionDirectory, !kinds.isEmpty, query.isEmpty {
       PaletteGroup(
-        "Open \(directory.lastPathComponent) in", meta: [kinds.count == 1 ? String(localized: "1 app") : String(localized: "\(kinds.count) apps")],
+        "Open \(directory.lastPathComponent) in", meta: [String(localized: "\(kinds.count) apps")],
         systemImage: "folder", hue: .gray
       ) {
         ForEach(kinds, id: \.self) { kind in
