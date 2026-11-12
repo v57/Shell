@@ -349,7 +349,7 @@ struct DirectoryBrowserView: View {
         let others = names.subtracting([row.name])
         if !others.isEmpty {
           Divider()
-          let picked = others.count == 1 ? (others.first ?? "") : "the \(others.count) items you picked"
+          let picked = others.count == 1 ? (others.first ?? "") : String(localized: "the \(others.count) items you picked")
           Button("Move Here", systemImage: "folder") {
             onMoveCopyIntoDirectory(others, absolutePath(for: row), .move)
           }

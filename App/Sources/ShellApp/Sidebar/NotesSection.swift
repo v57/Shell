@@ -41,10 +41,10 @@ struct NotesSectionView: View {
       } meta: {
         if let edited = model.notes.notes.map(\.lastUpdate).max() {
           // "2 notes · edited 2 min. ago", dropping words rather than truncating in a narrow sidebar.
-          let notes = count == 1 ? "1 note" : "\(count) notes"
+          let notes = String(localized: "\(count) notes")
           let ago = edited.formatted(.relative(presentation: .named, unitsStyle: .abbreviated))
           ViewThatFits(in: .horizontal) {
-            MetaLine(notes, "edited \(ago)")
+            MetaLine(notes, String(localized: "edited \(ago)"))
             MetaLine(notes, ago)
             MetaLine(notes)
           }

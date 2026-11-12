@@ -165,7 +165,7 @@ struct LocalSectionView: View {
   @ViewBuilder
   private var meta: some View {
     if model.historyMode {
-      MetaLine(model.history.sessions.count == 1 ? "1 session" : "\(model.history.sessions.count) sessions")
+      MetaLine(String(localized: "\(model.history.sessions.count) sessions"))
     } else if flags.isEnabled(.monitoring) {
       LocalStatsLine(monitor: monitor, showGraphs: { [state] in state.showingStatsGraphs = true }) {
         sessionsLine
@@ -178,7 +178,7 @@ struct LocalSectionView: View {
   private var sessionsLine: MetaLine {
     let count = localSessions.count
     let active = localSessions.filter(\.hasActivity).count
-    return MetaLine([count == 1 ? "1 session" : "\(count) sessions", active > 0 ? "\(active) running" : ""])
+    return MetaLine([String(localized: "\(count) sessions"), active > 0 ? String(localized: "\(active) running") : ""])
   }
 
   /// The header's controls: the history toggle (and, in history, delete all),

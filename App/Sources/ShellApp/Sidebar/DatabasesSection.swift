@@ -80,11 +80,12 @@ struct DatabasesSectionView: View {
   /// "2 open · 14 connections", or "PostgreSQL · 3 of 14" with an engine picked.
   private func meta(groups: [DatabaseGroup], listed: [DatabaseGroup]) -> [String] {
     let total = model.databaseConnections.count
-    if total == 0 { return ["No connections"] }
+    if total == 0 { return [String(localized: "No connections")] }
     let open = groups.filter { $0.isOpen(model: model) }.count
-    let count = listed.count < groups.count ? "\(listed.count) of \(groups.count)" : total == 1 ? "1 connection" : "\(total) connections"
+    let count =
+      listed.count < groups.count ? "\(listed.count) of \(groups.count)" : String(localized: "\(total) connections")
     if let engine = DatabaseEngine(rawValue: engineFilter) { return [engine.displayName, count] }
-    return [open > 0 ? "\(open) open" : "", count]
+    return [open > 0 ? String(localized: "\(open) open") : "", count]
   }
 
   @ViewBuilder private var optionsMenu: some View {

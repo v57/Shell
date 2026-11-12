@@ -48,7 +48,7 @@ struct SidebarView: View {
     @Bindable var state = state
     SidebarFrame(searchText: $state.searchText, columnVisibility: $columnVisibility) {
       // The window's account, hidden while Personal is the only one.
-      VaultAccountPicker(meta: model.connections.count == 1 ? "1 host" : "\(model.connections.count) hosts")
+      VaultAccountPicker(meta: String(localized: "\(model.connections.count) hosts"))
 
       RunningSectionView(state: state)
 
@@ -360,7 +360,7 @@ private struct TextFilesSectionView: View {
           }
         }
       } meta: {
-        MetaLine([files.count == 1 ? "1 file" : "\(files.count) files", unsaved > 0 ? "\(unsaved) unsaved" : ""])
+        MetaLine([String(localized: "\(files.count) files"), unsaved > 0 ? String(localized: "\(unsaved) unsaved") : ""])
       } accessory: {
         EmptyView()
       }
