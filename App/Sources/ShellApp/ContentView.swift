@@ -1,4 +1,3 @@
-import Combine
 import ComponentKit
 import SwiftUI
 import ShellDatabaseEngines
@@ -36,7 +35,6 @@ struct ContentView: View {
   /// Presents the first-launch "choose your features" welcome sheet on a fresh
   /// install, when the feature-flags store has never been configured.
   @State private var showFirstLaunchWelcome = false
-  private let directoryTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
   /// The feature-flag source of truth. Reads `.isEnabled(_:)` here so a
   /// disabled feature's controls vanish from the UI. Accessing it through
@@ -243,10 +241,12 @@ struct ContentView: View {
       if AppModel.shared.mainWindow == nil { AppModel.shared.mainWindow = NSApp.keyWindow }
       #endif
     }
-    .onReceive(directoryTimer) { _ in
-      refreshLocalDirectory()
-      // Keep the Files panel's directory in sync with the live session.
-      if flags.isEnabled(.files) { model.directoryBrowser.syncTick() }
+    .task {
+      while (try? await Task.sleep(for: .seconds(1))) != nil {
+        refreshLocalDirectory()
+        // Keep the Files panel's directory in sync with the live session.
+        if flags.isEnabled(.files) { model.directoryBrowser.syncTick() }
+      }
     }
     // Kick the directory refresh the moment the selected session changes
     // (the timer alone adds up to a second of lag before the toolbar
