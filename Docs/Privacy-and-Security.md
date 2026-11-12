@@ -14,6 +14,8 @@ Shell never contacts a server on its own. Everything it sends goes to a place yo
 | Update check and download (Mac, Linux, Windows) | Shell's releases on GitHub | When you choose **Check for Updates…**, or once a day if you turn on **Check for Updates Automatically**. It is off until you turn it on. |
 | The `session` tool (Mac) | GitHub | Only when you tap **Install** next to **Session Tool** in **Settings ▸ Sessions**. |
 | DuckDB (Mac) | Its download | Only when you choose to download it from a database page. |
+| A project's packages (Mac) | The hosts an Xcode project's Swift packages come from | Only when you run a smart action such as **Build** or **Run**. A terminal entering a project folder lists its schemes without fetching anything. |
+| Apple's notary service and App Store Connect (Mac) | Apple | When you open the Notarization sheet, notarize an app or upload one. |
 
 On the Mac, Shell installs an update only when it is signed by its developer and notarized by Apple. The iPhone and
 iPad app updates through the App Store.

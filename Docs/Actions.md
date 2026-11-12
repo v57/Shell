@@ -53,6 +53,10 @@ When a local terminal is in a project folder, Shell finds the project's schemes 
 [Code](https://github.com/v57/Code/blob/main/docs/README.md) app, which knows Xcode, Swift, Go, Cargo, JavaScript and
 TypeScript, Python, Gradle, Maven, Docker Compose, CMake, Make, Dart, .NET, Ruby, Elixir, PHP and Zig projects.
 
+Entering an Xcode project's folder doesn't download anything. Shell lists the schemes from the project's files, or
+with Xcode's own list when every package the project pins is already checked out on the Mac. The project's Swift
+packages are fetched only when you run an action such as **Build** or **Run**.
+
 - The title bar shows the scheme picker and the action buttons. **Distribute** holds the distribution actions and
   **Notarization Settings…**.
 - The palette lists each scheme's actions too. Run one again to stop it.

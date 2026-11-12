@@ -24,7 +24,10 @@ one lists the current folder again.
 - On iPhone and iPad, pull the list down to list the folder again, with what changed on the server since.
 
 An empty folder shows **Empty Folder**. A folder Shell can't read shows **Couldn't Load Folder** with the reason and
-**Retry**.
+**Retry**. So does a server that doesn't answer for 30 seconds.
+
+The panel follows the terminal's folder when the server's shell reports it. A Mac's own zsh over SSH doesn't, so on a
+Mac server, move around in the panel itself.
 
 If you haven't accepted the server's key yet, the panel doesn't ask about it. It tells you to accept the key in the
 terminal, and lists the folder once you have.
@@ -36,8 +39,10 @@ Touch and hold (or right-click) a file or folder:
 - **Open Folder**, or **Open in Default App** for a file: runs the server's opener (`open` or `xdg-open`). On a server
   without a desktop, this fails with a message.
 - **Move…** and **Copy…**: the **Move to…** or **Copy to…** sheet asks for the destination path. Switch between
-  **Move** and **Copy** at the top, then confirm.
+  **Move** and **Copy** at the top, then confirm. **Copy…** opens with **Copy** selected, **Move…** with **Move**.
 - **Delete**: asks "Delete 1 item?" ("This cannot be undone."), then deletes it on the server.
+
+If a move, copy or delete fails, a banner over the list says why.
 
 ## On the Mac
 

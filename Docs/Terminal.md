@@ -18,6 +18,9 @@ Above the keyboard is a bar of special keys:
 With a hardware keyboard on iPad, the arrows, Tab, Esc, Control and Option keys go straight to the terminal, and the
 on-screen keyboard stays down.
 
+While the on-screen keyboard is up, the terminal has only the rows above it and the special-keys bar, and the server
+is told that size, so the prompt stays in view. Opening the arrows or Fn rows takes rows away the same way.
+
 ## Select and copy text
 
 Drag across text to select it. Drag past the top edge to scroll while you select.

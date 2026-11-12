@@ -47,6 +47,10 @@ there.
 The first time you connect to a server, Shell shows **Untrusted host key** with the server's fingerprint.
 
 - Tap **Accept** only if the fingerprint is the server's. Shell remembers the key and doesn't ask again.
+
+The question names the address that answered. For a host with fallback addresses, that may be a fallback rather than
+its main address. A key you accepted at any of a host's addresses is known at the others, so Shell doesn't ask again
+when the same server answers at another one.
 - Tap **Cancel**, or tap outside the dialog, to stop.
 
 If a server shows a different key from the one Shell remembers, Shell shows **Host key changed** with the

@@ -19,6 +19,13 @@ This page covers what Shell adds. For tables, queries, editing rows and the othe
 
 Fill in the connection sheet and save. Shell connects and opens the connection.
 
+## Try the sample database (iPhone and iPad)
+
+With no connections yet, the **Databases** section shows **Open the Sample Database**. It makes a small made-up shop
+in SQLite on your device (customers, products, orders, order items, refunds and a monthly revenue view) and opens it,
+so you can try the tables and queries without a server. Nothing is downloaded. The sample is an ordinary connection
+named **Sample Shop**: it syncs like the others, and **Delete…** removes it.
+
 ## Databases over SSH
 
 A connection with an SSH host goes through that server. Shell talks to the database over the SSH connection itself and
