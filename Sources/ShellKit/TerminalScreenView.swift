@@ -205,7 +205,10 @@ public struct TerminalScreenView: View {
   /// `onScrollGeometryChange` (ScrollModifier). Mouse → cell hit-testing
   /// maps through it so clicks work in CONTENT coordinates: logical line L
   /// spans content y [L*lh, (L+1)*lh) no matter where the viewport is.
-  @State private var scrollOffset: CGFloat = 0
+  ///
+  /// In a box, not in state: it changes on every frame of a scroll, and only the click and drag handlers read it. As
+  /// state, handed out as bindings (which carry their value), it rebuilt the scroll and selection modifiers each frame.
+  @State private var scrollOffset = TerminalScrollOffset()
   @State private var viewportHeight: CGFloat = 0
 
   @FocusState private var focused: Bool
@@ -313,7 +316,7 @@ public struct TerminalScreenView: View {
             focused: $focused,
             keyboardOn: $showKeyboard,
             anchorLine: $anchorLine,
-            scrollOffset: $scrollOffset,
+            scrollOffset: scrollOffset,
             viewportHeight: $viewportHeight
           ))
           // Floating "scroll to bottom" affordance pinned to the viewport's
@@ -396,7 +399,9 @@ public struct TerminalScreenView: View {
             )
           }
           .equatable()
-          .frame(height: metrics.lineHeight, alignment: .leading)
+          // A fixed size, not just a height: the lazy stack sizes the lines it passes as it scrolls (measuring back from
+          // the top of the screen on the way up), and a line with a free width laid its text out each time.
+          .frame(width: CGFloat(snapshot.columns) * metrics.cellWidth, height: metrics.lineHeight, alignment: .leading)
         }
       }
       .scrollTargetLayout()
@@ -420,7 +425,7 @@ public struct TerminalScreenView: View {
     }
     // Scrolling behavior (anchor tracking, content-offset reporting,
     // bottom-tailing) lives in ScrollModifier.
-    .modifier(ScrollModifier(session: session, anchorLine: $anchorLine, scrollOffset: $scrollOffset, scrolledToEnd: $scrolledToEnd, topInset: topInset, containerHeight: containerHeight))
+    .modifier(ScrollModifier(session: session, anchorLine: $anchorLine, scrollOffset: scrollOffset, scrolledToEnd: $scrolledToEnd, topInset: topInset, containerHeight: containerHeight))
   }
 
   /// Everything one line's drawing depends on (see `TerminalLineRow`): its
@@ -956,7 +961,7 @@ extension TerminalScreenView {
   struct ScrollModifier: ViewModifier {
     @Bindable var session: TerminalSession
     @Binding var anchorLine: Int?
-    @Binding var scrollOffset: CGFloat
+    let scrollOffset: TerminalScrollOffset
     @Binding var scrolledToEnd: Bool
     let topInset: CGFloat
     /// The scroll view's height (the grid's safe-area height), for the
@@ -984,7 +989,7 @@ extension TerminalScreenView {
         .modifier(ContentOffsetModifier(
           session: session,
           anchorLine: anchorLine,
-          scrollOffset: $scrollOffset,
+          scrollOffset: scrollOffset,
           scrolledToEnd: $scrolledToEnd,
           topInset: topInset,
           containerHeight: containerHeight
@@ -1029,7 +1034,7 @@ extension TerminalScreenView {
       @Environment(\.terminalFontSize) private var fontSize
       let session: TerminalSession
       let anchorLine: Int?
-      @Binding var scrollOffset: CGFloat
+      let scrollOffset: TerminalScrollOffset
       @Binding var scrolledToEnd: Bool
       let topInset: CGFloat
       let containerHeight: CGFloat
@@ -1048,7 +1053,7 @@ extension TerminalScreenView {
               toEnd: geometry.contentSize.height + geometry.contentInsets.bottom
                 - geometry.contentOffset.y - geometry.containerSize.height)
           } action: { _, position in
-            scrollOffset = -position.offset - topInset
+            scrollOffset.value = -position.offset - topInset
             scrolledToEnd = position.toEnd < TerminalScreenView.metrics(ofSize: fontSize).lineHeight
           }
         } else {
@@ -1060,7 +1065,7 @@ extension TerminalScreenView {
       }
 
       private func updateFallback() {
-        scrollOffset = Self.fallbackOffset(
+        scrollOffset.value = Self.fallbackOffset(
           anchorLine: anchorLine ?? 0,
           rows: session.snapshot.rows,
           totalLines: session.snapshot.totalLines,
@@ -1307,7 +1312,7 @@ extension TerminalScreenView {
     @Binding var anchorLine: Int?
     /// Shared with ScrollModifier: hit-testing maps clicks through the
     /// content offset.
-    @Binding var scrollOffset: CGFloat
+    let scrollOffset: TerminalScrollOffset
     /// Written by the resize code; the drag-to-edge extension computes the
     /// viewport's bottom line from it.
     @Binding var viewportHeight: CGFloat
@@ -1426,7 +1431,7 @@ extension TerminalScreenView {
     private func cell(at location: CGPoint) -> TerminalCursor {
       let snapshot = session.snapshot
       let line = Self.logicalLine(
-        contentOffset: scrollOffset,
+        contentOffset: scrollOffset.value,
         localY: location.y,
         lineHeight: metrics.lineHeight,
         totalLines: snapshot.totalLines
@@ -1477,13 +1482,13 @@ extension TerminalScreenView {
     private func extendSelectionToEdge(direction: Int) {
       let snapshot = session.snapshot
       let topLine = Self.logicalLine(
-        contentOffset: scrollOffset,
+        contentOffset: scrollOffset.value,
         localY: 0,
         lineHeight: metrics.lineHeight,
         totalLines: snapshot.totalLines
       )
       let bottomLine = Self.logicalLine(
-        contentOffset: scrollOffset,
+        contentOffset: scrollOffset.value,
         localY: viewportHeight,
         lineHeight: metrics.lineHeight,
         totalLines: snapshot.totalLines
@@ -1990,3 +1995,9 @@ private struct TerminalKeyboardBridge: UIViewRepresentable {
   }
 }
 #endif
+
+/// The terminal's scroll offset (`TerminalScreenView.scrollOffset`), shared by the scroll modifier that writes it and
+/// the click handlers that read it, without drawing anything again when it changes.
+@MainActor final class TerminalScrollOffset {
+  var value: CGFloat = 0
+}
