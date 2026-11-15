@@ -474,7 +474,7 @@ public final class TerminalSession: Identifiable {
       transport.resize(columns: columns, rows: rows)
     }
     parser.resize(columns: columns, rows: rows)
-    parser.drainParseQueue()
+    parser.drainParseQueue(timeout: Self.interactiveDrainTimeout)
     if !shrinking {
       transport.resize(columns: columns, rows: rows)
     }
@@ -529,6 +529,12 @@ public final class TerminalSession: Identifiable {
     }
   }
 
+  /// How long resize and Cmd+K wait on the main thread for output still
+  /// being parsed before publishing: half a 120 Hz frame. Output past it
+  /// shows on the next publish ticks instead of stalling the window (a
+  /// window resize during `seq 1 300000` waited 1.7–4.9 s for the backlog).
+  static let interactiveDrainTimeout: DispatchTimeInterval = .milliseconds(4)
+
   /// Cmd+K "clean stdout": tell the shell to redraw its prompt at the top
   /// of the screen (Ctrl-L — zsh's line editor handles it itself, so the
   /// shell's internal cursor stays in sync and the prompt MOVES UP like
@@ -538,7 +544,7 @@ public final class TerminalSession: Identifiable {
   public func clearStdout() {
     sendClearScreen()
     parser.clearStdout()
-    parser.drainParseQueue()
+    parser.drainParseQueue(timeout: Self.interactiveDrainTimeout)
     selectionStart = nil
     selectionEnd = nil
     scrollbackOffset = 0

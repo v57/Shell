@@ -73,6 +73,18 @@ public final class TerminalOutputParser {
     parseQueue.sync {}
   }
 
+  /// Waits at most `timeout` for the previously-enqueued `consumeAsync`
+  /// blocks; true when they all ran. For the main thread's interactive
+  /// paths (resize, Cmd+K): while a command floods output the backlog can
+  /// take seconds, and the session's publish picks up the rest on its next
+  /// ticks (it publishes again while parsed and received chunks differ).
+  @discardableResult
+  public func drainParseQueue(timeout: DispatchTimeInterval) -> Bool {
+    let drained = DispatchSemaphore(value: 0)
+    parseQueue.async { drained.signal() }
+    return drained.wait(timeout: .now() + timeout) == .success
+  }
+
   /// Consumes output on the CALLING thread (used by tests and by
   /// synchronous paths). Serialized against other access via `lock`.
   public func consume(_ data: Data) {
@@ -593,6 +605,10 @@ struct TerminalGrid {
   private(set) var scrolledLineCount = 0
   /// Matches Terminal.app's default scrollback size.
   static let scrollbackLimit = 10_000
+  /// Lines the scrollback may grow past `scrollbackLimit` before its head is
+  /// trimmed back to the limit in one go. Trimming one line per line pushed
+  /// shifted all 10,000 rows each time: a long output parsed in quadratic time.
+  static let scrollbackSlack = 1_000
 
   init(rows: Int, columns: Int) {
     self.rows = rows
@@ -1363,7 +1379,7 @@ struct TerminalGrid {
     // The row keeps its wrapped flag with it as it moves off-screen.
     scrollbackWrapped.append(rowWrapped[0])
     if !rowWrapped[0] { scrolledLineCount += 1 }
-    if scrollback.count > Self.scrollbackLimit {
+    if scrollback.count > Self.scrollbackLimit + Self.scrollbackSlack {
       let overflow = scrollback.count - Self.scrollbackLimit
       scrollback.removeFirst(overflow)
       scrollbackWrapped.removeFirst(overflow)
