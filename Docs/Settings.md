@@ -1,14 +1,8 @@
 # Settings
 
-On the Mac, open Settings with **Shell ▸ Settings…** (⌘,). On iPhone and iPad, tap the gear at the bottom of the
-sidebar. Shell reopens the pane you used last.
-
-## Sessions (Mac)
-
-- **Always Start Persistent Sessions**: new terminals keep running after you close them, and you reopen them from the
-  sidebar. It needs **Sessions** and **Screen sessions** on in Features.
-- **Session Tool**, **Keep Sessions Running After Quit** and **Session Daemon**: see
-  [Local Terminals and Sessions](Local-Terminals-and-Sessions.md#keep-sessions-running-after-shell-quits).
+Shell's settings are in panes: **Appearance**, **Features**, **Actions**, **Privacy** and **Accounts** everywhere,
+plus **Sessions** and **Remote** on the Mac and **Devices** on iPhone, iPad, Linux and Windows. Shell reopens the pane
+you used last. See below for where Settings is on your device.
 
 ## Appearance
 
@@ -24,8 +18,7 @@ are on. "Turned-off features are hidden and stop their background work; their da
 
 ## Actions
 
-One row per Shell command, each with its button. On the Mac the same commands are in the **Shell** menu; on iPhone
-and iPad this pane is where you find them:
+One row per Shell command, each with its button:
 
 | Row | Button | What it does |
 |---|---|---|
@@ -51,8 +44,8 @@ Keychain. What's already there stays, and your other devices keep it.
 
 The same pane as in every v57 app:
 
-- **This iPhone** / **This iPad** / **This Mac** ▸ **Rename…**: the device's name on your Hub, in its SSH key and on the
-  servers that let it in.
+- **This iPhone**, **This iPad**, **This Mac**, **This PC** (Windows) or **This Computer** (Linux) ▸ **Rename…**: the
+  device's name on your Hub, in its SSH key and on the servers that let it in.
 - **New Account…**, and **Edit…** or **Delete…** for each account. Deleting an account asks first: its projects, hosts,
   passwords and settings are deleted on every device. **Personal** can't be deleted.
 - **Your Name** ▸ **Set…** or **Edit…**: the name and email that go in your key's comment and in Git commits.
@@ -60,13 +53,72 @@ The same pane as in every v57 app:
 
 See [Vault's guide](https://github.com/v57/Vault/blob/main/docs/README.md) for more on accounts.
 
-## Devices (iPhone and iPad)
+## On the Mac
 
-Lists this device first, then your other devices. Touch and hold a device for **Rename…**, **Lost Device…** and
-**Remove…**. A lost device moves to **Not Trusted**, where **Trust Again…** brings it back.
+### Open Settings
 
-## Remote (Mac)
+<!-- only: mac -->
+
+Choose **Shell ▸ Settings…** (⌘,). Settings opens in its own window.
+
+<!-- /only -->
+
+<!-- only: linux windows -->
+
+Choose **Settings…** in the **Shell** menu (Ctrl+,). Settings opens over the window; press Esc or click outside it to
+close it.
+
+<!-- /only -->
+
+The **Actions** pane's commands are also in the **Shell** menu (see [Keyboard Shortcuts](Keyboard-Shortcuts.md)).
+
+### Sessions
+
+- **Always Start Persistent Sessions**: new terminals keep running after you close them, and you reopen them from the
+  sidebar. It needs **Sessions** and **Screen sessions** on in Features.
+
+<!-- only: mac -->
+
+- **Session Tool**, **Keep Sessions Running After Quit** and **Session Daemon**: see
+  [Local Terminals and Sessions](Local-Terminals-and-Sessions.md#keep-sessions-running-after-shell-quits).
+
+<!-- /only -->
+
+<!-- only: mac -->
+
+### Remote
 
 Whether your other devices may sign in to this Mac over SSH, which devices and app keys may, and the other keys in
 the Mac's `authorized_keys`. It needs Remote Login on in System Settings. This pane is the same in every v57 Mac app;
 see [Vault's guide](https://github.com/v57/Vault/blob/main/docs/README.md).
+
+<!-- /only -->
+
+<!-- only: linux windows -->
+
+### Devices
+
+Lists this device first, then your other devices. Right-click a device for **Rename…**, **Lost Device…** and
+**Remove…**. A lost device moves to **Not Trusted**, where **Trust Again…** brings it back.
+
+<!-- /only -->
+
+<!-- only: linux windows -->
+
+### iCloud
+
+iCloud is only on Apple devices: the **Privacy** pane says "Not on this device — iCloud is only on Apple devices."
+
+<!-- /only -->
+
+## On iPhone and iPad
+
+### Open Settings
+
+Tap the gear at the bottom of the sidebar. On iPhone, tap **Done** to close it. The **Actions** pane is where you find
+Shell's commands.
+
+### Devices
+
+Lists this device first, then your other devices. Touch and hold a device for **Rename…**, **Lost Device…** and
+**Remove…**. A lost device moves to **Not Trusted**, where **Trust Again…** brings it back.

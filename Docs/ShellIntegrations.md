@@ -1,13 +1,26 @@
 # ShellIntegrations
 
-ShellIntegrations holds the logic behind Shell's integrations, kept free of AppKit and of process spawning so it can
-be tested on its own: the Files panel's listing and file commands, persistent sessions (tmux, screen and the
-`session` tool), which apps Open With offers for a folder, how an opened path is handled, the smart actions' scan
-cache, and the address field of web actions.
+ShellIntegrations holds the logic behind Shell's integrations: the Files panel's listing and file commands,
+persistent sessions (tmux, screen and the `session` tool), which apps Open With offers for a folder, how an opened
+path is handled, the smart actions' scan cache, and the address field of web actions.
 
-It runs nothing by itself. Commands are strings you run with your own `FileCommandExecutor` (a local process, an SSH
-session), and launching apps is the app's job. The smart actions themselves come from Code's `CodeActions` library,
-which this library re-exports.
+## Purpose
+
+The library is kept free of AppKit and of process spawning so it can be tested on its own. It runs nothing by
+itself: commands are strings you run with your own `FileCommandExecutor` (a local process, an SSH session), and
+launching apps is the app's job. The one exception is `SessionAgent` on macOS, which runs `launchctl`.
+
+The smart actions themselves come from Code's `CodeActions` library, which this library re-exports.
+
+## Platforms
+
+<!-- platforms: macos ios linux windows -->
+
+- **macOS, iOS, Linux, Windows:** everything but `SessionAgent` is plain Foundation. The commands it builds assume a
+  POSIX shell (`ls`, `rsync`, `rm`), so on Windows they're for a server, not for the PC itself.
+- **`SessionAgent`:** macOS only (launchd).
+- **Smart actions:** whatever Code's `CodeActions` supports on the platform.
+- **Android:** not yet.
 
 ## Getting started
 
@@ -59,7 +72,8 @@ let sessions = ScreenSessionsParser.parseSessionOutput(sessionListJSON)  // the 
 - `FileCommandBuilder`: command strings with every path shell-quoted: `list(directory:)`,
   `open(path:isDirectory:remotePlatform:)`, `delete(path:isDirectory:)`, `moveCopy(source:destination:mode:)`
   (rsync), `shellQuote(_:)`, `terminalWord(_:)`.
-- `DirectoryLister.list(directory:executor:parser:)`: runs `ls -la` through an executor and parses it; throws
+- `DirectoryLister.list(directory:executor:parser:)`: runs `ls -la` (with colours off and dates in the C locale)
+  through an executor and parses it; throws
   `DirectoryListingError.commandFailed` with the output when the command fails.
 - `LSOutputParser.parse(_:)`: `ls -la` text to `FileRow`s (`name`, `isDirectory`, `size`, `modified`, `permissions`,
   `symlinkTarget`).
@@ -76,8 +90,10 @@ let sessions = ScreenSessionsParser.parseSessionOutput(sessionListJSON)  // the 
   `session`), `remoteOrigin` (`ScreenRemoteOrigin`: the saved SSH connection it lives on), `isAttached`,
   `isProtected`, `directoryCommand`.
 - `SessionAgent` (macOS): installs the `session` tool's daemon as a LaunchAgent so persistent sessions outlive Shell:
-  `status()`, `install(environment:bundleIdentifier:)`, `startIfStopped()`, `remove()`. Its calls run `launchctl` and
-  block, so call them off the main thread.
+  `status()`, `install(environment:bundleIdentifier:)`, `startIfStopped()`, `remove()`, `takeOverIdleDaemons()` (ends
+  daemons a terminal started when they hold no sessions, so the agent's takes over), `isDaemonRunning()`,
+  `stopDaemons()` (ends every daemon and its sessions) and `openLoginItems()`. Its calls run `launchctl` and block, so
+  call them off the main thread.
 
 The `session` tool is a separate program ([v57/session](https://github.com/v57/session)); Shell runs it and parses
 `session list`'s JSON, so a change to that output needs a change here too.
@@ -99,14 +115,6 @@ The `session` tool is a separate program ([v57/session](https://github.com/v57/s
 - `IntegrationCacheStore` (`entry(forDirectory:)`, `save(_:forDirectory:)`) and `IntegrationCacheEntry`: the cache,
   stored as the app chooses (Shell encrypts it).
 
-## Platform notes
-
-- **macOS, iOS, Linux, Windows:** everything but `SessionAgent` is plain Foundation. The commands it builds assume a
-  POSIX shell (`ls`, `rsync`, `rm`).
-- **`SessionAgent`:** macOS only (launchd).
-- **Smart actions:** whatever Code's `CodeActions` supports on the platform.
-- **Android:** not yet.
-
 ## Testing
 
 ```bash
@@ -116,3 +124,12 @@ swift test --filter ShellIntegrationsTests
 The tests need no servers: the listers run against fake executors and temporary folders, and the parsers against
 recorded output. `DirectoryLister` takes any `FileCommandExecutor` and `SmartActionsCoordinator` any
 `IntegrationCacheStore` and `scan` closure, so your own tests can pass fakes the same way.
+
+## Related
+
+- [ShellKit](ShellKit.md): the terminal sessions these commands run in.
+- Code's [CodeActions](https://github.com/v57/Code/blob/main/docs/CodeActions.md): the smart actions' detectors and
+  commands.
+- [v57/session](https://github.com/v57/session): the persistent-session tool.
+- Shell's guide: [Files Panel](Files-Panel.md), [Local Terminals and Sessions](Local-Terminals-and-Sessions.md) and
+  [Actions](Actions.md).

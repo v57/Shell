@@ -6,7 +6,8 @@ sign in. Hosts are shared with the other v57 apps through the vault.
 ## Add a server
 
 1. Tap **+** on the **Remote** header. The **New Connection** sheet opens.
-2. Fill in **Host** (a name or an address, like `my-server.example.com`) and **User**.
+2. Fill in **Host** (a name or an address, like `my-server.example.com`) and **User** (your user name on this
+   device to start with).
 3. Optionally give it a **Name** for the sidebar, and change the **Port** (22 by default).
 4. Under **Authentication**, pick the **Method**:
    - **SSH Key (Keychain)**: sign in with this device's key. The **Default key** row shows its fingerprint, and
@@ -15,7 +16,7 @@ sign in. Hosts are shared with the other v57 apps through the vault.
    - **Password**: type the **Password**. With **Save in Keychain** on, Shell remembers it.
 5. Tap **Connect**. Shell saves the host and opens a terminal on it.
 
-**Connect** stays disabled until there is a host and a user.
+**Connect** stays disabled until there is a host, a user and a valid port, and for **Password** a password.
 
 You can also open the sheet from **Settings ▸ Actions ▸ New Connection ▸ New…**.
 
@@ -23,7 +24,7 @@ You can also open the sheet from **Settings ▸ Actions ▸ New Connection ▸ N
 
 A server can have more than one address, for example its name at home and its address on another network.
 
-1. Edit the host (see below) and tap **Add Address** under **Fallback Addresses**.
+1. In **New Connection**, or when you edit the host (see below), tap **Add Address** under **Fallback Addresses**.
 2. Type the other address. Add as many as you like. They are tried in order when the main address doesn't answer.
 3. **Remove** deletes an address.
 
@@ -33,8 +34,7 @@ Network) with an **Automatic** label. You can't edit those.
 ## Connect
 
 Tap a saved host to open a terminal on it. The terminal shows under the host, slightly indented, and the host gets a
-green dot. Tap the host again for a second terminal. On the Mac, with a server's terminal selected,
-**Shell ▸ New Connection to …** (⌘N) opens another terminal on the same server.
+green dot. Tap the host again for a second terminal.
 
 While a host is connected, its row has a **+** button: **Web Session** opens a web page through it (see
 [Web Pages](Web-Pages.md)) and **Database** starts a database connection through it (see [Databases](Databases.md)).
@@ -47,11 +47,11 @@ there.
 The first time you connect to a server, Shell shows **Untrusted host key** with the server's fingerprint.
 
 - Tap **Accept** only if the fingerprint is the server's. Shell remembers the key and doesn't ask again.
+- Tap **Cancel**, or tap outside the dialog, to stop.
 
 The question names the address that answered. For a host with fallback addresses, that may be a fallback rather than
 its main address. A key you accepted at any of a host's addresses is known at the others, so Shell doesn't ask again
 when the same server answers at another one.
-- Tap **Cancel**, or tap outside the dialog, to stop.
 
 If a server shows a different key from the one Shell remembers, Shell shows **Host key changed** with the
 **Remembered** and the **Presented** fingerprints. Someone could be intercepting the connection, or the server was
@@ -71,20 +71,23 @@ For GitHub, GitLab and Bitbucket, the keys come with the app, and any other key 
 If a server asks for a password and none is saved, Shell shows **Password required** with `user@host`. Type the
 password and tap **Connect**. Leave **Save in Keychain** on to keep it. **Cancel** ends the login.
 
-Saved passwords are kept in your iCloud Keychain, so your other devices can use them.
+On Apple devices, saved passwords are kept in your iCloud Keychain, so your other devices can use them.
 
 ## Sign in with this device's key
 
-Each device has its own SSH key, made and kept in the device's Secure Enclave. It can't be copied off the device. All
-v57 apps on the device use the same key, so you add it to a server once.
+Each device has its own SSH key. All v57 apps on the device use the same key, so you add it to a server once.
 
-On newer devices, signing in with the key asks for Face ID, Touch ID or your password first ("Confirms it's you
-before this device's SSH key signs in to a server."). After you confirm, the key can sign for 15 minutes without
-asking again. When a dropped connection reconnects on its own, Shell doesn't ask. Keys made before this protection
-existed sign without asking.
+On a Mac, iPhone or iPad the key is made and kept in the device's Secure Enclave, and it can't be copied off the
+device. A key made since this protection was added, on a device with a passcode or login password, asks for Face ID,
+Touch ID or your password before it signs in to a server. After you confirm, it can sign for 15 minutes without
+asking again. When a dropped connection reconnects on its own, Shell doesn't ask. Keys made before then sign without
+asking.
 
-To copy the public key: **Copy Public Key** in a host's menu, **Copy** in the New Connection sheet,
-**Settings ▸ Actions ▸ SSH Public Key ▸ Copy**, or on the Mac **Shell ▸ Copy SSH Public Key** (⇧⌘C).
+On Linux and Windows there is no Secure Enclave: the key is sealed to your user account on that computer (with
+Windows' data protection, or under a key in Linux's Secret Service), and it signs without asking.
+
+To copy the public key: **Copy Public Key** in a host's menu, **Copy** in the New Connection sheet, or
+**Settings ▸ Actions ▸ SSH Public Key ▸ Copy**.
 
 ## When the connection drops
 
@@ -92,17 +95,15 @@ Shell keeps your terminals connected with keepalives. If the network drops, the 
 **Reconnecting…**, keeps its scrollback and dials again. While a terminal isn't connected, the title bar shows
 **Reconnect**, which dials at once.
 
-On iPhone and iPad, Shell doesn't run in the background. When you come back to it after a while, a terminal may need to
-reconnect.
-
 ## Manage a host
 
 Touch and hold (or right-click) a host:
 
 - **Connect**: open a terminal.
 - **Web Session** and **Database**: open a page or a database through this host.
-- **Persistent Session** and **Refresh Sessions** (Mac): start or list sessions on the server that keep running after
-  you disconnect. See [Local Terminals and Sessions](Local-Terminals-and-Sessions.md).
+- **Persistent Session** and **Refresh Sessions** (Mac, Linux and Windows): start or list sessions on the server that
+  keep running after you disconnect. **Persistent Session** needs the host connected. See
+  [Local Terminals and Sessions](Local-Terminals-and-Sessions.md).
 - **Edit…**: change it in **Edit Connection**, then **Save**. Open terminals stay open.
 - **Copy Public Key**: copy this device's public key.
 - **Authorized Keys**: see [Authorized Keys](Authorized-Keys.md).
@@ -124,10 +125,34 @@ and reorder them like your other hosts.
 
 A terminal's row shows a line of its output in its own colours:
 
-- a green dot while there is recent output;
+- a green dot while there has been output in the last 30 seconds;
 - gray once the shell has ended;
 - a live icon while it connects or reconnects;
 - red, with the error, when it fails.
 
-To choose which line the row shows, tap that line in the terminal (without dragging). Tap its first character again
-to show it from there.
+To choose which line the row shows, tap that line in the terminal (without dragging). Tap the shown line again to
+show it from the character you tapped; tap that character once more to show the whole line.
+
+## On the Mac
+
+### More terminals on a server
+
+<!-- only: mac -->
+
+With a server's terminal selected, **Shell ▸ New Connection to …** (⌘N) opens another terminal on the same server.
+**Shell ▸ Copy SSH Public Key** (⇧⌘C) copies this device's public key.
+
+<!-- /only -->
+
+<!-- only: linux windows -->
+
+With a server's terminal selected, **New Connection to …** in the **Shell** menu (Ctrl+N) opens another terminal on
+the same server. **Copy SSH Public Key** (Ctrl+Shift+C) copies this device's public key.
+
+<!-- /only -->
+
+## On iPhone and iPad
+
+### Coming back to Shell
+
+Shell doesn't run in the background. When you come back to it after a while, a terminal may need to reconnect.

@@ -12,8 +12,9 @@ Touch and hold (or right-click) a server in **Remote** and choose **Authorized K
 opens with the server's name and connects to it (**Connecting…**). If you haven't accepted the server's key yet, Shell
 asks first, before it sends anything.
 
-On the Mac, **Authorized Keys** in a local terminal's menu, and **Settings ▸ Actions ▸ Authorized Keys ▸ Show**, open
-the panel for this Mac: the keys that can sign in to it.
+On the Mac, Linux and Windows, **Authorized Keys** in a local terminal's menu, and
+**Settings ▸ Actions ▸ Authorized Keys ▸ Show**, open the panel for this computer: the keys that can sign in to it.
+The panel names it **This Mac**, **This Computer** (Linux) or **This PC** (Windows).
 
 ## Add or remove a key
 
@@ -28,14 +29,14 @@ Each one shows **Added** or **Not added**, with **Add** or **Remove**. **Remove*
 file; the other lines stay.
 
 The first time you add this device's key anywhere, Shell asks for your name and email. They go in the key's comment,
-"so the server shows whose key it is". You set them once per account.
+so the server shows whose key it is. You set them once per account.
 
 ## Add another key
 
 1. Tap **Add Key…**.
 2. Paste one public key line into **Public key**, for example the contents of an `id_ed25519.pub` file. The **Name**
    fills in from the key's comment.
-3. Leave **Save to iCloud for other machines** on to keep the key in your vault, so you can add it to other servers
+3. Leave **Save to iCloud** on (it starts on) to keep the key in your vault, so you can add it to other servers
    later.
 4. Tap **Add**. Shell adds the key to the server.
 

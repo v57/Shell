@@ -10,11 +10,9 @@ notes folder, and an edit in either app shows in the other.
 2. Type. The first line is the note's title, and the next line is the preview under it in the sidebar.
 
 The editor is a live Markdown editor: headings, lists, bold, links and code blocks show formatted, and the Markdown
-symbols hide except on the line you're editing. Shell saves a few seconds after you stop typing, and when you quit.
+symbols hide except on the line you're editing. Shell saves two seconds after you stop typing, and when you quit.
 
 A new note you leave empty is removed when you move on to something else.
-
-On the Mac, with a note selected, **Shell ▸ New Note** (⌘N) starts another one.
 
 ## Format lines
 
@@ -40,15 +38,40 @@ Web, email and Markdown links open as usual. Any other link asks first ("Open th
 where it leads and the app that would open it. On the Mac, apps and scripts are only shown in the Finder, never
 launched.
 
+Loaded images are fetched without cookies and kept in a cache on this device.
+
 ## Delete a note
 
 Touch and hold (or right-click) a note and choose **Delete Note**. It is removed from Shell, from Markdown and from
-your other devices. The next note is selected.
+your other devices. Your most recently changed note is selected.
 
 ## Edits on two devices
 
 If you edit the same note on two devices at once, Shell merges the changes line by line.
 
-## Detach a note (Mac)
+## On the Mac
 
-**Shell ▸ Detach Session/Note** (⇧⌘D) opens the selected note in its own window.
+### New note and detach
+
+<!-- only: mac -->
+
+With a note selected, **Shell ▸ New Note** (⌘N) starts another one. **Shell ▸ Detach Session/Note** (⇧⌘D) opens the
+selected note in its own window.
+
+<!-- /only -->
+
+<!-- only: linux windows -->
+
+With a note selected, **New Note** in the **Shell** menu (Ctrl+N) starts another one. **Detach Session/Note**
+(Ctrl+Shift+D) opens the selected note in its own window.
+
+<!-- /only -->
+
+<!-- only: mac -->
+
+### Drop files on Notes
+
+Drop text files from the Finder on the **Notes** section to copy them into new encrypted notes, or to link them (see
+[Local Terminals and Sessions](Local-Terminals-and-Sessions.md#drop-files-on-shell)).
+
+<!-- /only -->

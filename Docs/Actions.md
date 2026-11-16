@@ -5,13 +5,10 @@ on this device.
 
 ## Open the actions palette
 
-- On the Mac: **Shell ▸ Actions…** (⌘R).
-- On iPhone and iPad: **Settings ▸ Actions ▸ Actions ▸ Show**.
+Open the palette (see below for where it is on your device). It reads "Run an action or search". Type to filter, use
+↑ and ↓ to move, Return to run and Esc to close.
 
-The palette reads "Run an action or search". Type to filter, use ↑ and ↓ to move, Return to run and Esc to close.
-
-The menu at the top picks the terminal the action runs in. With no terminal selected, it reads **Local** on the Mac.
-On iPhone and iPad it reads **Choose a Terminal**, and actions can't run until you pick one.
+The menu at the top picks the terminal the action runs in. It shows once you have a terminal.
 
 ## Create an action
 
@@ -23,18 +20,19 @@ On iPhone and iPad it reads **Choose a Terminal**, and actions can't run until y
    - **Focus window when run**: off, the action runs in the background and shows in the sidebar's **Running**
      section.
    - **Keep after completion**: keeps the run in the sidebar after it finishes.
-   - **Commands**: one per line. They run in a new terminal, with zsh locally or your shell on the server.
+   - **Commands**: one per line. They run in a new terminal, with your shell on the server.
    - **Address** under **Web** (optional): if the commands start a web server, this page opens when the action runs.
      On a server, the page goes through that server.
    - **Dependencies**: other actions to start first. They all start together, and this action starts one second
      after them.
 3. Tap **Create**.
 
-You can also turn what you just typed into an action. Select a terminal where you ran some commands, then choose
-**Shell ▸ Create Action from Session** (⇧⌘R) on the Mac, or **Settings ▸ Actions ▸ Create Action from Session ▸ Create**.
-The **New Action** sheet opens with those commands filled in.
-
 To change or remove an action, touch and hold (or right-click) it in the palette and choose **Edit…** or **Remove**.
+
+## Make an action from what you typed
+
+Select a terminal where you ran some commands, then choose **Create Action from Session** (see below for where it is).
+The **New Action** sheet opens with those commands filled in.
 
 ## Follow a run
 
@@ -46,7 +44,47 @@ type into it; **Run Output** switches back.
 
 Touch and hold (or right-click) a run for **Cancel (Ctrl+C)** while it runs, **Close** and **Close All**.
 
-## Sync a folder to a server (Mac)
+## On the Mac
+
+### Open the palette
+
+<!-- only: mac -->
+
+Choose **Shell ▸ Actions…** (⌘R). **Shell ▸ Create Action from Session** (⇧⌘R) makes an action from the selected
+terminal.
+
+<!-- /only -->
+
+<!-- only: linux windows -->
+
+Choose **Actions…** in the **Shell** menu (Ctrl+R). **Create Action from Session** (Ctrl+Shift+R) makes an action
+from the selected terminal.
+
+<!-- /only -->
+
+With no terminal selected, actions run locally (the menu reads **Local**).
+
+### Local commands
+
+<!-- only: mac -->
+
+Locally, an action's commands run with zsh.
+
+<!-- /only -->
+
+<!-- only: linux -->
+
+Locally, an action's commands run with your login shell (`$SHELL`), or bash.
+
+<!-- /only -->
+
+<!-- only: windows -->
+
+Locally, an action's commands run with `cmd`.
+
+<!-- /only -->
+
+### Sync a folder to a server
 
 An action can upload a local folder to a folder on one of your servers, like `rsync --delete`, to deploy a website for
 example. It goes over Shell's own connection to the server: the server's key or password stays in Shell and is never
@@ -80,29 +118,52 @@ A folder sync is offered in the actions palette whatever terminal is selected, a
 no terminal on the server is needed. With a terminal on one of its servers selected, it syncs to that server;
 otherwise it syncs to each of its servers, one run per server.
 
-## Smart actions (Mac)
+### Smart actions
 
 When a local terminal is in a project folder, Shell finds the project's schemes and offers their actions: **Run**,
 **Build**, **Test**, **Lint** and **Clean**, plus distribution actions for Xcode projects. These come from the
 [Code](https://github.com/v57/Code/blob/main/docs/README.md) app, which knows Xcode, Swift, Go, Cargo, JavaScript and
-TypeScript, Python, Gradle, Maven, Docker Compose, CMake, Make, Dart, .NET, Ruby, Elixir, PHP and Zig projects.
+TypeScript, Python, Gradle (Android apps too), Maven, Docker Compose, CMake, Make, Dart, .NET, Ruby, Elixir, PHP and
+Zig projects.
+
+<!-- only: windows -->
+
+On Windows, Shell can't read a local terminal's folder yet, so it finds no smart actions there.
+
+<!-- /only -->
 
 Entering an Xcode project's folder doesn't download anything. Shell lists the schemes from the project's files, or
 with Xcode's own list when every package the project pins is already checked out on the Mac. The project's Swift
 packages are fetched only when you run an action such as **Build** or **Run**.
 
-- The title bar shows the scheme picker and the action buttons. **Distribute** holds the distribution actions and
-  **Notarization Settings…**.
-- The palette lists each scheme's actions too. Run one again to stop it.
+- The title bar shows the scheme picker and the **Run**, **Build**, **Test** and **Lint** buttons. **Distribute**
+  holds the distribution actions and **Notarization Settings…**.
+- The palette lists each scheme's actions too, **Clean** among them. Run one again to stop it.
 - To keep a copy you can edit, choose **Add to Your Actions…** in an action's menu, or use the **+** on the scheme's
   group in the palette.
 
 Turn smart actions off with **Smart Actions** in **Settings ▸ Features**.
 
-## Open With (Mac)
+<!-- only: mac -->
 
-For a local terminal's folder, the title bar has buttons that open the folder in the other v57 apps you have
-installed: [Code](https://github.com/v57/Code/blob/main/docs/README.md),
+### Open With
+
+For a local terminal's folder, the title bar has buttons that open the folder in another app you have installed:
+**Code**, **Zed**, **Visual Studio Code** and the **Finder** for any folder; **Xcode** and **Dev** for an Xcode project
+or Swift package; **Markdown** when the folder has Markdown files; **Git** for a repository. Code, Markdown, Git and Dev
+are v57 apps ([Code](https://github.com/v57/Code/blob/main/docs/README.md),
 [Markdown](https://github.com/v57/Markdown/blob/main/docs/README.md),
-[Git](https://github.com/v57/Git/blob/main/docs/README.md) and Dev. The palette lists them too, as
-**Open … in**.
+[Git](https://github.com/v57/Git/blob/main/docs/README.md)). The palette lists them too, as **Open … in**.
+
+<!-- /only -->
+
+## On iPhone and iPad
+
+### Open the palette
+
+Open **Settings ▸ Actions** and tap **Show** next to **Actions**. Actions run in a server's terminal: with none
+selected, the menu at the top reads **Choose a Terminal**, and actions can't run until you pick one.
+
+### Make an action from what you typed
+
+Select the terminal, then open **Settings ▸ Actions** and tap **Create** next to **Create Action from Session**.

@@ -19,13 +19,6 @@ This page covers what Shell adds. For tables, queries, editing rows and the othe
 
 Fill in the connection sheet and save. Shell connects and opens the connection.
 
-## Try the sample database (iPhone and iPad)
-
-With no connections yet, the **Databases** section shows **Open the Sample Database**. It makes a small made-up shop
-in SQLite on your device (customers, products, orders, order items, refunds and a monthly revenue view) and opens it,
-so you can try the tables and queries without a server. Nothing is downloaded. The sample is an ordinary connection
-named **Sample Shop**: it syncs like the others, and **Delete…** removes it.
-
 ## Databases over SSH
 
 A connection with an SSH host goes through that server. Shell talks to the database over the SSH connection itself and
@@ -35,8 +28,6 @@ opens no port on your device. A new server's key is asked about in the window be
 
 Tap a connection to open its overview. Its row shows a green dot while it's open. Tap the row's chevron to see the
 databases, schemas, tables (or collections, or keys) and saved queries under it. Tap a table to browse its rows.
-
-On the Mac, the **Data** menu has Database's commands for the open database. See Database's guide for its shortcuts.
 
 ## The Databases section
 
@@ -64,3 +55,25 @@ database itself isn't touched.
 PostgreSQL and MySQL logins that would send a password readably (a plain or MD5 password) are refused when the
 connection uses neither SSH nor TLS. If you accept the risk for one connection, turn on **Allow insecure login** in its
 connection sheet. See Database's guide.
+
+## On the Mac
+
+### Your first connection
+
+The **Databases** section shows once you have a connection. To add the first one, use **Database** in the **+** on the
+**This Mac** header (**This Computer** on Linux, **This PC** on Windows), or in a server's menu.
+
+### The Data menu
+
+With **Database** on, the **Data** menu has Database's commands for the open database: **New Query**, **Refresh**,
+**Run**, **Show Query Editor**, **Review Changes…** and **Show Inspector**, plus **Undo Last Save** in the **Edit**
+menu. See [Keyboard Shortcuts](Keyboard-Shortcuts.md#data-menu) for their keys.
+
+## On iPhone and iPad
+
+### Try the sample database
+
+The **Databases** section is always there. With no connections yet, it shows **Open the Sample Database**. It makes a
+small made-up shop in SQLite on your device (customers, products, orders, order items, refunds and a monthly revenue
+view) and opens it, so you can try the tables and queries without a server. Nothing is downloaded. The sample is an
+ordinary connection named **Sample Shop**: it syncs like the others, and **Delete…** removes it.

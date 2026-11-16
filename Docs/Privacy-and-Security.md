@@ -9,8 +9,8 @@ Shell never contacts a server on its own. Everything it sends goes to a place yo
 | SSH connections | The server you connect to | When you open a terminal, the Files panel, Authorized Keys, or a database or web page through a server. A dropped connection you opened dials again on its own. |
 | Database connections | The database, directly or through your server over SSH | When you open the connection |
 | Web pages | The site, or your server through an SSH tunnel | When you open the page |
-| Images in notes | The image's server | Only after you tap **Load Images** for that note. Without cookies, and nothing is kept between loads. |
-| The vault: hosts, database connections, host keys, device keys, accounts, notes, saved passwords | Your iCloud (iCloud and iCloud Keychain) | While **Use iCloud** is on (**Settings ▸ Privacy**). Everything is encrypted before it leaves the device. |
+| Images in notes | The image's server | Only after you tap **Load Images** for that note. Without cookies; loaded images are kept in a cache on this device. |
+| The vault: hosts, database connections, host keys, device keys, accounts, notes, saved passwords | Your iCloud (iCloud and iCloud Keychain) | On Apple devices, while **Use iCloud** is on (**Settings ▸ Privacy**). Everything is encrypted before it leaves the device. |
 | Update check and download (Mac, Linux, Windows) | Shell's releases on GitHub | When you choose **Check for Updates…**, or once a day if you turn on **Check for Updates Automatically**. It is off until you turn it on. |
 | The `session` tool (Mac) | GitHub | Only when you tap **Install** next to **Session Tool** in **Settings ▸ Sessions**. |
 | DuckDB (Mac) | Its download | Only when you choose to download it from a database page. |
@@ -22,12 +22,13 @@ iPad app updates through the App Store.
 
 ## Your SSH key
 
-Each device has one SSH key, made inside its Secure Enclave. It never leaves the device and can't be copied or
-backed up. All v57 apps on the device use the same key. Only its public half is published to your vault, so your other
-devices can add it to servers.
+Each device has one SSH key. On Apple devices it's made inside the Secure Enclave: it never leaves the device and
+can't be copied or backed up. All v57 apps on the device use the same key. Only its public half is published to your
+vault, so your other devices can add it to servers.
 
-On newer devices the key asks for Face ID, Touch ID or your password before it signs in to a server, and then signs
-for 15 minutes without asking. Older keys sign without asking.
+A key made since November 2026, on a device with a passcode or login password, asks for Face ID, Touch ID or your
+password before it signs in to a server, and then signs for 15 minutes without asking. Older keys sign without
+asking.
 
 ## Server keys
 
@@ -54,10 +55,10 @@ Web images in a note wait for **Load Images**, because loading them would tell t
 link that isn't a web, email or Markdown link asks before it opens. On the Mac, apps and scripts are only revealed in
 the Finder, never launched.
 
-## Local history (Mac)
+## Local history
 
-History is encrypted with a key tied to this Mac's Secure Enclave. It never leaves the Mac and can only be read while
-the Mac is unlocked. Turn off **History** in **Settings ▸ Features** to stop recording. **Delete All History** removes
+History is kept on this computer, encrypted. On the Mac, its key is tied to the Mac's Secure Enclave, and history can
+only be read while the Mac is unlocked. On Linux and Windows, its key is sealed to your user account (see below). Turn off **History** in **Settings ▸ Features** to stop recording. **Delete All History** removes
 what's there.
 
 ## Dropped files (Mac)
@@ -86,5 +87,10 @@ app on the device.
 
 ## Linux and Windows
 
-On Linux and Windows, Shell keeps its secrets in the system's password store. Your other programs can read them there,
-as with other password stores on those systems.
+- There is no iCloud: the vault stays on this computer, and **Settings ▸ Privacy** says so.
+- Shell keeps its secrets, such as saved passwords, in the system's password store: the Windows Credential Manager,
+  or the Secret Service (your login keyring) on Linux. Your other programs can ask for them there, as with other
+  secrets in those stores.
+- There is no Secure Enclave. The device's SSH key is sealed to your user account instead (with Windows' data
+  protection, or under a key kept in the Secret Service on Linux), and it signs without asking.
+- On Windows, web pages open in your browser.
