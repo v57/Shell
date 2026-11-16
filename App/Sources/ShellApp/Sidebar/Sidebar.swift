@@ -247,6 +247,23 @@ extension TerminalSession {
   /// An action run's state for its live icon and run block: working while
   /// alive, done after a clean exit, failed with the exit code or the error.
   var actionRunStatus: WorkStatus {
+    // A folder sync: waiting for Apply (the dry run's plan is up), the share of its steps done, Stopped when
+    // cancelled.
+    if let sync = folderSync {
+      switch sync.phase {
+      case .awaitingConfirmation:
+        return .waiting
+      case .applying:
+        if let progress = sync.progress, progress.total > 0 {
+          return .working(progress: Double(progress.completed) / Double(progress.total))
+        }
+        return .working
+      case .cancelled:
+        return .paused()
+      default:
+        break
+      }
+    }
     switch connectionState {
     case .starting, .connecting, .reconnecting, .connected:
       return .working
@@ -291,7 +308,8 @@ private struct ActionRunRow: View {
   var body: some View {
     let status = session.actionRunStatus
     SidebarRow(
-      value: AppModel.Selection.session(session.id), spec?.action.name ?? "Action", systemImage: "play.fill",
+      value: AppModel.Selection.session(session.id), spec?.action.name ?? "Action",
+      systemImage: session.folderSync == nil ? "play.fill" : "arrow.triangle.2.circlepath",
       status: status
     ) {
       DetachReturnBadge(selection: .session(session.id))

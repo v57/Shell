@@ -2269,10 +2269,21 @@ final class AppModel {
   /// wires it to archive to history on completion. `focus` is honored only
   /// for the action the user actually triggered, never for a dependency.
   private func spawnActionSession(_ action: Action, in environment: ActionEnvironment, isTopLevel: Bool, focus: Bool) {
-    let spec = ActionSpec(action: action, config: environment.sshConfig)
+    var spec = ActionSpec(action: action, config: environment.sshConfig)
     let transport: any TerminalTransport
     let startupMessage: String?
-    if let config = spec.config {
+    if let sync = action.folderSync {
+      // A folder sync over Shell's own login to one of the action's hosts (the host's credentials never leave the
+      // app); its commands run there afterwards. It lists both sides and waits for Apply (ActionRunsView).
+      spec.config = folderSyncHost(for: action, in: environment)
+      if let config = spec.config {
+        transport = FolderSyncTransport(config: config, settings: sync, script: action.commands)
+      } else {
+        transport = FolderSyncTransport(
+          destination: String(localized: "the host"), settings: sync, connect: { _ in throw FolderSyncError.noHost })
+      }
+      startupMessage = nil
+    } else if let config = spec.config {
       transport = SSHSession(config: config, execCommand: spec.action.commands)
       startupMessage = "Connecting to \(config.host)…"
     } else {
@@ -2291,7 +2302,8 @@ final class AppModel {
     }
     let newSession = TerminalSession(transport: transport, startupMessage: startupMessage)
     sessionKinds[newSession.id] = .action(spec)
-    registerActionCapture(for: newSession, seedCommand: spec.action.commands)
+    registerActionCapture(
+      for: newSession, seedCommand: spec.action.folderSync == nil ? spec.action.commands : spec.action.summary ?? "")
     newSession.actionCompletionHandler = { [weak self] in
       self?.actionSessionCompleted(newSession)
     }
@@ -2327,6 +2339,14 @@ final class AppModel {
       showingActions = false   // you're looking at the run now
     }
     // focusWindow == false and no web field: the overlay stays open for queuing more runs.
+  }
+
+  /// The host a folder sync goes to: the selected terminal's when the action applies to it, else the action's only
+  /// host. Nil with several hosts and none of them selected.
+  private func folderSyncHost(for action: Action, in environment: ActionEnvironment) -> SSHConfig? {
+    if let config = environment.sshConfig, action.applies(to: .ssh(config)) { return config }
+    let hosts = connections.filter { action.applies(to: .ssh($0)) }
+    return hosts.count == 1 ? hosts[0] : nil
   }
 
   /// Post-order startup sequence for `action` and its transitive
@@ -2371,6 +2391,8 @@ final class AppModel {
   func actionSessionCompleted(_ session: TerminalSession) {
     archiveLocalSession(session.id)
     guard session.actionExitCode == 0 else { return }
+    // A folder sync's summary stays: it is the record of what changed on the host.
+    guard session.folderSync == nil else { return }
     guard modelAction(for: session)?.keepAfterCompletion != true else { return }
     let id = session.id
     Task { try? await Task.sleep(for: .seconds(2)); removeSession(id) }

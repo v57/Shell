@@ -32,6 +32,7 @@ struct ActionsOverlayView: View {
     }
     let matching = applicable.filter {
       matches($0.name) || matches($0.category ?? "") || matches($0.commands)
+        || matches($0.folderSync?.remotePath ?? "")
     }
     return matching.enumerated().sorted { lhs, rhs in
       switch (lhs.element.lastUsed, rhs.element.lastUsed) {
@@ -115,7 +116,7 @@ struct ActionsOverlayView: View {
         ForEach(actions) { action in
           PaletteItem(
             "\(action.name)", id: action.id.uuidString, systemImage: "terminal", hue: .indigo,
-            detail: action.commands.split(separator: "\n").first.map(String.init),
+            detail: action.summary,
             note: runningActionIDs.contains(action.id) ? "Running" : nil,
             isEnabled: canRun
           ) {

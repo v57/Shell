@@ -185,6 +185,8 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
   private var connectedHost = ""
   private var session: OpaquePointer?
   private var channel: OpaquePointer?
+  /// The folder sync's SFTP session, kept from its first call until teardown.
+  private var syncSFTP: Libssh2SFTP?
 
   /// True while the connect/setup/auth/run lifecycle is active. Set true in
   /// start() and false in close()/teardown. Owned by `queue`.
@@ -330,13 +332,49 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
   /// `command not found` (exit 127) is the absence case — callers interpret the
   /// captured stdout. `.failure` is reserved for connection/channel-level
   /// problems. The remote exit status is delivered in `RemoteCommandResult`.
-  func runRemoteCommand(_ command: String, completion: @escaping @Sendable (Result<RemoteCommandResult, Error>) -> Void) {
+  ///
+  /// `terminal: false` runs it without a pseudo-terminal: the output is the command's standard output alone (its
+  /// standard error is dropped), byte for byte, and `input` goes to its standard input before an end of file.
+  /// `timeout` is how long the whole command may take.
+  func runRemoteCommand(
+    _ command: String, terminal: Bool = true, input: Data? = nil, timeout: Int = 60,
+    completion: @escaping @Sendable (Result<RemoteCommandResult, Error>) -> Void
+  ) {
     queue.async { [weak self] in
       guard let self, let sess = self.session else {
         DispatchQueue.main.async { completion(.failure(EngineError.notConnected)) }
         return
       }
-      self.runOneShotCommand(sess, command: command, completion: completion)
+      self.runOneShotCommand(
+        sess, command: command, terminal: terminal, input: input, timeout: timeout, completion: completion)
+    }
+  }
+
+  // MARK: SFTP (folder sync)
+
+  /// Runs `body` on the owner thread with this connection's SFTP session, started on first use and kept until the
+  /// connection closes, so a sync's hundreds of calls share one SFTP channel. `completion` runs on the owner thread.
+  /// Only meaningful after `start()` has authenticated.
+  func sftp<T>(
+    _ body: @escaping @Sendable (Libssh2SFTP) throws -> T, completion: @escaping @Sendable (Result<T, Error>) -> Void
+  ) {
+    queue.async { [weak self] in
+      guard let self, let sess = self.session else {
+        completion(.failure(EngineError.notConnected))
+        return
+      }
+      if self.syncSFTP == nil {
+        guard let handle = self.initSFTP(sess) else {
+          completion(.failure(EngineError.remoteCommandFailed("The host didn’t start SFTP: \(self.lastErrorText(sess))")))
+          return
+        }
+        let fd = self.socketFD
+        self.syncSFTP = Libssh2SFTP(session: sess, sftp: handle) { [weak self] in
+          guard let self else { return }
+          Sockets.wait(fd, for: self.polevents(libssh2_session_block_directions(sess)), milliseconds: 100)
+        }
+      }
+      completion(Result { try body(self.syncSFTP!) })
     }
   }
 
@@ -998,6 +1036,9 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
   private func runOneShotCommand(
     _ sess: OpaquePointer,
     command: String,
+    terminal: Bool = true,
+    input: Data? = nil,
+    timeout: Int = 60,
     completion: @escaping @Sendable (Result<RemoteCommandResult, Error>) -> Void
   ) {
     let delivered = LockedFlag()
@@ -1010,10 +1051,17 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
       return
     }
 
-    let term = "xterm-256color"
-    var ptyRc = libssh2_channel_request_pty_ex(ch, term, UInt32(term.utf8.count), nil, 0, 80, 24, 0, 0)
-    ptyRc = driveChannel(ptyRc) {
-      libssh2_channel_request_pty_ex(ch, term, UInt32(term.utf8.count), nil, 0, 80, 24, 0, 0)
+    var ptyRc: Int32 = 0
+    if terminal {
+      let term = "xterm-256color"
+      ptyRc = libssh2_channel_request_pty_ex(ch, term, UInt32(term.utf8.count), nil, 0, 80, 24, 0, 0)
+      ptyRc = driveChannel(ptyRc) {
+        libssh2_channel_request_pty_ex(ch, term, UInt32(term.utf8.count), nil, 0, 80, 24, 0, 0)
+      }
+    } else {
+      // Standard error is read and thrown away by libssh2, so it never fills the channel's window.
+      var rc = libssh2_channel_handle_extended_data2(ch, LIBSSH2_CHANNEL_EXTENDED_DATA_IGNORE)
+      rc = driveChannel(rc) { libssh2_channel_handle_extended_data2(ch, LIBSSH2_CHANNEL_EXTENDED_DATA_IGNORE) }
     }
     var execRc = channelProcessStartup(ch, request: "exec", command: command)
     execRc = driveChannel(execRc) { channelProcessStartup(ch, request: "exec", command: command) }
@@ -1025,8 +1073,30 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
       return
     }
 
+    let deadline = DispatchTime.now() + .seconds(timeout)
+    if let input, !input.isEmpty {
+      // The command's standard input, then its end of file.
+      let bytes = [UInt8](input)
+      var offset = 0
+      while offset < bytes.count && DispatchTime.now() < deadline {
+        let written = bytes.withUnsafeBufferPointer { buffer in
+          libssh2_channel_write_ex(ch, 0, buffer.baseAddress!.advanced(by: offset), Swift.min(32768, bytes.count - offset))
+        }
+        if written > 0 {
+          offset += Int(written)
+        } else if written == Self.EAGAIN {
+          Sockets.wait(socketFD, for: polevents(libssh2_session_block_directions(sess)), milliseconds: 50)
+        } else {
+          break
+        }
+      }
+    }
+    if input != nil {
+      var eofRc = libssh2_channel_send_eof(ch)
+      eofRc = driveChannel(eofRc) { libssh2_channel_send_eof(ch) }
+    }
+
     var collected = Data()
-    let deadline = DispatchTime.now() + .seconds(60)
     var buffer = [UInt8](repeating: 0, count: 32768)
     while DispatchTime.now() < deadline {
       let n = libssh2_channel_read_ex(ch, 0, &buffer, buffer.count)
@@ -1047,7 +1117,8 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
       _ = libssh2_channel_wait_closed(ch)
     }
     let exitStatus = Int32(libssh2_channel_get_exit_status(ch))
-    let out = String(data: collected, encoding: .utf8) ?? ""
+    // Without a terminal the bytes are a program's own (file names): never dropped for one invalid byte.
+    let out = terminal ? String(data: collected, encoding: .utf8) ?? "" : String(decoding: collected, as: UTF8.self)
     _ = libssh2_channel_free(ch)
 
     // Deliver exactly once on the main thread. Non-zero remote exit status is
@@ -1261,6 +1332,14 @@ nonisolated final class Libssh2Connection: @unchecked Sendable {
       _ = libssh2_channel_close(ch)
       _ = libssh2_channel_free(ch)
       channel = nil
+    }
+    if let sftp = syncSFTP?.sftp {
+      // Its channel is the session's too: shut it down first, briefly retrying while libssh2 would block.
+      let deadline = DispatchTime.now() + .seconds(2)
+      while libssh2_sftp_shutdown(sftp) == Self.EAGAIN && DispatchTime.now() < deadline {
+        Sockets.wait(socketFD, for: polevents(libssh2_session_block_directions(sess)), milliseconds: 50)
+      }
+      syncSFTP = nil
     }
     libssh2_session_disconnect_ex(sess, SSH_DISCONNECT_BY_APPLICATION, "Application closing", "")
     libssh2_session_free(sess)

@@ -33,6 +33,9 @@ struct Action: Identifiable, Codable, Hashable {
   /// When this action last ran (nil = never). Drives MRU ordering in the
   /// actions overlay; stamped by ActionsStore.touch on every run.
   var lastUsed: Date?
+  /// Syncs a local folder to a folder on the host before `commands` run there (which may then be empty). Only for
+  /// SSH connections: the sync goes over Shell's own login to the host. Nil for a plain script.
+  var folderSync: FolderSyncSettings?
 
   init(
     id: UUID = UUID(),
@@ -47,7 +50,8 @@ struct Action: Identifiable, Codable, Hashable {
     dependencies: [UUID] = [],
     focusWindow: Bool = false,
     keepAfterCompletion: Bool = false,
-    lastUsed: Date? = nil
+    lastUsed: Date? = nil,
+    folderSync: FolderSyncSettings? = nil
   ) {
     self.id = id
     self.name = name
@@ -62,6 +66,7 @@ struct Action: Identifiable, Codable, Hashable {
     self.focusWindow = focusWindow
     self.keepAfterCompletion = keepAfterCompletion
     self.lastUsed = lastUsed
+    self.folderSync = folderSync
   }
 
   private enum CodingKeys: String, CodingKey {
@@ -70,6 +75,7 @@ struct Action: Identifiable, Codable, Hashable {
     case dependencies
     case appliesToFutureSSHConnections, excludedSSHConnectionIDs
     case focusWindow, keepAfterCompletion, lastUsed
+    case folderSync
     case appliesToAll // legacy global scope
   }
 
@@ -97,6 +103,7 @@ struct Action: Identifiable, Codable, Hashable {
     focusWindow = try c.decodeIfPresent(Bool.self, forKey: .focusWindow) ?? false
     keepAfterCompletion = try c.decodeIfPresent(Bool.self, forKey: .keepAfterCompletion) ?? false
     lastUsed = try c.decodeIfPresent(Date.self, forKey: .lastUsed)
+    folderSync = try c.decodeIfPresent(FolderSyncSettings.self, forKey: .folderSync)
   }
 
   func encode(to encoder: Encoder) throws {
@@ -114,6 +121,7 @@ struct Action: Identifiable, Codable, Hashable {
     try c.encode(focusWindow, forKey: .focusWindow)
     try c.encode(keepAfterCompletion, forKey: .keepAfterCompletion)
     try c.encodeIfPresent(lastUsed, forKey: .lastUsed)
+    try c.encodeIfPresent(folderSync, forKey: .folderSync)
   }
 
   /// Whether this action is offered in the given environment.
@@ -122,7 +130,8 @@ struct Action: Identifiable, Codable, Hashable {
   func applies(to kind: ConnectionKind) -> Bool {
     switch kind {
     case .local, .screen:
-      return appliesToLocal
+      // A folder sync goes to a host: never offered on this machine.
+      return appliesToLocal && folderSync == nil
     case .ssh(let config):
       return applies(toSSHConnectionID: config.id)
     case .action(let spec):
@@ -130,7 +139,7 @@ struct Action: Identifiable, Codable, Hashable {
       if let config = spec.config {
         return applies(toSSHConnectionID: config.id)
       }
-      return appliesToLocal
+      return appliesToLocal && folderSync == nil
     case .web:
       // An action never runs against a web page.
       return false
@@ -138,6 +147,15 @@ struct Action: Identifiable, Codable, Hashable {
       // An action never runs against a database connection.
       return false
     }
+  }
+
+  /// The line that sums the action up in lists: its sync, or its script's first line.
+  var summary: String? {
+    if let sync = folderSync {
+      let script = commands.split(separator: "\n").first.map { " · \($0)" } ?? ""
+      return "Sync \((sync.localPath as NSString).lastPathComponent) → \(sync.remotePath)\(script)"
+    }
+    return commands.split(separator: "\n").first.map(String.init)
   }
 
   private func applies(toSSHConnectionID id: UUID) -> Bool {

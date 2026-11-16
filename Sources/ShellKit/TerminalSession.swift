@@ -437,6 +437,9 @@ public final class TerminalSession: Identifiable {
   /// connection. Nil for local, action, and test-double transports.
   public var sshTransport: SSHSession? { transport as? SSHSession }
 
+  /// The folder sync behind an action run that syncs a folder (its plan, progress, Apply and Cancel).
+  public var folderSync: FolderSyncTransport? { transport as? FolderSyncTransport }
+
   public func send(_ string: String) {
     send(Data(string.utf8))
   }

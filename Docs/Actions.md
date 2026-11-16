@@ -46,6 +46,38 @@ type into it; **Run Output** switches back.
 
 Touch and hold (or right-click) a run for **Cancel (Ctrl+C)** while it runs, **Close** and **Close All**.
 
+## Sync a folder to a server (Mac)
+
+An action can upload a local folder to a folder on one of your servers, like `rsync --delete`, to deploy a website for
+example. It goes over Shell's own connection to the server: the server's key or password stays in Shell and is never
+handed to `ssh`, `rsync`, `~/.ssh/config` or any other app.
+
+1. In **New Action**, under **Folder sync**, turn on **Sync a folder**.
+2. Fill in:
+   - **Local folder**: type its path or use **Choose…**.
+   - **Folder on the host**: an absolute path (`/var/www/site`) or one relative to your login folder (`~/site`).
+     Shell refuses `/`, an empty path, `..`, and the login folder itself while deleting is on.
+   - **Delete removed files** (on by default): files and folders on the server that the local folder doesn't have are
+     deleted. Only inside that folder, and a symbolic link is removed as a link, never followed.
+   - **Exclude**: comma-separated patterns that are neither uploaded nor deleted. The default `.*` leaves out
+     dotfiles (`.git`, `.env`, the server's `.htaccess`). A pattern without `/` matches a name anywhere
+     (`node_modules`, `*.log`); with one it matches from the folder (`/drafts`, `docs/*.md`); a trailing `/` matches
+     folders only; `**` matches across folders.
+3. Under **Where to display**, pick the servers (a sync never runs locally). **Commands** are optional: they run on
+   the server after the sync, for example to reload the web server.
+
+Running it first shows a dry run: the run lists every file to upload (new, size changed, content changed), delete or
+create, and nothing on the server has changed yet. **Apply** under the run (or Return or `y` in its terminal) makes the
+changes; **Cancel** (or `n`, Ctrl+C) leaves the server as it was. While it applies, the run shows each step and how
+many are done; then a summary, with any file that failed listed as an error. A sync's run stays in **Running** until
+you close it.
+
+Files of the same size are compared by SHA-256 when the server has `sha256sum` or `shasum`, else by modification time
+(Shell sets each uploaded file's time to the local one, so the next run sees it unchanged). Each file is uploaded
+under a temporary name beside it and then renamed over the old one, so a page is never half-written. With the
+actions palette and no terminal of the action's servers selected, it syncs to its only server; with several, select
+a terminal on the one to sync to first.
+
 ## Smart actions (Mac)
 
 When a local terminal is in a project folder, Shell finds the project's schemes and offers their actions: **Run**,

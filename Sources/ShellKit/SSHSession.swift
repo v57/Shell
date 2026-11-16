@@ -214,9 +214,21 @@ public final class SSHSession: TerminalTransport {
     return session
   }
 
-  /// Awaits the forwarding-only connection's `onConnected` (or surfaces
-  /// `onTerminated`). Resumes exactly once, so a connect-only session that fails
-  /// right after authentication never double-resumes the caller.
+  /// The folder sync's view of this ALREADY-CONNECTED session: SFTP and commands over its login, so the host's
+  /// credentials stay inside Shell. Nil before `start()`.
+  public var folderSyncRemote: (any FolderSyncRemote)? {
+    engine.map { Libssh2FolderSyncRemote(connection: $0) }
+  }
+
+  /// Starts the connection and waits until it has authenticated (or failed: the error says why). A session made
+  /// for one-shot work (`forwardingOnly`) whose owner set `onHostKeyPrompt`/`onPasswordPrompt` first gets the
+  /// login's questions there. Takes over `onConnected` and `onTerminated`. Resumes exactly once, so a connect-only
+  /// session that fails right after authentication never double-resumes the caller.
+  @MainActor
+  public func connectAndWait() async throws {
+    try await waitForConnected()
+  }
+
   @MainActor
   private func waitForConnected() async throws {
     try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in

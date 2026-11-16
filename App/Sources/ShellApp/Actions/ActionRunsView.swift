@@ -36,6 +36,8 @@ struct ActionRunsView: View {
           }
           .padding(KitMetrics.gutter)
         }
+        // A folder sync logs in while its output shows: an unknown host key or a password is asked here too.
+        .terminalPrompts(session)
         .transition(.opacity)
       }
     }
@@ -59,20 +61,39 @@ private struct ActionRunBlock: View {
   let run: TerminalSession
 
   var body: some View {
-    RunBlock(
-      model.actionSpec(for: run).map { "\($0.action.name)" } ?? "Action", command: command(of: run),
-      id: run.id.uuidString, systemImage: "play.fill", status: run.actionRunStatus,
-      output: output(of: run),
-      stop: run.isActionRunning ? { [run] in run.send(Data([0x03])) } : nil
-    )
+    VStack(alignment: .leading, spacing: 0) {
+      RunBlock(
+        model.actionSpec(for: run).map { "\($0.action.name)" } ?? "Action", command: command(of: run),
+        id: run.id.uuidString, systemImage: run.folderSync == nil ? "play.fill" : "arrow.triangle.2.circlepath",
+        status: run.actionRunStatus, progress: syncProgress, output: output(of: run),
+        stop: canStop ? { [run] in run.send(Data([0x03])) } : nil
+      )
+      if let sync = run.folderSync, sync.phase == .awaitingConfirmation, let plan = sync.plan {
+        FolderSyncConfirmation(sync: sync, plan: plan)
+      }
+    }
     .kitContextMenu {
       Button("Close", role: .destructive) { model.removeSession(run.id) }
     }
   }
 
+  /// Stop while it runs; a folder sync waiting for Apply has its own Cancel.
+  private var canStop: Bool {
+    run.isActionRunning && run.folderSync?.phase != .awaitingConfirmation
+  }
+
+  /// A folder sync's "12 of 40" while it applies.
+  private var syncProgress: String? {
+    guard let sync = run.folderSync, sync.phase == .applying, let progress = sync.progress else { return nil }
+    return String(localized: "\(progress.completed) of \(progress.total)")
+  }
+
   /// The command the run executes, without the `cd` into the project and the
   /// exports a smart action prefixes it with.
   private func command(of run: TerminalSession) -> String {
+    if let sync = run.folderSync {
+      return "\(sync.settings.localPath) → \(sync.destination):\(sync.settings.remotePath)"
+    }
     var command = model.actionSpec(for: run)?.action.commands
       .split(separator: "\n").first.map(String.init) ?? ""
     while command.hasPrefix("cd ") || command.hasPrefix("export "), let and = command.range(of: " && ") {
@@ -85,6 +106,39 @@ private struct ActionRunBlock: View {
   private func output(of run: TerminalSession) -> String {
     let snapshot = run.snapshot
     return snapshot.plainText(fromLine: max(0, snapshot.totalLines - 200))
+  }
+}
+
+/// Under a folder sync's dry run: what it will change, and Apply or Cancel. Typing Return or `y` into the run's
+/// terminal applies too, `n` or Ctrl+C cancels.
+private struct FolderSyncConfirmation: View {
+  let sync: FolderSyncTransport
+  let plan: FolderSyncPlan
+
+  var body: some View {
+    HStack(spacing: 8) {
+      MetaLine(meta)
+        .frame(maxWidth: .infinity, alignment: .leading)
+      Button("Cancel") { sync.cancel() }
+        .buttonStyle(.kit)
+        .controlSize(.small)
+        .kitHelp("Leave the host as it is")
+      Button("Apply") { sync.apply() }
+        .buttonStyle(.kitPrimary)
+        .controlSize(.small)
+        .kitHelp("Upload and delete as listed")
+    }
+    .padding(EdgeInsets(top: 0, leading: 34, bottom: 8, trailing: 6))
+  }
+
+  private var meta: [String] {
+    var parts = [
+      String(localized: "\(plan.uploads.count) to upload"), FolderSyncTransport.bytes(plan.uploadBytes),
+      String(localized: "\(plan.deletions.count) to delete"),
+    ]
+    if !plan.directories.isEmpty { parts.append(String(localized: "\(plan.directories.count) new folders")) }
+    if !plan.skipped.isEmpty { parts.append(String(localized: "\(plan.skipped.count) skipped")) }
+    return parts
   }
 }
 
