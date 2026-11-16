@@ -127,12 +127,18 @@ public final class SSHSession: TerminalTransport {
   /// server" case), so callers interpret the text rather than treat non-zero
   /// as a failure. Only meaningful after `start()` has connected — the
   /// scanner gates on `connectionState == .connected` before calling.
-  public func runCommand(_ command: String, completion: @escaping @Sendable (Result<RemoteCommandResult, Error>) -> Void) {
+  ///
+  /// `terminal: false` runs it without a pseudo-terminal (standard output alone), and `input` goes to its standard
+  /// input before an end of file.
+  public func runCommand(
+    _ command: String, terminal: Bool = true, input: Data? = nil,
+    completion: @escaping @Sendable (Result<RemoteCommandResult, Error>) -> Void
+  ) {
     guard let engine else {
       completion(.failure(Libssh2Connection.EngineError.notConnected))
       return
     }
-    engine.runRemoteCommand(command, completion: completion)
+    engine.runRemoteCommand(command, terminal: terminal, input: input, completion: completion)
   }
 
   // MARK: - SFTP download (materialize a remote file)

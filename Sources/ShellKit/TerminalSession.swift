@@ -145,8 +145,8 @@ public final class TerminalSession: Identifiable {
   }
 
   /// The current working directory of a REMOTE (SSH-backed) child process,
-  /// read by running `pwd` over the already-connected transport — no new
-  /// SSH dial, unlike `currentDirectory` which is local-only (libproc).
+  /// read over the already-connected transport (`remoteDirectoryScript`) — no
+  /// new SSH dial, unlike `currentDirectory` which is local-only (libproc).
   /// Follows the shell's `cd` on the remote host. Nil for local sessions
   /// (use `currentDirectory`), for non-SSH transports, and while the SSH
   /// channel isn't connected. Polled on a throttle (see `refreshRemoteDirectory`)
@@ -157,17 +157,47 @@ public final class TerminalSession: Identifiable {
   @ObservationIgnored
   private var lastRemoteCWDReadAt: Date?
 
-  /// Seconds between remote `pwd` polls. A `pwd` opens a second exec channel
+  /// Seconds between remote directory polls. Each opens a second exec channel
   /// over the live connection (same mechanism as the persistent-session
   /// scanner), so it must not run every frame — the subtitle's 1s timer drives
   /// `refreshRemoteDirectory`, and this tradeoff mirrors `DirectoryBrowserModel`'s
   /// remote tick cadence.
   public static let remoteCWDThrottle: TimeInterval = 3
 
-  /// Re-reads the remote shell's cwd via a throttled `pwd` on the live
-  /// transport and publishes it to `remoteCurrentDirectory`. No-op (and clears
+  /// Prints the folder of the terminal's shell, run by `sh -s` on a second exec channel of the same connection. That
+  /// channel starts in the login folder, so its own `pwd` never follows `cd`. The script walks up from itself to the
+  /// connection's server process (`sshd`, `sshd-session` or `dropbear`), whose oldest child on a terminal is this
+  /// session's shell (the script's own channel has none), and reads that process's folder: `/proc/<pid>/cwd` on Linux,
+  /// `lsof` elsewhere (macOS, BSD). Falls back to `pwd` when it can't tell.
+  public static let remoteDirectoryScript = #"""
+    p=$PPID; s=
+    for i in 1 2 3 4 5; do
+      if [ -r "/proc/$p/stat" ]; then
+        n=$(cat "/proc/$p/comm"); q=$(sed 's/.*) //' "/proc/$p/stat" | cut -d ' ' -f 2)
+      else
+        set -- $(ps -o ppid= -o comm= -p "$p" 2>/dev/null); q=$1; n=$2
+      fi
+      case "$n" in *sshd*|*dropbear*) s=$p; break ;; esac
+      case "$q" in ''|0) break ;; esac
+      p=$q
+    done
+    d=
+    if [ -n "$s" ] && [ -r "/proc/$s/stat" ]; then
+      c=$(awk -v s="$s" '{ sub(/.*\) /, ""); if ($2 == s && $5 != 0) { split(FILENAME, a, "/"); print a[3] } }' /proc/[0-9]*/stat 2>/dev/null | sort -n | head -n 1)
+      [ -n "$c" ] && d=$(readlink "/proc/$c/cwd" 2>/dev/null)
+    elif [ -n "$s" ]; then
+      c=$(ps -A -o pid= -o ppid= -o tty= 2>/dev/null | awk -v s="$s" '$2 == s && $3 !~ /^\?/ { print $1 }' | sort -n | head -n 1)
+      [ -n "$c" ] && d=$(lsof -a -d cwd -p "$c" -Fn 2>/dev/null | sed -n 's/^n//p')
+    fi
+    case "$d" in /*) printf '%s\n' "$d" ;; *) pwd ;; esac
+
+    """#
+
+  /// Re-reads the remote shell's cwd on a throttle over the live transport and
+  /// publishes it to `remoteCurrentDirectory`: `remoteDirectoryScript`, or
+  /// `command` (a persistent session's own directory query). No-op (and clears
   /// the value) for non-SSH sessions and while not connected.
-  public func refreshRemoteDirectory(command: String = "pwd") {
+  public func refreshRemoteDirectory(command: String? = nil) {
     guard case .connected = connectionState, let ssh = sshTransport else {
       remoteCurrentDirectory = nil
       return
@@ -175,7 +205,7 @@ public final class TerminalSession: Identifiable {
     if let last = lastRemoteCWDReadAt,
        Date().timeIntervalSince(last) < Self.remoteCWDThrottle { return }
     lastRemoteCWDReadAt = Date()
-    ssh.runCommand(command) { [weak self] result in
+    let completion: @Sendable (Result<RemoteCommandResult, Error>) -> Void = { [weak self] result in
       guard case .success(let remote) = result, remote.exitStatus == 0 else { return }
       // `pwd` on a remote shell returns an absolute path; ignore anything else
       // (e.g. a bare "~" or an empty reply) so we never publish a bogus URL.
@@ -190,6 +220,12 @@ public final class TerminalSession: Identifiable {
       MainActor.assumeIsolated {
         self?.remoteCurrentDirectory = URL(fileURLWithPath: line)
       }
+    }
+    if let command {
+      ssh.runCommand(command, completion: completion)
+    } else {
+      // No terminal, so the script's own processes aren't taken for the shell's.
+      ssh.runCommand("sh -s", terminal: false, input: Data(Self.remoteDirectoryScript.utf8), completion: completion)
     }
   }
 

@@ -92,7 +92,8 @@ command, parsing output without a session, and a custom transport.
 - Input and output: `send(_:)` (text or data), `paste(_:)`, `submitCommand(_:)`,
   `handleKey(characters:charactersIgnoringModifiers:keyCode:modifierFlags:)`, `resize(columns:rows:)`,
   `close()`, `clearStdout()`. `currentDirectory` (local) and `remoteCurrentDirectory` (SSH, refreshed with
-  `refreshRemoteDirectory(command:)`). `reconnectNow()` and `canReconnect`; `sshTransport` and `folderSync` give the
+  `refreshRemoteDirectory(command:)`: with no command, `remoteDirectoryScript` finds the terminal's shell on the host
+  and reads its folder, so it follows `cd`). `reconnectNow()` and `canReconnect`; `sshTransport` and `folderSync` give the
   session's transport when it is one of those.
 - Handlers: `exitHandler`, `commandSubmittedHandler`, `snapshotUpdateHandler`, `actionCompletionHandler`.
 - `TerminalView(session:)`: the screen, with selection, scrolling and keyboard input. Its drawing is

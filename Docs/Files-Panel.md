@@ -18,8 +18,11 @@ Open a folder to go into it, or choose **Open Folder** from its menu. Opening a 
 An empty folder shows **Empty Folder**. A folder Shell can't read shows **Couldn't Load Folder** with the reason and
 **Retry**. So does a server that doesn't answer for 30 seconds.
 
-For a local terminal, the panel follows the terminal's folder when you `cd`. On a server, it opens in your login
-folder and doesn't follow `cd` in the terminal: move around in the panel itself.
+The panel follows the terminal's folder when you `cd`. On a server, Shell asks the server every few seconds which
+folder the terminal's shell is in, so the panel catches up a moment after a `cd`. This works on Linux and macOS
+servers; where Shell can't tell (a Windows server, for example), the panel opens in your login folder and you move
+around in the panel itself. Once you've opened a folder in the panel, it stays there until the terminal changes
+folder again.
 
 If you haven't accepted the server's key yet, the panel doesn't ask about it. It tells you to accept the key in the
 terminal, and lists the folder once you have.
