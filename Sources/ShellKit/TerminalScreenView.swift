@@ -1205,7 +1205,16 @@ extension TerminalScreenView {
     ) -> KeyPress.Result {
       guard press.phase == .down || press.phase == .repeat else { return .ignored }
 
-      let flags = Self.nsFlags(from: press.modifiers)
+      #if os(Linux) || os(Windows)
+        // The PC's Ctrl arrives as ⌘: Ctrl+key goes to the program, copy and paste take Shift.
+        guard
+          let flags = TerminalKeyMapper.pcModifiers(
+            key: press.key.character, modifierFlags: Self.nsFlags(from: press.modifiers),
+            hasSelection: session.selectionStart != nil, windowsStyle: Self.windowsStyleKeys)
+        else { return .ignored }
+      #else
+        let flags = Self.nsFlags(from: press.modifiers)
+      #endif
       // Cmd+K: clean stdout — the scrollback is wiped, so the viewport must
       // snap to the (new) bottom too.
       if flags.contains(.command), press.key.character.lowercased() == "k" {
@@ -1233,6 +1242,12 @@ extension TerminalScreenView {
       )
       return .handled
     }
+
+    #if os(Windows)
+      private static let windowsStyleKeys = true
+    #else
+      private static let windowsStyleKeys = false
+    #endif
 
     /// SwiftUI EventModifiers → portable TerminalModifierFlags (no direct
     /// initializer exists for this conversion in the current SDK).

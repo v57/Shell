@@ -6,6 +6,30 @@ import SwiftUI
 // MARK: - Key mapping
 
 enum TerminalKeyMapper {
+  /// The modifiers a key typed on Linux or Windows means in the terminal. v57/SwiftUI reports the PC's Ctrl key as
+  /// `.command` there (an app's ⌘ shortcuts are Ctrl shortcuts) and the Super/Windows key as `.control`, so without
+  /// this Ctrl+C would copy instead of interrupting the program. As in the other terminals on those systems, Ctrl+key
+  /// goes to the program (Ctrl+C, Ctrl+D, Ctrl+R…) and copy, paste and clear take Shift: Ctrl+Shift+C, V and K come
+  /// back as `.command` (what `TerminalSession.handleKey` copies, pastes and clears on). `windowsStyle` adds Windows
+  /// Terminal's defaults: Ctrl+V pastes and Ctrl+C copies while text is selected. Nil for Ctrl+Shift and another
+  /// letter: the terminal leaves it to the app's menus.
+  static func pcModifiers(
+    key: Character, modifierFlags: TerminalModifierFlags, hasSelection: Bool, windowsStyle: Bool
+  ) -> TerminalModifierFlags? {
+    guard modifierFlags.contains(.command) else { return modifierFlags }
+    let letter = key.isASCII && key.isLetter ? Character(key.lowercased()) : nil
+    if modifierFlags.contains(.shift), let letter {
+      return "cvk".contains(letter) ? .command : nil
+    }
+    if windowsStyle, letter == "v" || (letter == "c" && hasSelection) {
+      return .command
+    }
+    var flags = modifierFlags
+    flags.remove(.command)
+    flags.insert(.control)
+    return flags
+  }
+
   /// Maps the structured key event (from the pure-SwiftUI onKeyPress path)
   /// to the byte sequence the child expects. Identical logic to the old
   /// NSEvent-based version — ctrl+key control sequences first, then special

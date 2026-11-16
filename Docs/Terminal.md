@@ -58,6 +58,17 @@ scrollback.
 
 <!-- /only -->
 
+<!-- only: linux windows -->
+
+### Copy, paste and clear
+
+In a terminal, Ctrl with a letter goes to the program, as in other terminals: Ctrl+C interrupts it and Ctrl+D ends
+its input. Ctrl+Shift+C copies the selection. With nothing selected, it copies what is on the screen. Ctrl+Shift+V
+pastes and Ctrl+Shift+K clears the scrollback. On Windows, as in Windows Terminal, Ctrl+V pastes too, and Ctrl+C
+copies while text is selected.
+
+<!-- /only -->
+
 ### Insert text
 
 <!-- only: mac -->

@@ -78,6 +78,21 @@ Every other key, with Control and Option, goes to the program in the terminal.
 
 <!-- /only -->
 
+<!-- only: linux windows -->
+
+### In a terminal
+
+| Keys | What it does |
+|---|---|
+| Ctrl+Shift+C | Copy the selection, or the visible screen when nothing is selected |
+| Ctrl+Shift+V | Paste |
+| Ctrl+Shift+K | Clear the scrollback |
+
+Ctrl with any other key, and Alt, go to the program in the terminal, as in other terminals: Ctrl+C interrupts it.
+On Windows, as in Windows Terminal, Ctrl+V pastes too, and Ctrl+C copies while text is selected.
+
+<!-- /only -->
+
 ## On iPhone and iPad
 
 ### With a keyboard on iPad
