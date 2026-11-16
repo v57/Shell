@@ -74,9 +74,11 @@ you close it.
 
 Files of the same size are compared by SHA-256 when the server has `sha256sum` or `shasum`, else by modification time
 (Shell sets each uploaded file's time to the local one, so the next run sees it unchanged). Each file is uploaded
-under a temporary name beside it and then renamed over the old one, so a page is never half-written. With the
-actions palette and no terminal of the action's servers selected, it syncs to its only server; with several, select
-a terminal on the one to sync to first.
+under a temporary name beside it and then renamed over the old one, so a page is never half-written.
+
+A folder sync is offered in the actions palette whatever terminal is selected, and it opens its own connection, so
+no terminal on the server is needed. With a terminal on one of its servers selected, it syncs to that server;
+otherwise it syncs to each of its servers, one run per server.
 
 ## Smart actions (Mac)
 

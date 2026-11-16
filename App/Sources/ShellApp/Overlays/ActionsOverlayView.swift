@@ -26,7 +26,8 @@ struct ActionsOverlayView: View {
   private var filteredActions: [Action] {
     let applicable: [Action]
     if let session = model.selectedSession {
-      applicable = model.actions.all.filter { $0.applies(to: model.kind(of: session)) }
+      // A folder sync carries its own hosts and connects on its own, so it's offered from every terminal.
+      applicable = model.actions.all.filter { $0.folderSync != nil || $0.applies(to: model.kind(of: session)) }
     } else {
       applicable = model.actions.all
     }

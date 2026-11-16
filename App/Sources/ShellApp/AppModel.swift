@@ -2269,6 +2269,16 @@ final class AppModel {
   /// wires it to archive to history on completion. `focus` is honored only
   /// for the action the user actually triggered, never for a dependency.
   private func spawnActionSession(_ action: Action, in environment: ActionEnvironment, isTopLevel: Bool, focus: Bool) {
+    // A folder sync that applies to several hosts, none of them the selected terminal's, runs once per host.
+    if action.folderSync != nil, folderSyncHost(for: action, in: environment) == nil {
+      let hosts = connections.filter { action.applies(to: .ssh($0)) }
+      if hosts.count > 1 {
+        for (index, host) in hosts.enumerated() {
+          spawnActionSession(action, in: .ssh(host), isTopLevel: isTopLevel, focus: focus && index == 0)
+        }
+        return
+      }
+    }
     var spec = ActionSpec(action: action, config: environment.sshConfig)
     let transport: any TerminalTransport
     let startupMessage: String?
@@ -2342,7 +2352,8 @@ final class AppModel {
   }
 
   /// The host a folder sync goes to: the selected terminal's when the action applies to it, else the action's only
-  /// host. Nil with several hosts and none of them selected.
+  /// host. Nil with several hosts and none of them selected (`spawnActionSession` then runs one sync per host). The
+  /// sync opens its own connection, so no terminal on the host is needed.
   private func folderSyncHost(for action: Action, in environment: ActionEnvironment) -> SSHConfig? {
     if let config = environment.sshConfig, action.applies(to: .ssh(config)) { return config }
     let hosts = connections.filter { action.applies(to: .ssh($0)) }
