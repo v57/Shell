@@ -41,6 +41,9 @@ public struct ShellApp: App {
         await ScreenshotDemo.open(CommandLine.arguments, in: AppModel.shared)
         Screenshots.ready()
       }
+    } else if ReviewRecording.isOn {
+      // The App Review recording build: an empty store in memory that never syncs.
+      ReviewRecording.prepare()
     } else {
       Vault.shared.startSync()
     }

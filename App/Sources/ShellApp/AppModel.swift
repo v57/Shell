@@ -425,12 +425,12 @@ final class AppModel {
     notesFeatureEnabled = notesFlag
     // Hosts and connections saved by builds before the vault move into it once (never into the
     // screenshot demo's store).
-    if !ScreenshotDemo.isOn { LegacyImport.run(configs: connectionStore, databases: databaseStore) }
+    if !ScreenshotDemo.isOn, !ReviewRecording.isOn { LegacyImport.run(configs: connectionStore, databases: databaseStore) }
     configureDatabases()
     // Publish this device's identity key to iCloud (no-op when the Secure
     // Enclave key is unreachable, e.g. locked screen — retried when the
     // authorized-keys panel opens). Part of the Authorized Keys feature.
-    if features.isEnabled(.authorizedKeys), !ScreenshotDemo.isOn {
+    if features.isEnabled(.authorizedKeys), !ScreenshotDemo.isOn, !ReviewRecording.isOn {
       deviceKeys.publishThisDevice()
     }
     #if os(macOS) || os(Windows) || os(Linux)
