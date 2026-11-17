@@ -102,3 +102,17 @@ The panel is a list of names, with each item's date and size.
 - On iPhone, tap a folder to go into it, or a file to open it.
 - On iPad, tap to select an item and double-tap to open it.
 - Pull the list down to list the folder again, with what changed on the server since.
+
+### Edit a file
+
+Opening a file shows it in an editor on the iPhone or iPad, read over the session's SSH login (the server's screen
+isn't involved). Code is colored as in Code, and Markdown opens in the Markdown editor. Return keeps the line's
+indentation. Tap **Save** (or press ⌘S on a keyboard) to write the file back to the server: Shell writes a hidden file
+beside it and renames it into place, keeping the file's permissions. **Close** with unsaved changes asks whether to
+save them. While the editor is open, the terminal behind it lets the keyboard go, so keys never reach it.
+
+- If the file changed on the server since you opened it (its size or modification time), saving says so, and
+  **Save Anyway** replaces it with your text.
+- A file over 512 KB opens read-only with its first 512 KB, as does a file that isn't UTF-8 text. A binary file
+  isn't shown.
+- In a folder where you can't create files, the file itself is written over.

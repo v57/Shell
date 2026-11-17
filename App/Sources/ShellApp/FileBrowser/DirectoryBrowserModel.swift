@@ -44,9 +44,9 @@ import ShellIntegrations
   /// The last listing error, shown by the view and cleared on retry.
   private(set) var lastError: String?
 
-  /// The file the iPhone and iPad show in their read-only viewer (`RemoteFileViewer`): there's no desktop on the
-  /// host to open it on, so it's read over the session's connection instead.
-  var viewedFile: ViewedFile?
+  /// The file the iPhone and iPad show in their editor (`RemoteFileEditor`): there's no desktop on the host to open
+  /// it on, so it's read and saved over SFTP instead.
+  var editedFile: RemoteFileDocument?
 
   /// How often a remote (SSH/action) path is re-typed via `pwd` while the
   /// panel is visible. Remote connections must not be polled on the 1s tick —

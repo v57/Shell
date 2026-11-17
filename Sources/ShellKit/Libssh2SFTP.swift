@@ -158,26 +158,80 @@ nonisolated final class Libssh2SFTP: @unchecked Sendable {
   func upload(_ local: URL, to path: String, permissions: UInt32) throws {
     let input = try FileHandle(forReadingFrom: local)
     defer { try? input.close() }
-    let flags = CUnsignedLong(LIBSSH2_FXF_WRITE | LIBSSH2_FXF_CREAT | LIBSSH2_FXF_TRUNC)
-    let file = try handle(path) {
-      libssh2_sftp_open_ex(sftp, path, UInt32(path.utf8.count), flags, CLong(permissions), LIBSSH2_SFTP_OPENFILE)
-    }
+    let file = try openForWriting(path, permissions: permissions)
     do {
       while let data = try input.read(upToCount: Self.chunk), !data.isEmpty {
-        try data.withUnsafeBytes { (bytes: UnsafeRawBufferPointer) in
-          var offset = 0
-          while offset < bytes.count {
-            let pointer = bytes.baseAddress!.advanced(by: offset).assumingMemoryBound(to: CChar.self)
-            let count = bytes.count - offset
-            offset += try call(path) { libssh2_sftp_write(file, pointer, count) }
-          }
-        }
+        try send(data, to: file, path: path)
       }
     } catch {
       try? close(file, path: path)
       throw error
     }
     try close(file, path: path)
+  }
+
+  /// Writes `data` to `path` (created with `permissions`, or truncated) and closes it.
+  func write(_ data: Data, to path: String, permissions: UInt32) throws {
+    let file = try openForWriting(path, permissions: permissions)
+    do {
+      try send(data, to: file, path: path)
+    } catch {
+      try? close(file, path: path)
+      throw error
+    }
+    try close(file, path: path)
+  }
+
+  private func openForWriting(_ path: String, permissions: UInt32) throws -> OpaquePointer {
+    let flags = CUnsignedLong(LIBSSH2_FXF_WRITE | LIBSSH2_FXF_CREAT | LIBSSH2_FXF_TRUNC)
+    return try handle(path) {
+      libssh2_sftp_open_ex(sftp, path, UInt32(path.utf8.count), flags, CLong(permissions), LIBSSH2_SFTP_OPENFILE)
+    }
+  }
+
+  private func send(_ data: Data, to file: OpaquePointer, path: String) throws {
+    try data.withUnsafeBytes { (bytes: UnsafeRawBufferPointer) in
+      var offset = 0
+      while offset < bytes.count {
+        let pointer = bytes.baseAddress!.advanced(by: offset).assumingMemoryBound(to: CChar.self)
+        let count = min(bytes.count - offset, Self.chunk)
+        offset += try call(path) { libssh2_sftp_write(file, pointer, count) }
+      }
+    }
+  }
+
+  /// The first `maxBytes` of the file at `path` (all of a shorter one).
+  func read(_ path: String, maxBytes: Int) throws -> Data {
+    let file = try handle(path) {
+      libssh2_sftp_open_ex(sftp, path, UInt32(path.utf8.count), CUnsignedLong(LIBSSH2_FXF_READ), 0, LIBSSH2_SFTP_OPENFILE)
+    }
+    var data = Data()
+    var buffer = [CChar](repeating: 0, count: Self.chunk)
+    do {
+      while data.count < maxBytes {
+        let wanted = min(buffer.count, maxBytes - data.count)
+        let count = try call(path) {
+          buffer.withUnsafeMutableBufferPointer { libssh2_sftp_read(file, $0.baseAddress, wanted) }
+        }
+        if count == 0 { break }
+        buffer.withUnsafeBytes { data.append(contentsOf: $0.prefix(count)) }
+      }
+    } catch {
+      try? close(file, path: path)
+      throw error
+    }
+    try close(file, path: path)
+    return data
+  }
+
+  /// Sets the permission bits of `path` (the server's umask applied to the ones a new file was opened with).
+  func setPermissions(_ path: String, to permissions: UInt32) throws {
+    var attributes = LIBSSH2_SFTP_ATTRIBUTES()
+    attributes.flags = CUnsignedLong(LIBSSH2_SFTP_ATTR_PERMISSIONS)
+    attributes.permissions = CUnsignedLong(permissions)
+    _ = try call(path) {
+      Int(libssh2_sftp_stat_ex(sftp, path, UInt32(path.utf8.count), LIBSSH2_SFTP_SETSTAT, &attributes))
+    }
   }
 
   /// Renames over whatever is at `destination` (a file or link) in one step with OpenSSH's `posix-rename`; without

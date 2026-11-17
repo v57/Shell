@@ -16,6 +16,8 @@ import ShellKit
 ///   --appearance              opens Settings › Appearance
 ///   --insert / --new-action  opens the Insert into Terminal or New Action sheet
 ///   --files                   shows the Files panel for the terminal
+///   --edit-file <path>        opens a file of this Mac's (the simulator's) in the iPhone and iPad's file editor, as
+///                             if it came from a host (Save then fails: there's no host)
 ///   --new-database            opens the New Database Connection sheet
 ///   --new-ssh-connection      opens the New Connection (SSH) sheet (not `--new-connection`: Database's
 ///                             `DebugDriver` opens its own New Connection sheet for that)
@@ -160,6 +162,7 @@ enum ScreenshotDemo {
     model.showingNewConnection = false
     model.databaseWindow.showsNewConnection = false
     model.databaseWindow.editingProfileID = nil
+    model.directoryBrowser.editedFile = nil
     let terminal = model.sessions.first
     if ranCommand, let terminal {
       terminal.clearStdout()
@@ -184,6 +187,15 @@ enum ScreenshotDemo {
     if flag("--insert", in: arguments) { model.showingCommandInsert = true }
     if flag("--new-action", in: arguments) { model.createAction() }
     model.directoryBrowser.visible = flag("--files", in: arguments)
+    if isOn, let path = value("--edit-file", in: arguments), let data = FileManager.default.contents(atPath: path) {
+      let limit = RemoteFileDocument.maxBytes
+      let contents = RemoteFileContents(
+        path: path, data: data.prefix(limit), isTruncated: data.count > limit,
+        stamp: RemoteFileStamp(size: UInt64(data.count), modified: nil))
+      model.directoryBrowser.editedFile = RemoteFileDocument(
+        name: (path as NSString).lastPathComponent, contents: contents,
+        config: SSHConfig(name: "atlas-web-1", host: "web1.atlas.example.com", user: "deploy"), session: nil)
+    }
     if flag("--new-database", in: arguments) { model.newDatabaseConnection() }
     if flag("--new-ssh-connection", in: arguments) { model.showingNewConnection = true }
     if let address = value("--web", in: arguments) { model.openWebSession(WebSession(url: address)) }

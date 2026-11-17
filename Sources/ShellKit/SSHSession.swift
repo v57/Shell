@@ -226,6 +226,34 @@ public final class SSHSession: TerminalTransport {
     engine.map { Libssh2FolderSyncRemote(connection: $0) }
   }
 
+  /// Reads the first `maxBytes` of a file for an editor, with the stamp a later `saveEditedFile` checks, over this
+  /// ALREADY-CONNECTED session's SFTP (the folder sync's channel). Links are resolved: `RemoteFileContents.path` is
+  /// the file itself.
+  public func readFileForEditing(remotePath: String, maxBytes: Int) async throws -> RemoteFileContents {
+    try await sftp { try $0.readForEditing(remotePath, maxBytes: maxBytes) }
+  }
+
+  /// Replaces a file with `data` over this session's SFTP: a hidden file beside it renamed into place, after
+  /// checking that the file still has the `expected` stamp (`RemoteFileError.changedOnHost` otherwise; nil replaces
+  /// whatever is there). Returns the new stamp. Nothing goes on a command line, so the size isn't limited by SSH's
+  /// packets.
+  public func saveEditedFile(_ data: Data, to remotePath: String, expecting expected: RemoteFileStamp?)
+    async throws -> RemoteFileStamp
+  {
+    try await sftp { try $0.saveEdited(data, to: remotePath, expecting: expected) }
+  }
+
+  private func sftp<T: Sendable>(_ body: @escaping @Sendable (Libssh2SFTP) throws -> T) async throws -> T {
+    guard let engine else { throw RemoteFileError.notConnected }
+    do {
+      return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<T, Error>) in
+        engine.sftp(body) { continuation.resume(with: $0) }
+      }
+    } catch Libssh2Connection.EngineError.notConnected {
+      throw RemoteFileError.notConnected
+    }
+  }
+
   /// Starts the connection and waits until it has authenticated (or failed: the error says why). A session made
   /// for one-shot work (`forwardingOnly`) whose owner set `onHostKeyPrompt`/`onPasswordPrompt` first gets the
   /// login's questions there. Takes over `onConnected` and `onTerminated`. Resumes exactly once, so a connect-only

@@ -294,6 +294,9 @@ public struct TerminalScreenView: View {
           }
           #if os(iOS)
           .onDisappear { showKeyboard = false }
+          // Disabled while something covers it (the Files panel's editor): the
+          // keyboard goes, so keys can't reach a terminal that isn't seen.
+          .onChange(of: isEnabled) { _, enabled in showKeyboard = enabled }
           // The keyboard follows the terminal's on-screen presence and taps, NOT
           // SwiftUI focus (#FocusState is not used on iOS — it fights the proxy).
           #endif

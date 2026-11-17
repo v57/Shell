@@ -152,6 +152,10 @@ command, parsing output without a session, and a custom transport.
   `/`, an empty path, `..` and, while deleting, the login folder) are the pure parts.
 - `FolderSyncRemote`: the host side (listing, hashing with `sha256sum` or `shasum`, uploads, renames, deletions).
   A connected `SSHSession`'s `folderSyncRemote` is one, on SFTP.
+- `SSHSession.readFileForEditing(remotePath:maxBytes:)` and `saveEditedFile(_:to:expecting:)`: a file read for an
+  editor (`RemoteFileContents`: its start, links resolved, and a `RemoteFileStamp` of size and modification time) and
+  saved back over the session's SFTP, through a hidden file renamed into place; `RemoteFileError.changedOnHost` when
+  the stamp differs (a nil stamp replaces whatever is there). Shell's iPhone and iPad file editor uses them.
 
 ### Host keys
 
@@ -170,7 +174,8 @@ integration suites need a real server and are skipped without one:
 - `SSHChannelStreamIntegrationTests` (a client over an SSH channel): an sshd that reaches Redis on its own
   `127.0.0.1:6379`, named by `SHELL_SSH_CHANNEL_TEST_PORT`, `SHELL_SSH_CHANNEL_TEST_KEYS` (an authorized-keys file the
   test may write) and optionally `SHELL_SSH_CHANNEL_TEST_USER`. It needs a Secure Enclave.
-- `FolderSyncIntegrationTests` (a sync over Shell's own SSH login): a user-level sshd on this machine, named by
+- `FolderSyncIntegrationTests` (a sync over Shell's own SSH login) and `RemoteFileEditingIntegrationTests` (the
+  editor's read and save, run apart from it): a user-level sshd on this machine, named by
   `SHELL_SSH_SYNC_TEST_PORT`, `SHELL_SSH_SYNC_TEST_KEYS`, `SHELL_SSH_SYNC_TEST_DIR` (a scratch folder it may delete
   in) and optionally `SHELL_SSH_SYNC_TEST_USER`. It needs a Secure Enclave. Never point it at a real server.
 - `SSHReconnectIntegrationTests` (reboots the host from inside a session): a disposable host with password login and

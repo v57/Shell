@@ -419,6 +419,8 @@ struct ContentView: View {
               .transition(detailTransition)
               .terminalFileDrop(session)
               .allowsHitTesting(!(model.directoryBrowser.visible && flags.isEnabled(.files)))
+              // A file open in the editor over it takes the keyboard (iPhone and iPad).
+              .disabled(model.directoryBrowser.editedFile != nil)
 
             if model.directoryBrowser.visible, flags.isEnabled(.files) {
               FilesPanelView(model: model.directoryBrowser)

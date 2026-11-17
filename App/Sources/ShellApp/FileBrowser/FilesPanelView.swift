@@ -54,7 +54,11 @@ struct FilesPanelView: View {
         "Delete \(deleteCandidates.count) items?",
         isPresented: $showsDeleteConfirm, message: "This cannot be undone.", systemImage: "trash", confirm: "Delete"
       ) { model.delete(deleteCandidates) }
-      .kitSheet(item: $model.viewedFile) { file in RemoteFileViewer(file: file) }
+      #if os(iOS)
+      .fullScreenCover(item: $model.editedFile) { document in
+        RemoteFileEditor(document: document) { model.editedFile = nil }
+      }
+      #endif
       .kitSheet(item: $mutating) { request in
         DestinationSheet(defaultPath: request.defaultPath, text: $destinationText, initialMode: request.mode) {
           destination, mode in model.moveCopy(request.names, to: destination, mode: mode)

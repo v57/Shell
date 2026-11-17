@@ -42,29 +42,27 @@ import ShellIntegrations
     let path = Self.absolutePath(name, in: ctx)
     #if os(iOS)
       // `open` would start an app on the host's own screen (and fails when nobody is signed in there): the iPhone
-      // and iPad show the file themselves.
-      await viewFile(path, name: name, in: ctx)
+      // and iPad edit the file themselves.
+      await editFile(path, name: name, in: ctx)
     #else
       await openFile(path, in: ctx)
     #endif
   }
 
-  /// Reads up to `ViewedFile.maxBytes` of the file over the session's connection into the read-only viewer.
-  private func viewFile(_ path: String, name: String, in ctx: DirectoryContext) async {
-    let dir = ctx.path.isEmpty ? "/" : ctx.path
+  /// Reads the file over SFTP on a login to the session's host into the editor (`RemoteFileDocument`).
+  private func editFile(_ path: String, name: String, in ctx: DirectoryContext) async {
+    guard let config = ctx.kind.sshConfig else {
+      model.setLastError(String(localized: "“\(name)” can only be opened from an SSH session."))
+      return
+    }
     model.setBusy(true)
     model.setLastError(nil)
     defer { model.setBusy(false) }
-    let command = "head -c \(ViewedFile.maxBytes + 1) -- \(FileCommandBuilder.shellQuote(path))"
-    guard let result = await Self.execute(command, in: dir, using: ctx.runner) else {
-      model.setLastError(String(localized: "Couldn’t read “\(name)”: the connection didn’t answer."))
-      return
+    do {
+      model.editedFile = try await RemoteFileDocument.open(path: path, name: name, config: config)
+    } catch {
+      model.setLastError(String(localized: "Couldn’t open “\(name)”: \(error.localizedDescription)"))
     }
-    guard result.exitCode == 0 else {
-      model.setLastError(Self.errorText(command: "head", result: result))
-      return
-    }
-    model.viewedFile = ViewedFile(name: name, path: path, output: result.output)
   }
 
   /// Opens a file, trying the macOS opener (`open`) first then the Linux opener
