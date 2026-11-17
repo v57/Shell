@@ -50,9 +50,20 @@ struct GuardedMarkdownEditor: View {
         }
         .padding(KitMetrics.gutter)
       }
-      editor
-        .remoteImages(loads: loadsImages) { hasBlockedImages = $0 }
-        .onConfirmLink { linkRequest = $0 }
+      #if os(iOS)
+        // Under the page's bar and the quick actions: the text scrolls under them, inset by them.
+        GeometryReader { proxy in
+          editor
+            .remoteImages(loads: loadsImages) { hasBlockedImages = $0 }
+            .onConfirmLink { linkRequest = $0 }
+            .underBars(proxy.safeAreaInsets)
+            .ignoresSafeArea(.container, edges: .vertical)
+        }
+      #else
+        editor
+          .remoteImages(loads: loadsImages) { hasBlockedImages = $0 }
+          .onConfirmLink { linkRequest = $0 }
+      #endif
     }
     .kitConfirmation(
       linkTitle, isPresented: Binding(get: { linkRequest != nil }, set: { if !$0 { linkRequest = nil } }),
