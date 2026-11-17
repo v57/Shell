@@ -40,6 +40,8 @@ let package = Package(
         .product(name: "DevScreenshots", package: "Dev"),
         // The Notarization sheet, shared with Code.
         .product(name: "CodeActionsUI", package: "Code"),
+        // Syntax colors in the iPhone and iPad's file viewer, as in Markdown's code blocks.
+        .product(name: "CodeHighlighting", package: "Code"),
         // Updates from GitHub Releases outside the App Store (the iOS app updates through the App Store).
         .product(name: "UpdateKit", package: "UpdateKit", condition: .when(platforms: [.macOS, .linux, .windows])),
       ],
