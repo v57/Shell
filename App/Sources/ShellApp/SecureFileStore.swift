@@ -56,6 +56,9 @@ nonisolated enum SecureFileStore {
   private static let service = "dev.v57.sh"
   private static let account = "encrypted-file-secure-enclave-key-v1"
   private static let hkdfSalt = Data("Shell encrypted file storage v1".utf8)
+  /// The key files are encrypted with while secrets are in memory (`VaultSecrets.useInMemoryStore()`): one per process,
+  /// so what a demo wrote can't be read after it.
+  private static let memoryKey = SymmetricKey(size: .bits256)
 
   static func write(_ plaintext: Data, to url: URL, domain: Domain) throws {
     let ciphertext = try seal(plaintext, domain: domain)
@@ -108,6 +111,11 @@ nonisolated enum SecureFileStore {
   /// `ICloudNotesKey` instead. Internal so notes migration can decrypt
   /// local files with the domain key.
   static func symmetricKey(for domain: Domain) throws -> SymmetricKey {
+    // A demo run or a test with secrets in memory: a key of the process's own, never the keychain's.
+    if VaultSecrets.isInMemory {
+      return HKDF<SHA256>.deriveKey(
+        inputKeyMaterial: memoryKey, salt: hkdfSalt, info: Data(domain.rawValue.utf8), outputByteCount: 32)
+    }
     let (privateKey, peerPublicKey) = try loadOrCreateKeyAgreement()
     let secret = try privateKey.sharedSecretFromKeyAgreement(with: peerPublicKey)
     return deriveSymmetricKey(from: secret, domain: domain)

@@ -1,9 +1,12 @@
 import Foundation
 import ShellDatabaseEngines
 import ShellKit
+import VaultKit
 
 /// Debug builds: `--screenshot-demo` runs Shell on made-up hosts, databases and notes for the screenshots
 /// (`.dev/screenshots.json`), never the user's. The vault opens a fresh store in a temporary folder and never syncs;
+/// its keys, passwords and the encrypted files' key are in memory (`VaultSecrets.useInMemoryStore()`), so a demo run
+/// never reads or writes the user's keychain, except this Mac's SSH key (`VaultIdentity`) when `--ssh-host` logs in;
 /// actions, web pages and history are the demo's own (debug builds share the installed app's defaults); the
 /// screen/tmux monitor stays off, since it lists the Mac's real sessions (`--persistent-sessions` turns it on; launch
 /// with your own `XDG_RUNTIME_DIR` for a `session` daemon of its own). `.dev/screenshots.json` also gives the launch a
@@ -64,8 +67,11 @@ enum ScreenshotDemo {
 
   static var historyFile: URL { folder.appendingPathComponent("history.shellhistory") }
 
-  /// Before anything opens the vault: a fresh, empty store of the demo's own.
+  /// Before anything opens the vault: a fresh, empty store of the demo's own, with its keys and secrets in memory (as
+  /// `ReviewRecording` does): the vault's keys, the hosts' and databases' passwords (`SSHKeychain`) and the key the
+  /// history and the scan cache are encrypted with (`SecureFileStore`) never reach the user's keychain.
   static func prepare() {
+    VaultSecrets.useInMemoryStore()
     try? FileManager.default.removeItem(at: folder)
     let vault = folder.appendingPathComponent("Vault", isDirectory: true)
     try? FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)

@@ -116,8 +116,11 @@ public nonisolated enum SSHKeychain {
   // SSH hosts' and databases' passwords (`ssh-password-<id>`, `db-password-<id>`) live in the shared
   // keychain group, named after the shared record (`VaultSecrets`), so Database use them
   // and iCloud Keychain brings them to the user's other devices. Ones saved before move there when read.
+  // With secrets in memory (a demo run or a test: `VaultSecrets.useInMemoryStore()`) every password stays there and
+  // Shell's own keychain items are neither read nor deleted.
 
   public static func savePassword(_ password: String, account: String) throws {
+    if VaultSecrets.isInMemory { return try VaultSecrets.setPassword(password, for: sharedID(account) ?? account) }
     if let id = sharedID(account) {
       try VaultSecrets.setPassword(password, for: id)
       delete(account: account)
@@ -127,6 +130,7 @@ public nonisolated enum SSHKeychain {
   }
 
   public static func loadPassword(account: String) throws -> String? {
+    if VaultSecrets.isInMemory { return VaultSecrets.password(for: sharedID(account) ?? account) }
     if let id = sharedID(account) {
       if let shared = VaultSecrets.password(for: id) { return shared }
       guard let data = try load(account: account), let legacy = String(data: data, encoding: .utf8) else {
@@ -140,6 +144,10 @@ public nonisolated enum SSHKeychain {
   }
 
   public static func deletePassword(account: String) {
+    if VaultSecrets.isInMemory {
+      try? VaultSecrets.setPassword(nil, for: sharedID(account) ?? account)
+      return
+    }
     if let id = sharedID(account) { try? VaultSecrets.setPassword(nil, for: id) }
     delete(account: account)
   }

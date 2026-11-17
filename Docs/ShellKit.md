@@ -136,7 +136,9 @@ command, parsing output without a session, and a custom transport.
   (`.keychainKey` or `.password`), `savePassword`, and `recordID` (the shared record's id when another app made the host).
 - `SSHKeychain`: this device's SSH key (`loadOrCreateDefaultKey()`, shared with the other v57 apps through
   VaultKit's `VaultIdentity`), its `authorized_keys` line (`publicKeyOpenSSHLine(for:comment:)`) and fingerprint,
-  and saved passwords (`savePassword(_:account:)`, `loadPassword(account:)`, `deletePassword(account:)`).
+  and saved passwords (`savePassword(_:account:)`, `loadPassword(account:)`, `deletePassword(account:)`). After
+  `VaultSecrets.useInMemoryStore()` (the screenshot demo, the App Review build, a test) the passwords stay in memory
+  and Shell's own keychain items are neither read nor deleted.
 
 ### Folder sync
 
