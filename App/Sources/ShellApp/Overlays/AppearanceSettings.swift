@@ -4,7 +4,7 @@ import SwiftUI
 
 /// Settings › Appearance (Shell menu → Appearance…, ⌘⇧H): the forced color scheme, the terminals' text size and the
 /// "disable character backgrounds" switch. The previews show both sides of a choice, drawn by the real terminal view,
-/// with the one in use outlined.
+/// with the one in use outlined. A tap on a preview chooses it; on the color scheme in use it goes back to System.
 struct AppearanceSettings: View {
   @Environment(AppModel.self) private var model
   @Environment(\.colorScheme) private var colorScheme
@@ -19,10 +19,14 @@ struct AppearanceSettings: View {
       FormRow("Color Scheme", systemImage: "circle.lefthalf.filled", hue: .gray) {
         KitSegmented(selection: $model.appearanceMode, options: AppearanceMode.allCases.map { ($0.label, $0) })
       }
-      .preview(height: previewHeight) {
+      .preview(height: previewHeight, isInteractive: true) {
         samples(
-          TerminalSample("Dark", scheme: .dark, backgroundsDisabled: model.disableTerminalBackgrounds, isCurrent: colorScheme == .dark),
-          TerminalSample("Light", scheme: .light, backgroundsDisabled: model.disableTerminalBackgrounds, isCurrent: colorScheme == .light)
+          TerminalSample("Dark", scheme: .dark, backgroundsDisabled: model.disableTerminalBackgrounds, isCurrent: colorScheme == .dark) {
+            choose(.dark)
+          },
+          TerminalSample("Light", scheme: .light, backgroundsDisabled: model.disableTerminalBackgrounds, isCurrent: colorScheme == .light) {
+            choose(.light)
+          }
         )
       }
       FormRow(
@@ -33,13 +37,22 @@ struct AppearanceSettings: View {
         Toggle("Disable Background Colors", isOn: $model.disableTerminalBackgrounds)
           .kitLabelsHidden()
       }
-      .preview(height: previewHeight) {
+      .preview(height: previewHeight, isInteractive: true) {
         samples(
-          TerminalSample("Colors", scheme: colorScheme, backgroundsDisabled: false, isCurrent: !model.disableTerminalBackgrounds),
-          TerminalSample("Disabled", scheme: colorScheme, backgroundsDisabled: true, isCurrent: model.disableTerminalBackgrounds)
+          TerminalSample("Colors", scheme: colorScheme, backgroundsDisabled: false, isCurrent: !model.disableTerminalBackgrounds) {
+            model.disableTerminalBackgrounds = false
+          },
+          TerminalSample("Disabled", scheme: colorScheme, backgroundsDisabled: true, isCurrent: model.disableTerminalBackgrounds) {
+            model.disableTerminalBackgrounds = true
+          }
         )
       }
     }
+  }
+
+  /// A tap on the Dark or Light preview: that scheme, or System again when it's the one already chosen.
+  private func choose(_ mode: AppearanceMode) {
+    model.appearanceMode = model.appearanceMode == mode ? .system : mode
   }
 
   /// The sample's lines at the current text size, the grid's padding and the panes' margin.
@@ -66,18 +79,24 @@ private struct TerminalSample: View {
   let scheme: ColorScheme
   let backgroundsDisabled: Bool
   let isCurrent: Bool
+  let action: () -> Void
 
-  init(_ title: String, scheme: ColorScheme, backgroundsDisabled: Bool, isCurrent: Bool) {
+  init(
+    _ title: String, scheme: ColorScheme, backgroundsDisabled: Bool, isCurrent: Bool, action: @escaping () -> Void
+  ) {
     self.title = title
     self.scheme = scheme
     self.backgroundsDisabled = backgroundsDisabled
     self.isCurrent = isCurrent
+    self.action = action
   }
 
   var body: some View {
     let shape = RoundedRectangle(cornerRadius: 6, style: .continuous)
     TerminalView(session: Self.session)
       .disabled(true)
+      // Its UIKit view took the tap on iPhone (and scrolled) instead of the preview's button over it.
+      .allowsHitTesting(false)
       .background(TerminalPalette.windowBackground)
       .overlay(alignment: .bottomTrailing) {
         Text(title)
@@ -93,6 +112,14 @@ private struct TerminalSample: View {
       .environment(\.colorScheme, scheme)
       .clipShape(shape)
       .overlay(shape.strokeBorder(isCurrent ? AnyShapeStyle(.kitAccent) : AnyShapeStyle(.clear), lineWidth: 2))
+      // The terminal under it is disabled: the tap is the preview's own.
+      .overlay {
+        Button(action: action) { Color.clear.contentShape(shape) }
+          .buttonStyle(.plain)
+          .accessibilityLabel(Text(title))
+          .accessibilityAddTraits(isCurrent ? .isSelected : [])
+      }
+      .animation(.kitFast, value: isCurrent)
   }
 }
 
