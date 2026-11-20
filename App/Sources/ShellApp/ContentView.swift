@@ -558,6 +558,15 @@ struct ContentView: View {
         ToolbarSlot(priority: 1) { smartActionTools } menu: { smartActionMenu }
       }
       #endif
+      #if os(iOS)
+      // Actions: iPhone and iPad have no menu bar (⌘R) for the palette, which Settings alone showed.
+      if flags.isEnabled(.actions) {
+        ToolGroup(iconOnly: true) {
+          Button("Actions", systemImage: "bolt") { model.showingActions = true }
+            .kitHelp("Actions", shortcut: "⌘R", systemImage: "bolt")
+        }
+      }
+      #endif
       if flags.isEnabled(.files) || hasOpenWith {
         // Files, then the apps that open the directory, in one card.
         ToolbarSlot(priority: 0) {

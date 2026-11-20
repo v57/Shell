@@ -244,7 +244,7 @@ private struct ActionsSettings: View {
       })
     }
     if flags.isEnabled(.actions) {
-      rows.append(Row(title: "Actions", systemImage: "folder", hue: .purple, button: "Show") {
+      rows.append(Row(title: "Actions", systemImage: "bolt", hue: .purple, button: "Show") {
         model.showingActions = true
       })
       rows.append(Row(title: "Create Action from Session", systemImage: "calendar.badge.plus", hue: .purple,
