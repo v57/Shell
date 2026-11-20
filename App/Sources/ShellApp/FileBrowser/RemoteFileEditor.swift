@@ -15,22 +15,40 @@
     @State private var markdownCommands = MarkdownEditorCommands()
     @ScaledMetric(relativeTo: .footnote) private var fontSize: CGFloat = 13
 
+    /// The page's ground under both editors (Markdown's showed black and Code's its theme's gray-blue) and the kit's
+    /// toolbar over them, as on every other page, in place of the system's Close and Save buttons.
     var body: some View {
-      NavigationStack {
-        VStack(spacing: 0) {
-          if let notice = document.notice {
-            Label(notice, systemImage: "info.circle")
-              .kitFont(.caption)
-              .foregroundStyle(.kitSecondary)
-              .frame(maxWidth: .infinity, alignment: .leading)
-              .padding(.horizontal, KitMetrics.gutter)
-              .padding(.vertical, 8)
-          }
-          editor
+      VStack(spacing: 0) {
+        if let notice = document.notice {
+          Label(notice, systemImage: "info.circle")
+            .kitFont(.caption)
+            .foregroundStyle(.kitSecondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, KitMetrics.gutter)
+            .padding(.vertical, 8)
         }
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar { toolbar }
+        editor
       }
+      .kitPane(.content)
+      .kitToolbar(document.name) {
+        ToolGroup(iconOnly: true) {
+          Button("Close", systemImage: "xmark") { close() }
+            .keyboardShortcut(.cancelAction)
+        }
+      } title: {
+        KitTitle(document.name, meta: meta, systemImage: document.isMarkdown ? "doc.richtext" : "doc.text", hue: .blue)
+      } tools: {
+        if document.isEditable {
+          Button(document.isSaving ? "Saving…" : "Save", systemImage: "square.and.arrow.down") {
+            Task { await document.save() }
+          }
+          .buttonStyle(.kitPrimary)
+          .keyboardShortcut("s", modifiers: .command)
+          .disabled(!document.isEdited || document.isSaving)
+        }
+      }
+      // Close asks before dropping edits; the kit's Back would dismiss at once.
+      .kitToolbarBackHidden()
       .interactiveDismissDisabled(document.isEdited)
       .confirmationDialog(
         "Save your changes to “\(document.name)”?", isPresented: $confirmsDiscard, titleVisibility: .visible
@@ -58,33 +76,16 @@
       .onDisappear { document.close() }
     }
 
-    @ToolbarContentBuilder private var toolbar: some ToolbarContent {
-      ToolbarItem(placement: .cancellationAction) {
-        Button("Close") {
-          if document.isEdited { confirmsDiscard = true } else { onClose() }
-        }
-      }
-      ToolbarItem(placement: .principal) {
-        VStack(spacing: 0) {
-          Text(document.name).kitFont(.headline).lineLimit(1)
-          Text(document.language.map { "\(document.path) · \($0.name)" } ?? document.path)
-            .kitFont(.caption)
-            .foregroundStyle(.kitSecondary)
-            .lineLimit(1)
-            .truncationMode(.head)
-        }
-      }
-      if document.isEditable {
-        ToolbarItem(placement: .confirmationAction) {
-          if document.isSaving {
-            ProgressView()
-          } else {
-            Button("Save") { Task { await document.save() } }
-              .keyboardShortcut("s", modifiers: .command)
-              .disabled(!document.isEdited)
-          }
-        }
-      }
+    private func close() {
+      if document.isEdited { confirmsDiscard = true } else { onClose() }
+    }
+
+    /// Where the file is (its folder's last two names: a whole path showed only its start) and its language.
+    private var meta: [String] {
+      let folder = (document.path as NSString).deletingLastPathComponent
+      let names = folder.split(separator: "/").suffix(2).joined(separator: "/")
+      let place = names.isEmpty ? folder : (folder.split(separator: "/").count > 2 ? "…/" : "/") + names
+      return [place] + (document.language.map { [$0.name] } ?? [])
     }
 
     @ViewBuilder private var editor: some View {
@@ -101,9 +102,17 @@
       } else {
         CodeTextEditor(
           text: Binding(get: { document.text }, set: { document.edit($0) }), language: document.language,
-          configuration: EditorConfiguration(themeID: "github", fontSize: fontSize, isEditable: document.isEditable))
+          configuration: codeConfiguration)
+        .padding(.horizontal, 8)
         .ignoresSafeArea(.container, edges: .bottom)
       }
+    }
+
+    /// Code's GitHub colors on the page's own ground.
+    private var codeConfiguration: EditorConfiguration {
+      var configuration = EditorConfiguration(themeID: "github", fontSize: fontSize, isEditable: document.isEditable)
+      configuration.drawsBackground = false
+      return configuration
     }
 
     private var problemShown: Binding<Bool> {
