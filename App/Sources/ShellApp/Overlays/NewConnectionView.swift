@@ -29,7 +29,7 @@ struct NewConnectionView: View {
     _name = State(initialValue: config?.name ?? "")
     _host = State(initialValue: config?.host ?? "")
     _fallbacks = State(initialValue: FallbackAddresses.rows(config?.fallbacks ?? []))
-    _user = State(initialValue: config?.user ?? NSUserName())
+    _user = State(initialValue: config?.user ?? Self.suggestedUser)
     _port = State(initialValue: config?.port ?? 22)
     _authMethod = State(initialValue: config?.authMethod ?? .keychainKey)
     _password = State(initialValue: "")
@@ -37,6 +37,16 @@ struct NewConnectionView: View {
     _keyError = State(initialValue: nil)
   }
   
+  /// The user a new connection starts with: this computer's own on a desktop, where it's usually the same on the
+  /// server. iPhone and iPad run as `mobile`, never a server's user, so the field starts empty there.
+  private static var suggestedUser: String {
+    #if os(iOS)
+      ""
+    #else
+      NSUserName()
+    #endif
+  }
+
   private var canConnect: Bool {
     !host.trimmingCharacters(in: .whitespaces).isEmpty
     && !user.trimmingCharacters(in: .whitespaces).isEmpty
