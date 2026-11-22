@@ -45,8 +45,9 @@ struct ContentView: View {
   /// Whether the window appears active (key window). Animations freeze while
   /// the window is unfocused.
   @WindowAppearsActive private var appearsActive
-  /// The split view's columns, for the sidebar's own toggle on iPad.
-  @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
+  /// The split view's columns, for the sidebar's own toggle on iPad. The screenshot demo shows the sidebar, which a
+  /// portrait iPad would hide.
+  @State private var columnVisibility: NavigationSplitViewVisibility = ScreenshotDemo.isOn ? .all : .automatic
   @Environment(\.kitIdiom) private var idiom
 
   /// Whether anything animates right now: the Animations feature, motion, AND
