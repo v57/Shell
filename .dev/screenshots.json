@@ -1,32 +1,140 @@
 {
-  "build": { "scheme": "Shell", "project": "Shell.xcodeproj" },
-  "appearances": ["light", "dark"],
-  "variables": { "DEMO": "/tmp/ShellDemo" },
-  "watch": ["App", "Sources", "Tools/screenshots"],
-  "mac": { "window": [1440, 900] },
+  "build": {
+    "scheme": "Shell",
+    "project": "Shell.xcodeproj"
+  },
+  "appearances": [
+    "light",
+    "dark"
+  ],
+  "variables": {
+    "DEMO": "/tmp/ShellDemo"
+  },
+  "watch": [
+    "App",
+    "Sources",
+    "Tools/screenshots"
+  ],
+  "mac": {
+    "window": [
+      1440,
+      900
+    ]
+  },
+  "ios": {
+    "devices": [
+      "iPhone 18 Pro Max",
+      "iPad Pro 13-inch (M5)"
+    ]
+  },
   "scenes": [
     {
       "id": "01-terminal",
-      "arguments": ["--screenshot-demo", "--run", "git log --oneline --decorate --graph && git status -s"],
-      "environment": { "ZDOTDIR": "$DEMO/zsh" },
+      "platforms": [
+        "mac"
+      ],
+      "arguments": [
+        "--screenshot-demo",
+        "--run",
+        "git log --oneline --decorate --graph && git status -s"
+      ],
+      "environment": {
+        "ZDOTDIR": "$DEMO/zsh"
+      },
       "caption": "Terminals, SSH hosts and databases in one window"
     },
     {
       "id": "02-note",
-      "arguments": ["--screenshot-demo", "--note", "Release 2.0"],
-      "environment": { "ZDOTDIR": "$DEMO/zsh" },
+      "platforms": [
+        "mac"
+      ],
+      "arguments": [
+        "--screenshot-demo",
+        "--note",
+        "Release 2.0"
+      ],
+      "environment": {
+        "ZDOTDIR": "$DEMO/zsh"
+      },
       "caption": "Notes next to your sessions, synced with Markdown"
     },
     {
       "id": "03-actions",
-      "arguments": ["--screenshot-demo", "--actions"],
-      "environment": { "ZDOTDIR": "$DEMO/zsh" },
+      "platforms": [
+        "mac"
+      ],
+      "arguments": [
+        "--screenshot-demo",
+        "--actions"
+      ],
+      "environment": {
+        "ZDOTDIR": "$DEMO/zsh"
+      },
       "caption": "Save the commands you run every day"
     },
     {
       "id": "04-database",
-      "arguments": ["--screenshot-demo", "--new-database"],
-      "environment": { "ZDOTDIR": "$DEMO/zsh" },
+      "platforms": [
+        "mac"
+      ],
+      "arguments": [
+        "--screenshot-demo",
+        "--new-database"
+      ],
+      "environment": {
+        "ZDOTDIR": "$DEMO/zsh"
+      },
+      "caption": "Connect to a database through any SSH host"
+    },
+    {
+      "id": "11-hosts-ios",
+      "platforms": [
+        "iphone"
+      ],
+      "relaunch": true,
+      "arguments": [
+        "--screenshot-demo"
+      ],
+      "caption": "Your servers and databases, one tap away"
+    },
+    {
+      "id": "13-note-ios",
+      "platforms": [
+        "iphone",
+        "ipad"
+      ],
+      "relaunch": true,
+      "arguments": [
+        "--screenshot-demo",
+        "--note",
+        "Release 2.0"
+      ],
+      "caption": "Notes, synced with Markdown"
+    },
+    {
+      "id": "14-actions-ios",
+      "platforms": [
+        "iphone",
+        "ipad"
+      ],
+      "relaunch": true,
+      "arguments": [
+        "--screenshot-demo",
+        "--actions"
+      ],
+      "caption": "Save the commands you run every day"
+    },
+    {
+      "id": "15-database-ios",
+      "platforms": [
+        "iphone",
+        "ipad"
+      ],
+      "relaunch": true,
+      "arguments": [
+        "--screenshot-demo",
+        "--new-database"
+      ],
       "caption": "Connect to a database through any SSH host"
     }
   ]
