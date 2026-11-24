@@ -73,14 +73,15 @@ nonisolated final class Libssh2SFTP: @unchecked Sendable {
 
   private func failure(_ rc: Int32, path: String) -> Failure {
     if rc == LIBSSH2_ERROR_SFTP_PROTOCOL {
-      let status = libssh2_sftp_last_error(sftp)
+      // `unsigned long`: UInt on macOS and Linux, UInt32 on Windows.
+      let status = UInt(libssh2_sftp_last_error(sftp))
       switch status {
       case UInt(LIBSSH2_FX_NO_SUCH_FILE), UInt(LIBSSH2_FX_NO_SUCH_PATH): return .noSuchFile(path)
       case UInt(LIBSSH2_FX_PERMISSION_DENIED), UInt(LIBSSH2_FX_WRITE_PROTECT): return .permissionDenied(path)
       case UInt(LIBSSH2_FX_FILE_ALREADY_EXISTS): return .alreadyExists(path)
       case UInt(LIBSSH2_FX_DIR_NOT_EMPTY): return .directoryNotEmpty(path)
       case UInt(LIBSSH2_FX_OP_UNSUPPORTED): return .unsupported("this operation")
-      default: return .failed(path: path, status: UInt(status), message: lastError())
+      default: return .failed(path: path, status: status, message: lastError())
       }
     }
     return .connectionLost(lastError())
