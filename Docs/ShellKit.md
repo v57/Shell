@@ -142,7 +142,8 @@ command, parsing output without a session, and a custom transport.
 
 ### Folder sync
 
-- `FolderSyncSettings(localPath:remotePath:deletesRemovedFiles:excludes:)`, with `defaultExcludes` (`[".*"]`).
+- `FolderSyncSettings(localPath:remotePath:deletesRemovedFiles:excludes:asksBeforeApplying:)`, with `defaultExcludes`
+  (`[".*"]`). With `asksBeforeApplying` false a run applies its plan without waiting.
 - `FolderSyncTransport(config:settings:script:)`: a `TerminalTransport` that runs one sync as a session. It lists both
   folders, shows the plan and waits (`phase`: `connecting`, `preparing`, `awaitingConfirmation`, `applying`,
   `runningScript`, `finished`, `failed`, `cancelled`); `apply()` makes the changes and `cancel()` stops. Return or `y`

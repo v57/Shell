@@ -217,8 +217,13 @@ public final class FolderSyncTransport: TerminalTransport {
         finishSync()
       } else {
         phase = .awaitingConfirmation
-        line("")
-        line("Dry run: nothing has changed on \(destination) yet. Apply to make these changes (Return or y), or Cancel (n).")
+        if settings.asksBeforeApplying {
+          line("")
+          line("Waiting for Apply: nothing has changed on \(destination) yet. Return or y makes these changes, n cancels.")
+        } else {
+          // The action's Ask before applying is off: the plan is in the log, and it goes ahead.
+          apply()
+        }
       }
     } catch {
       guard phase != .cancelled else { return }

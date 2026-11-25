@@ -68,7 +68,7 @@ private struct ActionRunBlock: View {
         status: run.actionRunStatus, progress: syncProgress, output: output(of: run),
         stop: canStop ? { [run] in run.send(Data([0x03])) } : nil
       )
-      if let sync = run.folderSync, sync.phase == .awaitingConfirmation, let plan = sync.plan {
+      if run.isAwaitingApply, let sync = run.folderSync, let plan = sync.plan {
         FolderSyncConfirmation(sync: sync, plan: plan)
       }
     }
@@ -79,7 +79,7 @@ private struct ActionRunBlock: View {
 
   /// Stop while it runs; a folder sync waiting for Apply has its own Cancel.
   private var canStop: Bool {
-    run.isActionRunning && run.folderSync?.phase != .awaitingConfirmation
+    run.isActionRunning && !run.isAwaitingApply
   }
 
   /// A folder sync's "12 of 40" while it applies.
@@ -117,8 +117,13 @@ private struct FolderSyncConfirmation: View {
 
   var body: some View {
     HStack(spacing: 8) {
-      MetaLine(meta)
-        .frame(maxWidth: .infinity, alignment: .leading)
+      VStack(alignment: .leading, spacing: 2) {
+        Text("Waiting for Apply: nothing has changed on \(sync.destination) yet")
+          .font(.callout.weight(.medium))
+          .foregroundStyle(Hue.orange.text)
+        MetaLine(meta)
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
       Button("Cancel") { sync.cancel() }
         .buttonStyle(.kit)
         .controlSize(.small)

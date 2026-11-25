@@ -589,6 +589,38 @@ struct FolderSyncTransportTests {
     #expect(closed == 1)
   }
 
+  @Test func withAskingOffTheSyncAppliesAtOnce() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("folder-sync-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    try "hi".write(to: root.appendingPathComponent("index.html"), atomically: true, encoding: .utf8)
+    let host = FakeSyncHost()
+    host.put("/srv/site/old.html", "x")
+    let transport = FolderSyncTransport(
+      destination: "test",
+      settings: FolderSyncSettings(localPath: root.path, remotePath: "/srv/site", asksBeforeApplying: false),
+      connect: { _ in (host, {}) })
+    var output = ""
+    var exit: Int32?
+    transport.onOutput = { output += String(decoding: $0, as: UTF8.self) }
+    transport.onExit = { exit = $0 }
+    transport.start()
+    try await waitUntil { exit != nil }
+    #expect(exit == 0)
+    #expect(transport.phase == .finished)
+    #expect(host.text("/srv/site/index.html") == "hi")
+    #expect(output.contains("Plan: 1 to upload"))
+    #expect(!output.contains("Waiting for Apply"))
+    #expect(output.contains("Done: uploaded 1"))
+  }
+
+  @Test func anActionSavedBeforeTheSwitchStillAsks() throws {
+    let saved = Data(#"{"localPath":"/site","remotePath":"/srv/site","deletesRemovedFiles":true,"excludes":[".*"]}"#.utf8)
+    #expect(try JSONDecoder().decode(FolderSyncSettings.self, from: saved).asksBeforeApplying)
+    let off = FolderSyncSettings(localPath: "/site", remotePath: "/srv/site", asksBeforeApplying: false)
+    #expect(try JSONDecoder().decode(FolderSyncSettings.self, from: JSONEncoder().encode(off)).asksBeforeApplying == false)
+  }
+
   @Test func cancelLeavesTheHostAlone() async throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent("folder-sync-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

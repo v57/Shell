@@ -17,21 +17,25 @@ nonisolated public struct FolderSyncSettings: Codable, Hashable, Sendable {
   /// file or folder name anywhere; with one it matches the path from the folder (`/build`, `docs/*.md`); a trailing
   /// `/` matches folders only. `*` and `?` stay within a name, `**` crosses folders, `[abc]` is a class.
   public var excludes: [String]
+  /// Show what would change and wait for Apply before changing anything on the host (the default). Off, a run
+  /// lists the changes and makes them at once.
+  public var asksBeforeApplying: Bool
 
   public static let defaultExcludes = [".*"]
 
   public init(
     localPath: String = "", remotePath: String = "", deletesRemovedFiles: Bool = true,
-    excludes: [String] = FolderSyncSettings.defaultExcludes
+    excludes: [String] = FolderSyncSettings.defaultExcludes, asksBeforeApplying: Bool = true
   ) {
     self.localPath = localPath
     self.remotePath = remotePath
     self.deletesRemovedFiles = deletesRemovedFiles
     self.excludes = excludes
+    self.asksBeforeApplying = asksBeforeApplying
   }
 
   private enum CodingKeys: String, CodingKey {
-    case localPath, remotePath, deletesRemovedFiles, excludes
+    case localPath, remotePath, deletesRemovedFiles, excludes, asksBeforeApplying
   }
 
   /// Every field is optional in saved data, so a later field never fails an older action.
@@ -41,6 +45,7 @@ nonisolated public struct FolderSyncSettings: Codable, Hashable, Sendable {
     remotePath = try c.decodeIfPresent(String.self, forKey: .remotePath) ?? ""
     deletesRemovedFiles = try c.decodeIfPresent(Bool.self, forKey: .deletesRemovedFiles) ?? true
     excludes = try c.decodeIfPresent([String].self, forKey: .excludes) ?? Self.defaultExcludes
+    asksBeforeApplying = try c.decodeIfPresent(Bool.self, forKey: .asksBeforeApplying) ?? true
   }
 }
 

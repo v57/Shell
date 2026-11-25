@@ -200,16 +200,23 @@ private struct RunningSectionView: View {
 
   var body: some View {
     if flags.isEnabled(.actions), !runs.isEmpty {
-      let running = runs.filter(\.isActionRunning).count
+      // A folder sync waiting for Apply isn't running: it's waiting for the user, and says so.
+      let waiting = runs.filter(\.isAwaitingApply).count
+      let running = runs.filter(\.isActionRunning).count - waiting
       let failed = runs.filter { $0.actionRunStatus.isFailed }.count
       KitSection(
-        "Running", systemImage: "bolt.fill", hue: .purple, status: running > 0 ? .working : .idle,
+        "Running", systemImage: "bolt.fill", hue: .purple, status: running > 0 ? .working : waiting > 0 ? .waiting : .idle,
         isExpanded: .expanded(collapsed: $runningCollapsed)
       ) {
         ForEach(runs) { session in
           ActionRunRow(session: session, spec: model.actionSpec(for: session))
             .kitContextMenu {
-              if session.isActionRunning {
+              if session.isAwaitingApply, let sync = session.folderSync {
+                Button("Apply") { sync.apply() }
+                  .kitMenuPreview("Makes the listed changes on the host: uploads and deletions.")
+                Button("Cancel") { sync.cancel() }
+                  .kitMenuPreview("Leaves the host as it is.")
+              } else if session.isActionRunning {
                 Button("Cancel (Ctrl+C)") { session.send(Data([0x03])) }
                   .kitMenuPreview("Stops the running action, as Ctrl+C would.")
               }
@@ -223,9 +230,10 @@ private struct RunningSectionView: View {
         }
       } meta: {
         MetaLine([
+          waiting > 0 ? "\(waiting) waiting for Apply" : "",
           running > 0 ? "\(running) running" : "",
           failed > 0 ? "\(failed) failed" : "",
-          running == 0 && failed == 0 ? "\(runs.count) finished" : "",
+          running == 0 && waiting == 0 && failed == 0 ? "\(runs.count) finished" : "",
         ])
       } accessory: {
         EmptyView()
@@ -243,6 +251,9 @@ extension TerminalSession {
     case .failed, .closed: false
     }
   }
+
+  /// A folder sync that has listed its changes and waits for Apply.
+  var isAwaitingApply: Bool { folderSync?.phase == .awaitingConfirmation && folderSync?.settings.asksBeforeApplying == true }
 
   /// An action run's state for its live icon and run block: working while
   /// alive, done after a clean exit, failed with the exit code or the error.
@@ -313,14 +324,24 @@ private struct ActionRunRow: View {
       status: status
     ) {
       DetachReturnBadge(selection: .session(session.id))
-      Text(environmentLabel)
-        .foregroundStyle(.kitSecondary)
+      if session.isAwaitingApply, let sync = session.folderSync {
+        // The run stands still until this is pressed: the button is on the row itself.
+        Button("Apply") { sync.apply() }
+          .buttonStyle(.kitPrimary)
+          .controlSize(.small)
+          .kitHelp("Make the listed changes on the host")
+      } else {
+        Text(environmentLabel)
+          .foregroundStyle(.kitSecondary)
+      }
     }
     .subtitle {
-      // The failure (the error, or the exit code), else the action's live last
+      // The failure (the error, or the exit code), what a waiting sync would change, else the action's live last
       // output line in the terminal's colours.
       if case .failed(let message) = status, let message {
         Text(message).monospaced().foregroundStyle(Hue.red.text)
+      } else if let waitingText {
+        Text(waitingText).foregroundStyle(Hue.orange.text)
       } else {
         SessionStatusLine(session: session)
       }
@@ -331,8 +352,17 @@ private struct ActionRunRow: View {
       hue: .purple, status: status)
   }
 
+  /// "Waiting for Apply · 12 to upload · 3 to delete" while a folder sync waits.
+  private var waitingText: String? {
+    guard session.isAwaitingApply, let plan = session.folderSync?.plan else { return nil }
+    var parts = [String(localized: "Waiting for Apply"), String(localized: "\(plan.uploads.count) to upload")]
+    if !plan.deletions.isEmpty { parts.append(String(localized: "\(plan.deletions.count) to delete")) }
+    return parts.joined(separator: " · ")
+  }
+
   private func statusText(_ status: WorkStatus) -> String {
     switch status {
+    case .waiting: String(localized: "Waiting for Apply")
     case .working: String(localized: "Running")
     case .failed(let message): message.map { String(localized: "Failed: \($0)") } ?? String(localized: "Failed")
     default: String(localized: "Finished")

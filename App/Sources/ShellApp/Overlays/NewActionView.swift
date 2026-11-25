@@ -30,6 +30,7 @@ struct NewActionView: View {
   @State private var syncLocalPath = ""
   @State private var syncRemotePath = ""
   @State private var syncDeletes = true
+  @State private var syncAsks = true
   @State private var syncExcludes = FolderSyncSettings.defaultExcludes.joined(separator: ", ")
 
   /// `draft` fills a new action's form (a smart action added to Your actions).
@@ -51,6 +52,7 @@ struct NewActionView: View {
       _syncLocalPath = State(initialValue: sync.localPath)
       _syncRemotePath = State(initialValue: sync.remotePath)
       _syncDeletes = State(initialValue: sync.deletesRemovedFiles)
+      _syncAsks = State(initialValue: sync.asksBeforeApplying)
       _syncExcludes = State(initialValue: sync.excludes.joined(separator: ", "))
     }
   }
@@ -266,7 +268,9 @@ struct NewActionView: View {
     FormCard(
       "Folder sync",
       footer: syncsFolder
-        ? "Each run lists both folders and shows what would change, then waits for Apply. Files of the same size are compared by SHA-256 when the host has sha256sum or shasum, else by modification time. The host's login stays in Shell."
+        ? (syncAsks
+          ? "Each run lists both folders and shows what would change, then waits for Apply. Files of the same size are compared by SHA-256 when the host has sha256sum or shasum, else by modification time. The host's login stays in Shell."
+          : "Each run lists both folders and makes the changes at once, without asking. Files of the same size are compared by SHA-256 when the host has sha256sum or shasum, else by modification time. The host's login stays in Shell.")
         : "Optional: upload a local folder to the host, like rsync, without handing the host's login to another app."
     ) {
       FormRow("Sync a folder", systemImage: "arrow.triangle.2.circlepath", hue: .orange) {
@@ -290,6 +294,12 @@ struct NewActionView: View {
           hue: .red
         ) {
           toggle("Delete removed files", isOn: $syncDeletes)
+        }
+        FormRow(
+          "Ask before applying", help: "Show what would change and wait for Apply", systemImage: "hand.raised",
+          hue: .orange
+        ) {
+          toggle("Ask before applying", isOn: $syncAsks)
         }
         FormRow(
           "Exclude", help: "Neither uploaded nor deleted. Comma-separated: .* (dotfiles), node_modules, /drafts",
@@ -354,7 +364,7 @@ struct NewActionView: View {
         ? FolderSyncSettings(
           localPath: syncLocalPath.trimmingCharacters(in: .whitespacesAndNewlines),
           remotePath: syncRemotePath.trimmingCharacters(in: .whitespacesAndNewlines),
-          deletesRemovedFiles: syncDeletes, excludes: syncExcludePatterns)
+          deletesRemovedFiles: syncDeletes, excludes: syncExcludePatterns, asksBeforeApplying: syncAsks)
         : nil
     )
     model.actions.save(action)

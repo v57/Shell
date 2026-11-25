@@ -97,6 +97,8 @@ handed to `ssh`, `rsync`, `~/.ssh/config` or any other app.
      Shell refuses `/`, an empty path, `..`, and the login folder itself while deleting is on.
    - **Delete removed files** (on by default): files and folders on the server that the local folder doesn't have are
      deleted. Only inside that folder, and a symbolic link is removed as a link, never followed.
+   - **Ask before applying** (on by default): the run shows what would change and waits for **Apply**. Off, it
+     lists the changes and makes them at once.
    - **Exclude**: comma-separated patterns that are neither uploaded nor deleted. The default `.*` leaves out
      dotfiles (`.git`, `.env`, the server's `.htaccess`). A pattern without `/` matches a name anywhere
      (`node_modules`, `*.log`); with one it matches from the folder (`/drafts`, `docs/*.md`); a trailing `/` matches
@@ -105,8 +107,10 @@ handed to `ssh`, `rsync`, `~/.ssh/config` or any other app.
    the server after the sync, for example to reload the web server.
 
 Running it first shows a dry run: the run lists every file to upload (new, size changed, content changed), delete or
-create, and nothing on the server has changed yet. **Apply** under the run (or Return or `y` in its terminal) makes the
-changes; **Cancel** (or `n`, Ctrl+C) leaves the server as it was. While it applies, the run shows each step and how
+create, and nothing on the server has changed yet. The run then waits: its row in **Running** says "Waiting for
+Apply" with what it would upload and delete, and has an **Apply** button. **Apply** there or under the run (or Return
+or `y` in its terminal) makes the changes; **Cancel** (or `n`, Ctrl+C) leaves the server as it was. With **Ask before
+applying** off, the run lists the changes and goes straight on. While it applies, the run shows each step and how
 many are done; then a summary, with any file that failed listed as an error. A sync's run stays in **Running** until
 you close it.
 
