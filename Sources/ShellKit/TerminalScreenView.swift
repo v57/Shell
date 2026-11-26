@@ -1798,7 +1798,7 @@ private final class TerminalKeyInput: UITextView {
         )
         host.view.backgroundColor = .clear
         let container = TerminalKeyBarContainer(
-          frame: CGRect(x: 0, y: 0, width: UIScreen.main.bounds.width, height: barModel.contentHeight))
+          frame: CGRect(x: 0, y: 0, width: (window ?? self).bounds.width, height: barModel.contentHeight))
         container.height = barModel.contentHeight
         host.view.frame = container.bounds
         host.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
