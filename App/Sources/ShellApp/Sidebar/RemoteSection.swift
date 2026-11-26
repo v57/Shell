@@ -56,6 +56,13 @@ struct RemoteSectionView: View {
           false
           #endif
         }
+        if model.connections.isEmpty {
+          // The first steps, the same as the + above and a host's Copy Public Key.
+          SectionEmptyActions("Terminals on your servers, over SSH.") {
+            Button("Add a Host", systemImage: "plus") { model.showingNewConnection = true }
+            Button("Copy Public Key", systemImage: "key") { model.copyPublicKey() }
+          }
+        }
       } meta: {
         if model.connections.isEmpty {
           MetaLine("No hosts")

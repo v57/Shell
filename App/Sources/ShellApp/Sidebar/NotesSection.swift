@@ -38,6 +38,11 @@ struct NotesSectionView: View {
               }
             }
         }
+        if count == 0 {
+          SectionEmptyActions("Commands and text to keep, shared with Markdown.") {
+            Button("New Note", systemImage: "square.and.pencil") { model.newNote() }
+          }
+        }
       } meta: {
         if let edited = model.notes.notes.map(\.lastUpdate).max() {
           // "2 notes · edited 2 min. ago", dropping words rather than truncating in a narrow sidebar.

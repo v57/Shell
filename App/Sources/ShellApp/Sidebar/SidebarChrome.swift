@@ -1,5 +1,6 @@
 import ComponentKit
 import SwiftUI
+import ShellKit
 import ShellMonitoring
 
 /// The sidebar's SHARED state: what its sections and its own presentation need,
@@ -53,6 +54,10 @@ final class SidebarState {
 
   /// The database connection whose Delete… awaits confirmation.
   var deletingDatabaseConnection: DatabaseConnection?
+
+  /// The hosts and notes opened last, for the Recent section (SidebarStatus.swift). Here rather than in the section:
+  /// the section is gone while the list is empty, and what's opened is noted by the selection routing.
+  let recents = KitRecents(key: "sidebar.recents")
 
   #if os(macOS) || os(Windows) || os(Linux)
   /// Live CPU/GPU/wattage for the Local section header (macOS only — the reads
@@ -169,7 +174,16 @@ private struct SelectionRouter: ViewModifier {
     content.onChange(of: model.selection) { _, newValue in
       if state.renamingSessionID != nil { state.renamingSessionID = nil }
       guard let selection = newValue else { return }
+      state.noteOpened(selection, in: model)
       model.activate(selection)
+    }
+    // A deleted host or note leaves Recent. Only what was there and is gone: a list that is empty for a moment
+    // (the vault loading) drops nothing.
+    .onChange(of: model.connections.map(\.id)) { old, new in
+      state.forgetRecents(SidebarState.RecentItem.host, removedFrom: old, now: new)
+    }
+    .onChange(of: model.notes.notes.map(\.id)) { old, new in
+      state.forgetRecents(SidebarState.RecentItem.note, removedFrom: old, now: new)
     }
   }
 }

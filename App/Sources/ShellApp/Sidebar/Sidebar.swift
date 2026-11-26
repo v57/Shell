@@ -50,6 +50,8 @@ struct SidebarView: View {
       // The window's account, hidden while Personal is the only one.
       VaultAccountPicker(meta: String(localized: "\(model.connections.count) hosts"))
 
+      RecentSectionView(state: state)
+
       RunningSectionView(state: state)
 
       // Long sections keep their title at the top while they scroll by; the
@@ -84,7 +86,13 @@ struct SidebarView: View {
       }
       #else
       Button("Settings", systemImage: "gearshape") { model.showingSettings = true }
+      // No terminals of its own here: a new one starts with a host.
+      if FeatureFlagsStore.shared.isEnabled(.ssh) {
+        Button("New SSH Connection", systemImage: "plus") { model.showingNewConnection = true }
+          .kitHelp("New SSH connection")
+      }
       #endif
+      ReconnectAllButton()
     }
     // The rows of a database's tree select as the sidebar's own items.
     .environment(\.databaseSidebarTag, Self.databaseTag)
@@ -138,6 +146,8 @@ private struct SidebarFrame<Content: View, BottomBar: View>: View {
     } bottomBar: {
       bottomBar
     }
+    // What is going on now, above the bar (SidebarStatus.swift).
+    .activity(model.sidebarActivity)
   }
 }
 
@@ -255,6 +265,14 @@ extension TerminalSession {
   /// A folder sync that has listed its changes and waits for Apply.
   var isAwaitingApply: Bool { folderSync?.phase == .awaitingConfirmation && folderSync?.settings.asksBeforeApplying == true }
 
+  /// "Waiting for Apply · 12 to upload · 3 to delete" while a folder sync waits (its row, the activity card).
+  var applyWaitingText: String? {
+    guard isAwaitingApply, let plan = folderSync?.plan else { return nil }
+    var parts = [String(localized: "Waiting for Apply"), String(localized: "\(plan.uploads.count) to upload")]
+    if !plan.deletions.isEmpty { parts.append(String(localized: "\(plan.deletions.count) to delete")) }
+    return parts.joined(separator: " · ")
+  }
+
   /// An action run's state for its live icon and run block: working while
   /// alive, done after a clean exit, failed with the exit code or the error.
   var actionRunStatus: WorkStatus {
@@ -340,7 +358,7 @@ private struct ActionRunRow: View {
       // output line in the terminal's colours.
       if case .failed(let message) = status, let message {
         Text(message).monospaced().foregroundStyle(Hue.red.text)
-      } else if let waitingText {
+      } else if let waitingText = session.applyWaitingText {
         Text(waitingText).foregroundStyle(Hue.orange.text)
       } else {
         SessionStatusLine(session: session)
@@ -350,14 +368,6 @@ private struct ActionRunRow: View {
       spec.map { "\($0.action.name)" } ?? "Action", meta: "\(environmentLabel) · \(statusText(status))",
       systemImage: "play.fill",
       hue: .purple, status: status)
-  }
-
-  /// "Waiting for Apply · 12 to upload · 3 to delete" while a folder sync waits.
-  private var waitingText: String? {
-    guard session.isAwaitingApply, let plan = session.folderSync?.plan else { return nil }
-    var parts = [String(localized: "Waiting for Apply"), String(localized: "\(plan.uploads.count) to upload")]
-    if !plan.deletions.isEmpty { parts.append(String(localized: "\(plan.deletions.count) to delete")) }
-    return parts.joined(separator: " · ")
   }
 
   private func statusText(_ status: WorkStatus) -> String {
